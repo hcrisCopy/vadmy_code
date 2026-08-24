@@ -67,15 +67,45 @@ def _load_state(path: str) -> dict:
     return checkpoint
 
 
-def _capture_encode_video(module: nn.Module) -> None:
+def _apply_feature_modulation(
+    owner: "BaselineAdapter",
+    features: torch.Tensor,
+    stream_name: str,
+) -> torch.Tensor:
+    if owner.feature_modulator is None or owner._current_neurons is None:
+        return features
+    modulated, record = owner.feature_modulator(
+        features,
+        owner._current_neurons,
+        owner._current_lengths,
+    )
+    record["stream_name"] = stream_name
+    owner._modulation_records.append(record)
+    return modulated
+
+
+def _capture_encode_video(module: nn.Module, owner: "BaselineAdapter", stream_name: str) -> None:
     original = module.encode_video
 
     def wrapped(self, *args, **kwargs):
         value = original(*args, **kwargs)
+        value = _apply_feature_modulation(owner, value, stream_name)
         self._responsibility_features = value
         return value
 
     module.encode_video = MethodType(wrapped, module)
+
+
+def _capture_lagovad_temporal(module: nn.Module, owner: "BaselineAdapter") -> None:
+    original = module._temporal_encoding
+
+    def wrapped(self, *args, **kwargs):
+        features, _ = original(*args, **kwargs)
+        features = _apply_feature_modulation(owner, features, "main")
+        normalized = F.normalize(features, dim=-1)
+        return features, normalized
+
+    module._temporal_encoding = MethodType(wrapped, module)
 
 
 def _batch_mask(lengths: torch.Tensor, steps: int) -> torch.Tensor:
@@ -93,6 +123,40 @@ def _unfreeze_last(container: nn.Module) -> None:
 
 class BaselineAdapter(nn.Module):
     visual_length: int
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.feature_modulator: nn.Module | None = None
+        self._current_neurons: torch.Tensor | None = None
+        self._current_lengths: torch.Tensor | None = None
+        self._modulation_records: list[dict[str, torch.Tensor | str]] = []
+
+    def attach_feature_modulator(self, modulator: nn.Module) -> None:
+        if self.feature_modulator is not None:
+            raise RuntimeError("a feature modulator is already attached")
+        self.feature_modulator = modulator
+
+    def forward_modulated(
+        self,
+        clip: torch.Tensor,
+        neurons: torch.Tensor,
+        lengths: torch.Tensor,
+    ) -> tuple[BaselineOutput, list[dict[str, torch.Tensor | str]]]:
+        if self.feature_modulator is None:
+            raise RuntimeError("attach a feature modulator before calling forward_modulated")
+        self._current_neurons = neurons
+        self._current_lengths = lengths
+        self._modulation_records = []
+        try:
+            output = self.forward_baseline(clip, lengths)
+            records = list(self._modulation_records)
+        finally:
+            self._current_neurons = None
+            self._current_lengths = None
+            self._modulation_records = []
+        if not records:
+            raise RuntimeError("baseline forward did not reach the shared post-temporal feature hook")
+        return output, records
 
     def forward_baseline(self, clip: torch.Tensor, lengths: torch.Tensor) -> BaselineOutput:
         raise NotImplementedError
@@ -127,7 +191,7 @@ class DSANetAdapter(BaselineAdapter):
             self.options, device,
         )
         self.base.load_state_dict(_load_state(weight), strict=True)
-        _capture_encode_video(self.base)
+        _capture_encode_video(self.base, self, "main")
 
     def forward_baseline(self, clip: torch.Tensor, lengths: torch.Tensor) -> BaselineOutput:
         raw = self.base(clip, _batch_mask(lengths, clip.shape[1]), self.prompt, lengths, True)
@@ -202,8 +266,8 @@ class DeSCAdapter(BaselineAdapter):
             )
         self.sensitivity.load_state_dict(_load_state(sensitivity_weight), strict=True)
         self.consistency.load_state_dict(_load_state(consistency_weight), strict=True)
-        _capture_encode_video(self.sensitivity)
-        _capture_encode_video(self.consistency)
+        _capture_encode_video(self.sensitivity, self, "sensitivity")
+        _capture_encode_video(self.consistency, self, "consistency")
 
     def forward_baseline(self, clip: torch.Tensor, lengths: torch.Tensor) -> BaselineOutput:
         mask = _batch_mask(lengths, clip.shape[1])
@@ -268,6 +332,7 @@ class LaGoVADAdapter(BaselineAdapter):
         self.label_map = label_map_for(dataset)
         self.class_names = list(self.label_map.values())
         self.visual_length = 512
+        _capture_lagovad_temporal(self.base, self)
 
     def forward_baseline(self, clip: torch.Tensor, lengths: torch.Tensor) -> BaselineOutput:
         batch = {"v_feat": clip, "v_feat_l": lengths}

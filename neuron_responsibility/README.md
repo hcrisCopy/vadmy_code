@@ -2,6 +2,10 @@
 
 本目录实现一套共享方法，适配 DSANet、DeSC、LaGoVAD，以及 UCF-Crime、XD-Violence。baseline 源码不修改，CLIP 始终冻结。
 
+当前正式主方案已经升级为不使用 baseline 分数的稀疏神经元特征调制，完整指令见
+`neuron_responsibility/SCORE_FREE_FEATURE_MODULATION.md`。本文件后面的 probe、分区责任和
+score correction 指令仅用于复现实验对照，不再作为主方案。
+
 以下所有命令均从 `vadmy_code` 目录执行。命令已经分别写全，不需要手动替换数据集、权重或输出路径。
 
 ## 0. 产物复用与目录边界

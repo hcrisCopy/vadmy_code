@@ -8,6 +8,10 @@ import torch
 
 from neuron_responsibility.common import base_key, resample_feature
 from neuron_responsibility.data import AlignedFeatureDataset
+from neuron_responsibility.feature_modulation import (
+    SparseNeuronFeatureModulator,
+    score_free_modulation_losses,
+)
 from neuron_responsibility.model import (
     NeuronResponsibilityProbe,
     ResponsibilityCorrectionHead,
@@ -76,3 +80,28 @@ def test_aligned_dataset(tmp_path: Path) -> None:
     assert item["neurons"].shape == (16, 12)
     assert item["length"].item() == 7
     assert item["binary_label"].item() == 0.0
+
+
+def test_score_free_feature_modulation_is_zero_initialized() -> None:
+    torch.manual_seed(2)
+    modulator = SparseNeuronFeatureModulator(
+        neuron_width=12,
+        active_indices=torch.tensor([1, 4, 8, 10]),
+        thresholds=torch.tensor([0.5, 0.5, 0.5, 0.5]),
+        feature_width=16,
+        context_width=4,
+        temporal_kernel=3,
+    )
+    features = torch.randn(2, 9, 16)
+    neurons = torch.randn(2, 9, 12)
+    lengths = torch.tensor([9, 6])
+    labels = torch.tensor([1.0, 0.0])
+    modulated, record = modulator(features, neurons, lengths)
+    assert torch.equal(modulated, features)
+    losses = score_free_modulation_losses([record], labels, lengths)
+    assert set(losses) == {"auxiliary", "normal", "smooth", "sparse"}
+    assert all(torch.isfinite(value) for value in losses.values())
+    total = sum(losses.values())
+    total.backward()
+    assert modulator.auxiliary_head.weight.grad is not None
+    assert modulator.config()["method"] == "sparse_neuron_feature_modulation_v1"

@@ -29,6 +29,9 @@ from neuron_responsibility.common import clean_output, load_hidden, resample_fea
 from neuron_responsibility.model import valid_mask
 
 
+_VALIDATION_CACHE: dict[str, list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]] = {}
+
+
 def seed_everything(seed: int) -> None:
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed); torch.cuda.manual_seed_all(seed)
 
@@ -70,14 +73,22 @@ def group_features(group: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
 
 
 def frame_metrics(adapter, csv_path: str, gt_path: str, repeat: int, device: torch.device, description: str, conditioned: bool = True) -> dict[str, float]:
-    adapter.eval(); frame = pd.read_csv(csv_path); scores = []
-    with torch.no_grad():
-        for _, group in tqdm(list(frame.groupby("key", sort=False)), desc=description, unit="video", leave=False):
+    adapter.eval(); scores = []
+    cache_key = str(Path(csv_path).resolve())
+    if cache_key not in _VALIDATION_CACHE:
+        frame = pd.read_csv(csv_path); cached_groups = []
+        for _, group in tqdm(list(frame.groupby("key", sort=False)), desc="cache validation features", unit="video", leave=False):
             clip, hidden = group_features(group)
             clip_chunks, lengths = pad_chunks(clip, adapter.visual_length)
             hidden_chunks, hidden_lengths = pad_chunks(hidden, adapter.visual_length)
             if not torch.equal(lengths, hidden_lengths):
                 raise RuntimeError("validation modalities have different chunk lengths")
+            # The source hidden states are float16. Keeping the cache in that
+            # dtype avoids a 2.4 GB duplicate; CACC promotes them to float32.
+            cached_groups.append((clip_chunks, hidden_chunks.half(), lengths))
+        _VALIDATION_CACHE[cache_key] = cached_groups
+    with torch.no_grad():
+        for clip_chunks, hidden_chunks, lengths in tqdm(_VALIDATION_CACHE[cache_key], desc=description, unit="video", leave=False):
             lengths_device = lengths.to(device)
             if conditioned:
                 output, _ = adapter.forward_conditioned(clip_chunks.to(device), hidden_chunks.to(device), lengths_device)

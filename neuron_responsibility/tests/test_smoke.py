@@ -7,6 +7,7 @@ import numpy as np
 import torch
 
 from neuron_responsibility.common import base_key, resample_feature
+from neuron_responsibility.circuit_routing import ConceptCircuitRouter
 from neuron_responsibility.boundary_localization import (
     IndependentNeuronLocalizer,
     NeuronBoundaryConditioner,
@@ -161,3 +162,45 @@ def test_boundary_localizer_synthesis_and_conditioning() -> None:
     conditioner_loss.backward()
     assert conditioner.up.weight.grad is not None
     assert conditioner.config()["method"] == "neuron_boundary_pre_temporal_conditioning_v1"
+
+
+def test_concept_circuit_router_preserves_shape_and_gradients() -> None:
+    torch.manual_seed(4)
+    hidden_width, feature_width = 8, 5
+    union = torch.tensor([1, 3, 6])
+    class_mask = torch.tensor([[1, 1, 0], [0, 1, 1]], dtype=torch.float32)
+    directions = torch.tensor([[1, -1, 0], [0, 1, -1]], dtype=torch.float32)
+    router = ConceptCircuitRouter(
+        union_indices=union,
+        class_mask=class_mask,
+        directions=directions,
+        center=torch.zeros(3),
+        scale=torch.ones(3),
+        ln_weight=torch.ones(hidden_width),
+        ln_bias=torch.zeros(hidden_width),
+        projection=torch.randn(hidden_width, feature_width),
+        normal_text=torch.randn(2, feature_width),
+        abnormal_text=torch.randn(2, feature_width),
+        normal_margin_threshold=-1.0,
+        initial_gain=0.1,
+    )
+    hidden = torch.randn(2, 7, hidden_width)
+    normalized = torch.nn.functional.layer_norm(hidden, (hidden_width,))
+    clip = normalized @ router.projection
+    compact = torch.cat(
+        [
+            hidden.index_select(-1, union),
+            hidden.mean(-1, keepdim=True),
+            hidden.var(-1, keepdim=True, unbiased=False),
+        ],
+        dim=-1,
+    )
+    targets = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
+    views = router(clip, compact, targets)
+    assert views.enhanced.shape == clip.shape
+    assert views.suppressed.shape == clip.shape
+    assert views.evidence.shape == clip.shape[:2]
+    assert torch.isfinite(views.enhanced).all()
+    loss = views.enhanced.square().mean() + views.target_text_effect.mean()
+    loss.backward()
+    assert router.gain_logits.grad is not None

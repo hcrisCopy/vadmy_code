@@ -2,6 +2,8 @@
 
 本目录实现一套共享方法，适配 DSANet、DeSC、LaGoVAD，以及 UCF-Crime、XD-Violence。baseline 源码不修改，CLIP 始终冻结。
 
+当前概念条件神经元通路方案及 DSANet/UCF 完整命令见 `neuron_responsibility/CNCR_DSANET_UCF.md`。
+
 当前正式主方案是独立神经元边界定位、动态边界合成和时序编码前注入，完整指令见
 `neuron_responsibility/NEURON_BOUNDARY_CONDITIONING.md`。旧的 post-temporal 特征调制、
 probe、分区责任和 score correction 只用于复现实验对照，不再作为主方案。

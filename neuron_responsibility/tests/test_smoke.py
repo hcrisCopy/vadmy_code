@@ -30,6 +30,13 @@ from neuron_responsibility.model import (
     responsibility_mil_loss,
     responsibility_sets,
 )
+from neuron_responsibility.trace import (
+    TraceNeuronEvidence,
+    TraceThresholds,
+    responsibility_sets as trace_responsibility_sets,
+    trace_pretraining_losses,
+    trace_student_losses,
+)
 
 
 def test_key_and_resample() -> None:
@@ -283,3 +290,35 @@ def test_cacc_dataset_reuses_hidden_manifest_rows(tmp_path: Path) -> None:
     assert item["hidden"].shape == (10, 3, 8)
     assert item["length"].item() == 7
     assert sorted(VideoGroupedSampler(dataset, seed=7)) == [0, 1]
+
+
+def test_trace_score_free_evidence_and_student_losses_are_finite() -> None:
+    torch.manual_seed(6)
+    evidence = TraceNeuronEvidence(
+        selected_layers=torch.tensor([0, 0, 1, 2, 2, 3]),
+        selected_dimensions=torch.tensor([0, 3, 2, 1, 4, 5]),
+        center=torch.zeros(6), scale=torch.ones(6),
+        innovation_center=torch.zeros(6), innovation_scale=torch.ones(6),
+        hidden_width=8, active_neurons=3, dropout=0.0,
+    )
+    hidden = torch.randn(2, 9, 4, 7)
+    lengths = torch.tensor([9, 6]); labels = torch.tensor([1.0, 0.0])
+    record = evidence(hidden, lengths)
+    pretraining = trace_pretraining_losses(evidence, record, labels, lengths)
+    assert record["semantic_logits"].shape == (2, 9)
+    assert int(record["gates"].detach().round().sum()) == 3
+    assert all(torch.isfinite(value) for value in pretraining.values())
+    sets = trace_responsibility_sets(
+        record, labels, TraceThresholds(0.45, 0.55, 0.25, 0.75), grow_steps=3,
+    )
+    binary_logits = torch.randn(2, 9, requires_grad=True)
+    semantic_logits = torch.randn(2, 9, 3, requires_grad=True)
+    losses = trace_student_losses(
+        binary_logits, semantic_logits, sets, labels,
+        torch.tensor([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]), lengths,
+    )
+    trainable = [losses[name] for name in ("pseudo_binary", "ranking", "ap", "semantic", "event")]
+    assert all(torch.isfinite(value) for value in trainable)
+    (sum(pretraining.values()) + sum(trainable)).backward()
+    assert evidence.neuron_logits.grad is not None
+    assert binary_logits.grad is not None

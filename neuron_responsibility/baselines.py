@@ -84,11 +84,37 @@ def _apply_feature_modulation(
     return modulated
 
 
+def _apply_pre_temporal_conditioning(
+    owner: "BaselineAdapter",
+    features: torch.Tensor,
+    stream_name: str,
+) -> torch.Tensor:
+    if owner.pre_temporal_conditioner is None or owner._current_neurons is None:
+        return features
+    conditioned, record = owner.pre_temporal_conditioner(
+        features,
+        owner._current_neurons,
+        owner._current_lengths,
+    )
+    record["stream_name"] = stream_name
+    owner._conditioning_records.append(record)
+    return conditioned
+
+
 def _capture_encode_video(module: nn.Module, owner: "BaselineAdapter", stream_name: str) -> None:
     original = module.encode_video
 
     def wrapped(self, *args, **kwargs):
-        value = original(*args, **kwargs)
+        arguments = list(args)
+        if arguments:
+            arguments[0] = _apply_pre_temporal_conditioning(
+                owner, arguments[0], stream_name
+            )
+        elif "images" in kwargs:
+            kwargs["images"] = _apply_pre_temporal_conditioning(
+                owner, kwargs["images"], stream_name
+            )
+        value = original(*arguments, **kwargs)
         value = _apply_feature_modulation(owner, value, stream_name)
         self._responsibility_features = value
         return value
@@ -100,7 +126,14 @@ def _capture_lagovad_temporal(module: nn.Module, owner: "BaselineAdapter") -> No
     original = module._temporal_encoding
 
     def wrapped(self, *args, **kwargs):
-        features, _ = original(*args, **kwargs)
+        arguments = list(args)
+        if arguments:
+            arguments[0] = _apply_pre_temporal_conditioning(owner, arguments[0], "main")
+        elif "v_feat" in kwargs:
+            kwargs["v_feat"] = _apply_pre_temporal_conditioning(
+                owner, kwargs["v_feat"], "main"
+            )
+        features, _ = original(*arguments, **kwargs)
         features = _apply_feature_modulation(owner, features, "main")
         normalized = F.normalize(features, dim=-1)
         return features, normalized
@@ -127,14 +160,45 @@ class BaselineAdapter(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.feature_modulator: nn.Module | None = None
+        self.pre_temporal_conditioner: nn.Module | None = None
         self._current_neurons: torch.Tensor | None = None
         self._current_lengths: torch.Tensor | None = None
         self._modulation_records: list[dict[str, torch.Tensor | str]] = []
+        self._conditioning_records: list[dict[str, torch.Tensor | str]] = []
 
     def attach_feature_modulator(self, modulator: nn.Module) -> None:
         if self.feature_modulator is not None:
             raise RuntimeError("a feature modulator is already attached")
         self.feature_modulator = modulator
+
+    def attach_pre_temporal_conditioner(self, conditioner: nn.Module) -> None:
+        if self.pre_temporal_conditioner is not None:
+            raise RuntimeError("a pre-temporal conditioner is already attached")
+        self.pre_temporal_conditioner = conditioner
+
+    def forward_conditioned(
+        self,
+        clip: torch.Tensor,
+        neurons: torch.Tensor,
+        lengths: torch.Tensor,
+    ) -> tuple[BaselineOutput, list[dict[str, torch.Tensor | str]]]:
+        if self.pre_temporal_conditioner is None:
+            raise RuntimeError(
+                "attach a pre-temporal conditioner before calling forward_conditioned"
+            )
+        self._current_neurons = neurons
+        self._current_lengths = lengths
+        self._conditioning_records = []
+        try:
+            output = self.forward_baseline(clip, lengths)
+            records = list(self._conditioning_records)
+        finally:
+            self._current_neurons = None
+            self._current_lengths = None
+            self._conditioning_records = []
+        if not records:
+            raise RuntimeError("baseline forward did not reach the pre-temporal feature hook")
+        return output, records
 
     def forward_modulated(
         self,

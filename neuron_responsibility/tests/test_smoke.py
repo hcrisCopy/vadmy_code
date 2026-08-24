@@ -7,6 +7,12 @@ import numpy as np
 import torch
 
 from neuron_responsibility.common import base_key, resample_feature
+from neuron_responsibility.boundary_localization import (
+    IndependentNeuronLocalizer,
+    NeuronBoundaryConditioner,
+    boundary_supervision_loss,
+    synthesize_boundary_batch,
+)
 from neuron_responsibility.data import AlignedFeatureDataset
 from neuron_responsibility.feature_modulation import (
     SparseNeuronFeatureModulator,
@@ -105,3 +111,53 @@ def test_score_free_feature_modulation_is_zero_initialized() -> None:
     total.backward()
     assert modulator.auxiliary_head.weight.grad is not None
     assert modulator.config()["method"] == "sparse_neuron_feature_modulation_v1"
+
+
+def test_boundary_localizer_synthesis_and_conditioning() -> None:
+    torch.manual_seed(3)
+    localizer = IndependentNeuronLocalizer(
+        neuron_width=12,
+        active_indices=torch.tensor([1, 3, 5, 7, 9, 11]),
+        thresholds=torch.full((6,), 0.5),
+        hidden_width=8,
+        active_neurons=4,
+        dropout=0.0,
+    )
+    normal_clip = torch.randn(2, 16, 512)
+    abnormal_clip = torch.randn(2, 16, 512)
+    normal_neurons = torch.randn(2, 16, 12)
+    abnormal_neurons = torch.randn(2, 16, 12) + 1.0
+    lengths = torch.tensor([16, 13])
+    synthetic = synthesize_boundary_batch(
+        localizer,
+        normal_clip,
+        normal_neurons,
+        lengths,
+        abnormal_clip,
+        abnormal_neurons,
+        lengths,
+        min_segment=3,
+        max_segment=6,
+    )
+    assert synthetic["clip"].shape == (4, 16, 512)
+    assert synthetic["targets"][:2].sum() > 0
+    assert synthetic["targets"][2:].sum() == 0
+    logits = localizer(synthetic["neurons"], synthetic["lengths"])
+    losses = boundary_supervision_loss(
+        logits, synthetic["targets"], synthetic["lengths"], synthetic["confidence"]
+    )
+    assert set(losses) == {"bce", "dice", "boundary"}
+    assert all(torch.isfinite(value) for value in losses.values())
+
+    conditioner = NeuronBoundaryConditioner(
+        localizer, feature_width=512, adapter_width=8, max_scale=0.25
+    )
+    conditioned, record = conditioner(normal_clip, normal_neurons, lengths)
+    assert torch.equal(conditioned, normal_clip)
+    sum(losses.values()).backward()
+    conditioner_loss = conditioner(
+        normal_clip, normal_neurons, lengths
+    )[0].square().mean()
+    conditioner_loss.backward()
+    assert conditioner.up.weight.grad is not None
+    assert conditioner.config()["method"] == "neuron_boundary_pre_temporal_conditioning_v1"

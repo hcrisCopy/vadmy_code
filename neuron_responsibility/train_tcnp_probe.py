@@ -222,7 +222,9 @@ def main() -> None:
     calibration = calibrate(model, source, fit, prototypes, args.normal_quantile, device)
     gate = audit_split(model, source, validation, prototypes, calibration, args.candidate_threshold, device)
     diagnostic = test_diagnostic(model, args.test_list, prototypes, calibration, args.candidate_threshold, args.gt_path, args.frames_per_snippet, device)
-    report = {"method": model.method_name, "selection": model.config(), "split": {"fit_rows": len(fit), "validation_rows": len(validation)},
+    selection = {key: value for key, value in model.config().items() if key != "atlas"}
+    selection["atlas_path"] = str(Path(args.atlas))
+    report = {"method": model.method_name, "selection": selection, "split": {"fit_rows": len(fit), "validation_rows": len(validation)},
               "calibration": calibration, "candidate_threshold": args.candidate_threshold,
               "fusion_rule": "text-circuit semantic confidence is primary; normal-prototype distance and layer agreement are audit channels",
               "training_quality_gate": gate, "test_diagnostic": diagnostic,

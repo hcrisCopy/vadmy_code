@@ -131,6 +131,8 @@ def main() -> None:
     parser.add_argument("--anchor-weight", type=float, default=0.01); parser.add_argument("--frames-per-snippet", type=int, default=16)
     parser.add_argument("--preservation-weight", type=float, default=0.50)
     parser.add_argument("--dsanet-ucf-eval-samples", type=int, default=1280)
+    parser.add_argument("--pilot-samples", type=int, default=5120)
+    parser.add_argument("--pilot-min-gain", type=float, default=0.003)
     parser.add_argument("--num-workers", type=int, default=4); parser.add_argument("--seed", type=int, default=234)
     parser.add_argument("--device", default="cuda"); parser.add_argument("--resume", action="store_true")
     parser.add_argument("--clean", action="store_true")
@@ -194,6 +196,7 @@ def main() -> None:
     (output / "parameter_report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(report, indent=2, ensure_ascii=False), flush=True)
     start_epoch, best, processed = 0, -float("inf"), 0
+    released_metric, pilot_failed = None, False
     run_config = vars(args).copy()
     if args.resume:
         checkpoint = torch.load(last_path, map_location="cpu")
@@ -205,6 +208,7 @@ def main() -> None:
 
     def payload(epoch: int, metrics: dict, tag: str) -> dict:
         return {"method": report["method"], "epoch": epoch, "best_metric": best, "processed_samples": processed,
+                "released_metric": released_metric,
                 "model_state_dict": adapter.state_dict(), "optimizer_state_dict": optimizer.state_dict(),
                 "scheduler_state_dict": scheduler.state_dict(), "config": run_config, "metrics": metrics,
                 "validation_tag": tag, "selection_rule": report["selection"]}
@@ -219,7 +223,11 @@ def main() -> None:
         return metrics
 
     if not args.resume:
-        validate(-1, "released_author")
+        released_metrics = validate(-1, "released_author")
+        released_metric = released_metrics["frame_auc" if args.dataset == "ucf" else "frame_ap"]
+    else:
+        released_value = checkpoint.get("released_metric")
+        released_metric = float(best if released_value is None else released_value)
     next_eval = (processed // args.dsanet_ucf_eval_samples + 1) * args.dsanet_ucf_eval_samples
     history_path = output / "history.jsonl"
     for epoch in range(start_epoch, args.max_epoch):
@@ -262,6 +270,15 @@ def main() -> None:
             progress.set_postfix(stage=stage, loss=f"{running['total'] / step:.4f}", rank=f"{running['binary_rank'] / step:.3f}")
             if args.baseline == "dsanet" and args.dataset == "ucf" and processed >= next_eval:
                 validate(epoch, f"sample_{processed}"); adapter.train(); next_eval += args.dsanet_ucf_eval_samples
+                if args.pilot_samples > 0 and processed >= args.pilot_samples and best < released_metric + args.pilot_min_gain:
+                    pilot_failed = True
+                    print(json.dumps({
+                        "pilot_stop": True, "processed_samples": processed,
+                        "released_metric": released_metric, "best_metric": best,
+                        "required_gain": args.pilot_min_gain,
+                        "reason": "fixed pilot did not establish the required gain; later unfreezing is skipped",
+                    }), flush=True)
+                    break
         scheduler.step()
         metrics = {"selection_deferred_to_fixed_sample_interval": True}
         if args.baseline != "dsanet" or args.dataset != "ucf" or not best_path.exists():
@@ -270,6 +287,12 @@ def main() -> None:
         with history_path.open("a", encoding="utf-8") as handle: handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         torch.save(payload(epoch, metrics, "epoch_recovery"), last_path)
         print(json.dumps(record, ensure_ascii=False), flush=True)
+        if pilot_failed:
+            (output / "pilot_stop.json").write_text(json.dumps({
+                "processed_samples": processed, "released_metric": released_metric,
+                "best_metric": best, "required_gain": args.pilot_min_gain,
+            }, indent=2), encoding="utf-8")
+            break
 
 
 if __name__ == "__main__":

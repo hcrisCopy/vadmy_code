@@ -73,12 +73,14 @@ python neuron_responsibility/train_definition_evidence.py \
   --preservation-weight 0.50 \
   --anchor-weight 0.01 \
   --dsanet-ucf-eval-samples 1280 \
+  --pilot-samples 5120 \
+  --pilot-min-gain 0.003 \
   --num-workers 4 \
   --seed 234 \
   --device cuda
 ```
 
-解冻遵循 DSANet 结构逐步进行：epoch 1–2 仅 heads，epoch 3–4 为 temporal + heads，epoch 5–6 才加入 DSANet 的正常参考/DNP 相关小模块；CLIP 始终冻结。选模完全沿用作者 DSANet/UCF 的每 1280 个样本按帧级 AUC 保存最优模型。
+解冻遵循 DSANet 结构逐步进行：epoch 1–2 仅 heads，epoch 3–4 为 temporal + heads，epoch 5–6 才加入 DSANet 的正常参考/DNP 相关小模块；CLIP 始终冻结。选模完全沿用作者 DSANet/UCF 的每 1280 个样本按帧级 AUC 保存最优模型。默认 pilot 在 5120 个样本时检查；若尚未比作者 AUC 高至少 0.003（0.3 个百分点），程序自动停止，不进入更昂贵的解冻阶段。
 
 ## 3. 正式评测
 

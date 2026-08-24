@@ -282,14 +282,14 @@ class DSANetAdapter(BaselineAdapter):
         if scope in {"heads", "temporal_heads", "all_non_clip"}:
             for module in (self.base.classifier, self.base.mlp1, self.base.mlp2):
                 module.requires_grad_(True)
-        if scope in {"temporal_heads", "all_non_clip"}:
+        if scope in {"temporal_only", "temporal_heads", "all_non_clip"}:
             _unfreeze_last(self.base.temporal.resblocks)
             for module in (self.base.gc2, self.base.gc4, self.base.linear):
                 module.requires_grad_(True)
         if scope == "all_non_clip":
             self.base.requires_grad_(True)
             self.base.clipmodel.requires_grad_(False)
-        if scope not in {"frozen", "heads", "temporal_heads", "all_non_clip"}:
+        if scope not in {"frozen", "heads", "temporal_only", "temporal_heads", "all_non_clip"}:
             raise ValueError(f"unknown train scope: {scope}")
 
 
@@ -360,16 +360,17 @@ class DeSCAdapter(BaselineAdapter):
         return total
 
     def set_train_scope(self, scope: str) -> None:
-        if scope not in {"frozen", "heads", "temporal_heads"}:
+        if scope not in {"frozen", "heads", "temporal_only", "temporal_heads"}:
             raise ValueError(f"unknown DeSC train scope: {scope}")
         for model in (self.sensitivity, self.consistency):
             model.requires_grad_(False)
         if scope == "frozen":
             return
-        for model in (self.sensitivity, self.consistency):
-            for module in (model.classifier, model.mlp1, model.mlp2):
-                module.requires_grad_(True)
-        if scope == "temporal_heads":
+        if scope in {"heads", "temporal_heads"}:
+            for model in (self.sensitivity, self.consistency):
+                for module in (model.classifier, model.mlp1, model.mlp2):
+                    module.requires_grad_(True)
+        if scope in {"temporal_only", "temporal_heads"}:
             _unfreeze_last(self.sensitivity.tcn_module.layers)
             _unfreeze_last(self.sensitivity.gt_module.resblocks)
             self.sensitivity.fusion_mlp.requires_grad_(True)
@@ -434,7 +435,7 @@ class LaGoVADAdapter(BaselineAdapter):
         if scope in {"heads", "temporal_heads", "all_non_clip"}:
             for module in (self.base.bin_head, self.base.sim_head):
                 module.requires_grad_(True)
-        if scope in {"temporal_heads", "all_non_clip"}:
+        if scope in {"temporal_only", "temporal_heads", "all_non_clip"}:
             temporal = self.base.temporal_encoder
             if hasattr(temporal, "temporal") and hasattr(temporal.temporal, "resblocks"):
                 _unfreeze_last(temporal.temporal.resblocks)
@@ -452,7 +453,7 @@ class LaGoVADAdapter(BaselineAdapter):
         if scope == "all_non_clip":
             self.base.requires_grad_(True)
             self.base.clip_text_model.model.requires_grad_(False)
-        if scope not in {"frozen", "heads", "temporal_heads", "all_non_clip"}:
+        if scope not in {"frozen", "heads", "temporal_only", "temporal_heads", "all_non_clip"}:
             raise ValueError(f"unknown train scope: {scope}")
 
 

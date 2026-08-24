@@ -15,6 +15,7 @@ from neuron_responsibility.boundary_localization import (
     synthesize_boundary_batch,
 )
 from neuron_responsibility.data import AlignedFeatureDataset
+from neuron_responsibility.definition_evidence import DefinitionEvidence, definition_losses
 from neuron_responsibility.feature_modulation import (
     SparseNeuronFeatureModulator,
     score_free_modulation_losses,
@@ -204,3 +205,34 @@ def test_concept_circuit_router_preserves_shape_and_gradients() -> None:
     loss = views.enhanced.square().mean() + views.target_text_effect.mean()
     loss.backward()
     assert router.gain_logits.grad is not None
+
+
+def test_definition_evidence_is_training_only_and_finite(tmp_path: Path) -> None:
+    atlas = {
+        "class_names": ["abuse", "arrest"],
+        "selection_source": "unit test",
+        "blocks": [{
+            "width": 3, "center": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0],
+            "class_mask": [[1, 1, 0], [0, 1, 1]],
+            "directions": [[1, -1, 0], [0, 1, -1]],
+            "weights": [[2, 1, 0], [0, 1, 2]],
+        }],
+    }
+    atlas_path = tmp_path / "atlas.json"
+    atlas_path.write_text(__import__("json").dumps(atlas), encoding="utf-8")
+    evidence_model = DefinitionEvidence(str(atlas_path))
+    compact = torch.randn(2, 8, 3)
+    evidence = evidence_model(compact)
+    from neuron_responsibility.baselines import BaselineOutput
+    output = BaselineOutput(
+        torch.randn(2, 8, requires_grad=True), torch.randn(2, 8, 3, requires_grad=True),
+        torch.randn(2, 8, 4), (),
+    )
+    losses = definition_losses(
+        output, evidence, torch.tensor([[0., 1., 0.], [1., 0., 0.]]),
+        torch.tensor([1., 0.]), torch.tensor([8, 6]), 0.25, 0.2, 0.2,
+    )
+    assert evidence.shape == (2, 8, 2)
+    assert set(losses) == {"binary_rank", "semantic_hard_negative", "normal_suppression", "dnp_rank"}
+    assert all(torch.isfinite(value) for value in losses.values())
+    sum(losses.values()).backward()

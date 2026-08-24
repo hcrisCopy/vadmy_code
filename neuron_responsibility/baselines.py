@@ -279,17 +279,22 @@ class DSANetAdapter(BaselineAdapter):
         self.base.requires_grad_(False)
         if scope == "frozen":
             return
-        if scope in {"heads", "temporal_heads", "all_non_clip"}:
+        if scope in {"heads", "temporal_heads", "evidence_adaptation", "all_non_clip"}:
             for module in (self.base.classifier, self.base.mlp1, self.base.mlp2):
                 module.requires_grad_(True)
-        if scope in {"temporal_only", "temporal_heads", "all_non_clip"}:
+        if scope in {"temporal_only", "temporal_heads", "evidence_adaptation", "all_non_clip"}:
             _unfreeze_last(self.base.temporal.resblocks)
             for module in (self.base.gc2, self.base.gc4, self.base.linear):
                 module.requires_grad_(True)
+        if scope == "evidence_adaptation":
+            # DNP is DSANet's normal-pattern reference module.  The definition
+            # evidence loss supervises its reconstruction error, so it must be
+            # trainable in the final stage while CLIP stays frozen.
+            self.base.video_anomaly_refiner.requires_grad_(True)
         if scope == "all_non_clip":
             self.base.requires_grad_(True)
             self.base.clipmodel.requires_grad_(False)
-        if scope not in {"frozen", "heads", "temporal_only", "temporal_heads", "all_non_clip"}:
+        if scope not in {"frozen", "heads", "temporal_only", "temporal_heads", "evidence_adaptation", "all_non_clip"}:
             raise ValueError(f"unknown train scope: {scope}")
 
 

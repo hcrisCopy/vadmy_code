@@ -192,7 +192,10 @@ def main() -> None:
                 semantic_score = torch.cat(valid_semantic).numpy().astype(np.float32)
                 neuron = torch.cat(valid_neuron).numpy().astype(np.float32)
                 class_prob = torch.cat(valid_class).numpy().astype(np.float32)
-                baseline_final = binary if args.baseline == "lagovad" else semantic_score
+                # All three released baselines report frame anomaly AUC/AP from
+                # their binary branch.  Semantic scores remain a secondary
+                # diagnostic and provide DSANet's class distribution for mAP.
+                baseline_final = binary
                 fused = (0.5 * baseline_final + 0.5 * neuron).astype(np.float32)
                 np.savez_compressed(
                     cache_path, binary=binary, semantic=semantic_score,
@@ -220,7 +223,7 @@ def main() -> None:
         frame_scores = np.repeat(snippet, args.frames_per_snippet)
         metrics[name] = safe_frame_metrics(gt, frame_scores)
 
-    baseline_for_diagnostic = binary_all if args.baseline == "lagovad" else semantic_all
+    baseline_for_diagnostic = binary_all
     baseline_frames = np.repeat(np.concatenate(baseline_for_diagnostic), args.frames_per_snippet)
     neuron_frames = np.repeat(np.concatenate(neuron_all), args.frames_per_snippet)
     usable = min(len(gt), len(baseline_frames), len(neuron_frames))

@@ -42,14 +42,15 @@ python neuron_responsibility/train_definition_evidence.py \
   --val-list ../vadmy_data/neuron_responsibility/ucf/dance_v1/circuits/test.csv \
   --atlas ../vadmy_data/neuron_responsibility/ucf/dance_v1/circuits/definition_circuits.json \
   --gt-path ../vadmy_data/annotations/ucf/gt.npy \
+  --teacher-cache ../vadmy_data/neuron_responsibility/ucf/cncr_v1/dsanet_lr1e6/author_train_logits.pth \
   --out-dir ../vadmy_data/neuron_responsibility/ucf/dance_v1/dsanet \
   --max-epoch 10 \
   --temporal-start-epoch 2 \
   --reference-start-epoch 4 \
   --batch-size 64 \
-  --head-lr 7e-5 \
-  --temporal-lr 7e-6 \
-  --reference-lr 7e-6 \
+  --head-lr 1e-5 \
+  --temporal-lr 1e-6 \
+  --reference-lr 1e-6 \
   --weight-decay 0 \
   --top-fraction 0.10 \
   --binary-margin 0.20 \
@@ -58,6 +59,7 @@ python neuron_responsibility/train_definition_evidence.py \
   --semantic-weight 0.25 \
   --normal-weight 0.10 \
   --dnp-weight 0.20 \
+  --preservation-weight 0.50 \
   --anchor-weight 0.01 \
   --frames-per-snippet 16 \
   --dsanet-ucf-eval-samples 1280 \

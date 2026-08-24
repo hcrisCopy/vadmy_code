@@ -42,7 +42,7 @@ python neuron_responsibility/train_definition_evidence.py \
   --val-list ../vadmy_data/neuron_responsibility/ucf/dance_v1/circuits/test.csv \
   --atlas ../vadmy_data/neuron_responsibility/ucf/dance_v1/circuits/definition_circuits.json \
   --gt-path ../vadmy_data/annotations/ucf/gt.npy \
-  --teacher-cache ../vadmy_data/neuron_responsibility/ucf/cncr_v1/dsanet_lr1e6/author_train_logits.pth \
+  --teacher-cache ../vadmy_data/neuron_responsibility/ucf/dsanet_boundary_conditioning_v1/author_train_logits.pth \
   --out-dir ../vadmy_data/neuron_responsibility/ucf/dance_v1/dsanet \
   --max-epoch 10 \
   --temporal-start-epoch 2 \

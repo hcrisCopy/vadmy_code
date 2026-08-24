@@ -51,6 +51,20 @@ class DefinitionEvidence(nn.Module):
         return (activation * self.weight).sum(dim=-1)
 
 
+class LearnedDefinitionEvidence(nn.Module):
+    """Expose a frozen audited TCNP probe through the existing loss interface."""
+
+    def __init__(self, probe_path: str) -> None:
+        super().__init__()
+        from .tcnp import load_probe
+        self.probe, checkpoint = load_probe(probe_path)
+        self.atlas = checkpoint["probe_config"]["atlas"]
+        self.width = self.probe.width
+
+    def forward(self, compact: torch.Tensor) -> torch.Tensor:
+        return self.probe(compact)["logits"]
+
+
 def _valid_top_bottom(values: torch.Tensor, length: int, fraction: float) -> tuple[torch.Tensor, torch.Tensor]:
     count = max(1, min(length // 2, int(np.ceil(length * fraction))))
     order = torch.argsort(values[:length])

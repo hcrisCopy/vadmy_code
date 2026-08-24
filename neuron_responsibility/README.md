@@ -519,6 +519,9 @@ python neuron_responsibility/evaluate.py \
 
 ## 6. 开销与冻结范围
 
+最新的基线分数无关、带训练质量门控的 TCNP 方案及 DSANet/UCF 可直接运行指令见
+[`TCNP_DSANET_UCF.md`](TCNP_DSANET_UCF.md)。它复用已有多层紧凑回路，先学习文本类别约束的神经元组合并建立正常原型，训练集审计通过后才允许渐进解冻 baseline。
+
 默认 `K=768, H=128` 的 probe 约含 0.151M 参数，FP32 权重约 0.6 MB；每个 snippet 约 0.148M MAC，长度 256 的单视频约 38M MAC。选中 neuron 文件额外占 `T × 768 × 4` bytes，即约 3 KB/snippet。
 
 | 阶段 | CLIP | Probe | Baseline |

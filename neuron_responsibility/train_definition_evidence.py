@@ -30,7 +30,7 @@ if str(PACKAGE_ROOT) not in sys.path:
 from neuron_responsibility.baselines import build_baseline, class_targets
 from neuron_responsibility.common import clean_output
 from neuron_responsibility.data import AlignedFeatureDataset
-from neuron_responsibility.definition_evidence import DefinitionEvidence, definition_losses
+from neuron_responsibility.definition_evidence import DefinitionEvidence, LearnedDefinitionEvidence, definition_losses
 from neuron_responsibility.evaluate import pad_chunks
 from neuron_responsibility.model import valid_mask
 
@@ -118,6 +118,7 @@ def main() -> None:
     parser.add_argument("--dataset", choices=["ucf", "xd"], required=True)
     parser.add_argument("--train-list", required=True); parser.add_argument("--val-list", required=True)
     parser.add_argument("--atlas", required=True); parser.add_argument("--gt-path", required=True)
+    parser.add_argument("--probe-model", default=""); parser.add_argument("--gate-report", default="")
     parser.add_argument("--teacher-cache", default="")
     parser.add_argument("--out-dir", required=True); parser.add_argument("--max-epoch", type=int, default=10)
     parser.add_argument("--temporal-start-epoch", type=int, default=2); parser.add_argument("--reference-start-epoch", type=int, default=4)
@@ -143,6 +144,12 @@ def main() -> None:
     if last_path.exists() and not args.resume:
         raise RuntimeError("checkpoint exists; use --resume or --clean")
     seed_everything(args.seed)
+    if bool(args.probe_model) != bool(args.gate_report):
+        parser.error("--probe-model and --gate-report must be supplied together")
+    if args.gate_report:
+        gate = json.loads(Path(args.gate_report).read_text(encoding="utf-8"))
+        if not gate.get("baseline_training_allowed", False):
+            raise RuntimeError("TCNP training quality gate failed; baseline adaptation is intentionally blocked")
     device = torch.device(args.device if torch.cuda.is_available() and args.device.startswith("cuda") else "cpu")
     teacher = build_baseline(args, str(device)).to(device).eval(); teacher.requires_grad_(False)
     teacher_set = AlignedFeatureDataset(args.train_list, args.dataset, teacher.visual_length)
@@ -173,11 +180,12 @@ def main() -> None:
     optimizer = torch.optim.AdamW(optimizer_groups, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.max_epoch)
     initial = {name: value.detach().clone() for name, value in parameters.items()}
-    evidence_model = DefinitionEvidence(args.atlas).to(device).eval(); evidence_model.requires_grad_(False)
+    evidence_model = (LearnedDefinitionEvidence(args.probe_model) if args.probe_model else DefinitionEvidence(args.atlas)).to(device).eval()
+    evidence_model.requires_grad_(False)
     normal_set = AlignedFeatureDataset(args.train_list, args.dataset, adapter.visual_length, "normal")
     abnormal_set = AlignedFeatureDataset(args.train_list, args.dataset, adapter.visual_length, "abnormal")
     report = {
-        "method": "definition_sensitive_training_evidence_v1", "baseline": args.baseline, "dataset": args.dataset,
+        "method": "tcnp_gated_definition_training_v1" if args.probe_model else "definition_sensitive_training_evidence_v1", "baseline": args.baseline, "dataset": args.dataset,
         "inference": "released baseline path only; circuits are absent", "selection": "UCF frame AUC / XD frame AP",
         "circuit_source": evidence_model.atlas["selection_source"], "compact_width": evidence_model.width,
         "trainable": {key: sum(value.numel() for value in values) for key, values in grouped.items()},

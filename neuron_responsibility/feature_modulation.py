@@ -68,10 +68,12 @@ class SparseNeuronFeatureModulator(nn.Module):
     def reset_parameters(self) -> None:
         nn.init.xavier_uniform_(self.context_projection.weight)
         nn.init.normal_(self.gate_queries, std=0.02)
-        nn.init.normal_(self.neuron_directions, std=0.02)
+        # A zero output dictionary preserves the released baseline exactly,
+        # while receiving a direct gradient on the first optimization step.
+        nn.init.zeros_(self.neuron_directions)
         nn.init.zeros_(self.auxiliary_head.bias)
         nn.init.constant_(self.auxiliary_head.weight, 1.0 / self.active_width)
-        nn.init.zeros_(self.residual_scale)
+        nn.init.ones_(self.residual_scale)
 
     def config(self) -> dict[str, Any]:
         return {
@@ -108,7 +110,9 @@ class SparseNeuronFeatureModulator(nn.Module):
             )
         mask = valid_mask(lengths, neurons.shape[1], neurons.dtype).unsqueeze(-1)
         selected = neurons.index_select(-1, self.active_indices)
-        short = F.relu(selected - self.thresholds).clamp_max(self.evidence_cap)
+        # Softplus is a smooth exceedance above the normal quantile.  Unlike a
+        # hard ReLU, it retains weak but rank-preserving evidence below q99.
+        short = F.softplus(selected - self.thresholds).clamp_max(self.evidence_cap)
         channels = short.transpose(1, 2)
         long = F.avg_pool1d(
             channels,
@@ -138,7 +142,7 @@ class SparseNeuronFeatureModulator(nn.Module):
         gated_evidence = evidence * gates
         delta = torch.einsum("btk,kd->btd", gated_evidence, self.neuron_directions)
         delta = delta / math.sqrt(self.active_width)
-        scale = torch.tanh(self.residual_scale)
+        scale = self.residual_scale
         modulated = features + scale * delta
         auxiliary_logits = self.auxiliary_head(gated_evidence).squeeze(-1)
         return modulated, {

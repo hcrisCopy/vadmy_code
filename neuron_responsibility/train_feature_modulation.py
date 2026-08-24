@@ -400,7 +400,7 @@ def main() -> None:
             progress.set_postfix(
                 stage=stage,
                 loss=f"{running['total'] / step:.4f}",
-                scale=f"{float(torch.tanh(modulator.residual_scale).detach()):.4f}",
+                scale=f"{float(modulator.residual_scale.detach()):.4f}",
             )
             if paired and processed_samples >= next_eval:
                 validate_and_select(epoch, f"sample_{processed_samples}")
@@ -417,7 +417,7 @@ def main() -> None:
             "epoch": epoch + 1,
             "stage": stage,
             **{f"{key}_loss": value / max(1, step_count) for key, value in running.items()},
-            "residual_scale": float(torch.tanh(modulator.residual_scale).detach()),
+            "residual_scale": float(modulator.residual_scale.detach()),
             "metrics": metrics,
         }
         with history_path.open("a", encoding="utf-8") as handle:

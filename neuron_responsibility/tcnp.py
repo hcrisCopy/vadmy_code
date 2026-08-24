@@ -70,7 +70,7 @@ class TextConditionedNeuronProbe(nn.Module):
             temperature = F.softplus(self.layer_temperature[index]) + 0.25
             layer_logits.append(temperature * evidence + self.layer_bias[index])
         layers = torch.stack(layer_logits, dim=-2)
-        fusion = F.softmax(self.fusion_logits, dim=0).transpose(0, 1)
+        fusion = F.softmax(self.fusion_logits, dim=0)
         fused = (layers * fusion).sum(dim=-2)
         return {"logits": fused, "layer_logits": layers, "standardized": standardized}
 
@@ -90,4 +90,3 @@ def load_probe(path: str | Path, device: torch.device | str = "cpu") -> tuple[Te
     model = TextConditionedNeuronProbe(checkpoint["probe_config"]["atlas"])
     model.load_state_dict(checkpoint["probe_state_dict"], strict=True)
     return model.to(device), checkpoint
-

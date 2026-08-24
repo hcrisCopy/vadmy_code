@@ -1,6 +1,7 @@
 # Neuron-Decoupled Responsibility Learning
 
 最新跨层概念子空间方案及 DSANet/UCF 完整指令见 `neuron_responsibility/CACC_DSANET_UCF.md`。该方案直接复用全层 CLS manifest，不复制原始 hidden states，也不依赖 baseline 异常分数。
+DSANet/UCF 实验结论和分支诊断见 `neuron_responsibility/RESULT_DSANET_UCF_CACC.md`。
 
 本目录实现一套共享方法，适配 DSANet、DeSC、LaGoVAD，以及 UCF-Crime、XD-Violence。baseline 源码不修改，CLIP 始终冻结。
 

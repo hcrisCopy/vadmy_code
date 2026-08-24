@@ -136,6 +136,8 @@ def pcgrad_backward(
     primary: torch.Tensor,
     auxiliary: torch.Tensor,
     parameters: list[torch.nn.Parameter],
+    gradient_scale: float = 1.0,
+    accumulate: bool = False,
 ) -> dict[str, float]:
     primary_grad = torch.autograd.grad(
         primary, parameters, retain_graph=True, allow_unused=True
@@ -161,7 +163,11 @@ def pcgrad_backward(
         second_value = torch.zeros_like(parameter) if second is None else second
         if dot < 0 and first is not None and second is not None:
             second_value = second_value - coefficient * first_value
-        parameter.grad = (first_value + second_value).detach()
+        combined = ((first_value + second_value) * float(gradient_scale)).detach()
+        if accumulate and parameter.grad is not None:
+            parameter.grad.add_(combined)
+        else:
+            parameter.grad = combined
     cosine = float(dot / (primary_norm.sqrt() + 1e-12))
     return {"gradient_dot": float(dot), "gradient_cosine_proxy": cosine, "projected": float(dot < 0)}
 
@@ -177,6 +183,7 @@ def main() -> None:
     parser.add_argument("--out-dir", required=True); parser.add_argument("--teacher-cache", default="")
     parser.add_argument("--max-epoch", type=int, default=10); parser.add_argument("--warmup-epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=64); parser.add_argument("--lr", type=float, default=7e-5)
+    parser.add_argument("--micro-batch-size", type=int, default=16)
     parser.add_argument("--router-lr", type=float, default=7e-5); parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--counterfactual-weight", type=float, default=0.50)
     parser.add_argument("--preservation-weight", type=float, default=0.50); parser.add_argument("--anchor-weight", type=float, default=0.01)
@@ -194,6 +201,8 @@ def main() -> None:
         parser.error("--clean and --resume cannot be combined")
     if not 0 < args.top_fraction <= 1:
         parser.error("--top-fraction must be in (0,1]")
+    if args.micro_batch_size < 1 or args.batch_size % args.micro_batch_size != 0:
+        parser.error("--micro-batch-size must divide --batch-size")
     output = clean_output(args.out_dir, args.clean)
     last_path = output / "checkpoint_last.pth"; best_path = output / "model_best.pth"
     if last_path.exists() and not args.resume:
@@ -239,6 +248,7 @@ def main() -> None:
         "baseline_trainable_parameters": sum(value.numel() for value in baseline_parameters),
         "router_trainable_parameters": sum(value.numel() for value in router_parameters),
         "atlas_gate": atlas["checks"], "batch_size_per_normality": args.batch_size,
+        "micro_batch_size_per_normality": args.micro_batch_size,
         "learning_rate": args.lr, "router_learning_rate": args.router_lr,
     }
     (output / "parameter_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -309,44 +319,66 @@ def main() -> None:
             desc=f"CNCR {epoch + 1}/{args.max_epoch}", unit="batch",
         )
         for step, (normal_batch, abnormal_batch) in enumerate(progress, 1):
-            batch = merge(normal_batch, abnormal_batch)
-            clip = batch["clip"].to(device); compact = batch["neurons"].to(device)
-            lengths = batch["length"].to(device); labels = batch["binary_label"].to(device)
-            full_targets = class_targets(batch["label_text"], adapter.label_map, device)
-            concept_targets = full_targets[:, 1:]
-            views = router(clip, compact, concept_targets)
-            plus = adapter.forward_baseline(views.enhanced, lengths)
-            minus = adapter.forward_baseline(views.suppressed, lengths)
-            original = adapter.original_loss(plus, labels, batch["label_text"], lengths)
-            teacher_rows = torch.tensor(
-                [teacher_index[str(value)] for value in batch["sample_id"]], dtype=torch.long
-            )
-            teacher_batch = teacher_logits.index_select(0, teacher_rows).to(device)
-            preserve = preservation_loss(plus.binary_logits, teacher_batch, lengths)
-            anchor = torch.stack([
-                (value - initial).square().mean() / initial.square().mean().clamp_min(1e-8)
-                for value, initial in zip(baseline_parameters, initial_baseline)
-            ]).mean()
-            primary = original + args.preservation_weight * preserve + args.anchor_weight * anchor
-            cf, diagnostics = counterfactual_loss(
-                plus, minus, views, full_targets, labels, lengths, args.top_fraction,
-                args.semantic_margin, args.binary_margin,
-            )
-            auxiliary = args.counterfactual_weight * cf
             optimizer.zero_grad(set_to_none=True)
-            gradient = pcgrad_backward(primary, auxiliary, parameters)
+            micro_values = {key: 0.0 for key in running}
+            micro_count = args.batch_size // args.micro_batch_size
+            for micro_index, start in enumerate(
+                range(0, args.batch_size, args.micro_batch_size)
+            ):
+                stop = start + args.micro_batch_size
+                normal_micro = {
+                    key: value[start:stop] if torch.is_tensor(value) else list(value[start:stop])
+                    for key, value in normal_batch.items()
+                }
+                abnormal_micro = {
+                    key: value[start:stop] if torch.is_tensor(value) else list(value[start:stop])
+                    for key, value in abnormal_batch.items()
+                }
+                batch = merge(normal_micro, abnormal_micro)
+                clip = batch["clip"].to(device); compact = batch["neurons"].to(device)
+                lengths = batch["length"].to(device); labels = batch["binary_label"].to(device)
+                full_targets = class_targets(batch["label_text"], adapter.label_map, device)
+                concept_targets = full_targets[:, 1:]
+                views = router(clip, compact, concept_targets)
+                plus = adapter.forward_baseline(views.enhanced, lengths)
+                minus = adapter.forward_baseline(views.suppressed, lengths)
+                original = adapter.original_loss(plus, labels, batch["label_text"], lengths)
+                teacher_rows = torch.tensor(
+                    [teacher_index[str(value)] for value in batch["sample_id"]], dtype=torch.long
+                )
+                teacher_batch = teacher_logits.index_select(0, teacher_rows).to(device)
+                preserve = preservation_loss(plus.binary_logits, teacher_batch, lengths)
+                anchor = torch.stack([
+                    (value - initial).square().mean() / initial.square().mean().clamp_min(1e-8)
+                    for value, initial in zip(baseline_parameters, initial_baseline)
+                ]).mean()
+                primary = original + args.preservation_weight * preserve + args.anchor_weight * anchor
+                cf, diagnostics = counterfactual_loss(
+                    plus, minus, views, full_targets, labels, lengths, args.top_fraction,
+                    args.semantic_margin, args.binary_margin,
+                )
+                auxiliary = args.counterfactual_weight * cf
+                gradient = pcgrad_backward(
+                    primary, auxiliary, parameters,
+                    gradient_scale=1.0 / micro_count,
+                    accumulate=micro_index > 0,
+                )
+                values = {
+                    "total": float((primary + auxiliary).detach()),
+                    "original": float(original.detach()), "preserve": float(preserve.detach()),
+                    "counterfactual": float(cf.detach()),
+                    "semantic_rank": diagnostics["semantic_rank"],
+                    "binary_rank": diagnostics["binary_rank"],
+                    "normal_invariance": diagnostics["normal_invariance"],
+                    "gradient_projected": gradient["projected"],
+                    "gate": float(views.anomaly_gate.mean().detach()),
+                    "text_effect": float(views.target_text_effect.mean().detach()),
+                }
+                for key, value in values.items():
+                    micro_values[key] += value / micro_count
             torch.nn.utils.clip_grad_norm_(parameters, max_norm=5.0)
-            optimizer.step(); processed += int(labels.numel())
-            values = {
-                "total": float((primary + auxiliary).detach()), "original": float(original.detach()),
-                "preserve": float(preserve.detach()), "counterfactual": float(cf.detach()),
-                "semantic_rank": diagnostics["semantic_rank"], "binary_rank": diagnostics["binary_rank"],
-                "normal_invariance": diagnostics["normal_invariance"],
-                "gradient_projected": gradient["projected"],
-                "gate": float(views.anomaly_gate.mean().detach()),
-                "text_effect": float(views.target_text_effect.mean().detach()),
-            }
-            for key, value in values.items(): running[key] += value
+            optimizer.step(); processed += args.batch_size * 2
+            for key, value in micro_values.items(): running[key] += value
             progress.set_postfix(
                 loss=f"{running['total'] / step:.4f}", gate=f"{running['gate'] / step:.3f}",
                 pcgrad=f"{running['gradient_projected'] / step:.2f}",

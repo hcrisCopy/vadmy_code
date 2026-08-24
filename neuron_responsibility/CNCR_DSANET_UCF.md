@@ -46,6 +46,7 @@ python neuron_responsibility/train_circuit_routing.py \
   --max-epoch 10 \
   --warmup-epochs 1 \
   --batch-size 64 \
+  --micro-batch-size 16 \
   --lr 7e-5 \
   --router-lr 7e-5 \
   --weight-decay 0.0 \

@@ -130,6 +130,25 @@ def raw_evidence(
     return semantic.cpu().numpy(), structural.cpu().numpy()
 
 
+def paired_raw_evidence(
+    hidden: np.ndarray, selected: np.ndarray, random_indices: np.ndarray,
+    margin: TextMargin, center: torch.Tensor, scale: torch.Tensor, device: torch.device,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Share the expensive CLIP-margin backward pass between both controls."""
+    tensor = torch.from_numpy(hidden.astype(np.float32)).to(device)
+    _, responsibility = margin.responsibility(tensor, center)
+    outputs = []
+    for indices in (selected, random_indices):
+        outputs.extend(
+            value.cpu().numpy()
+            for value in evidence_from_responsibility(
+                responsibility, tensor, center, scale,
+                torch.as_tensor(indices, dtype=torch.long, device=device),
+            )
+        )
+    return outputs[0], outputs[1], outputs[2], outputs[3]
+
+
 def fit_calibration(
     groups, mapping, dataset, layer, selected, random_indices,
     margin, center, scale, samples_per_video, device,
@@ -141,10 +160,11 @@ def fit_calibration(
             continue
         hidden = hidden_for(mapping, key, layer)
         hidden = hidden[uniform_indices(len(hidden), samples_per_video)]
-        for target, indices in ((selected_values, selected), (random_values, random_indices)):
-            semantic, structural = raw_evidence(hidden, indices, margin, center, scale, device)
-            target[0].append(semantic)
-            target[1].append(structural)
+        semantic, structural, random_semantic, random_structural = paired_raw_evidence(
+            hidden, selected, random_indices, margin, center, scale, device
+        )
+        selected_values[0].append(semantic); selected_values[1].append(structural)
+        random_values[0].append(random_semantic); random_values[1].append(random_structural)
 
     def finish(values):
         semantic = np.concatenate(values[0])
@@ -168,7 +188,7 @@ def build_split(
     mapping, _ = read_hidden_manifest(manifest)
     feature_dir = output / name / "features"
     feature_dir.mkdir(parents=True, exist_ok=True)
-    rows, missing, reused = [], set(), 0
+    rows, missing, reused, video_cache = [], set(), 0, {}
     for _, row in tqdm(frame.iterrows(), total=len(frame), desc=f"build {name} priors", unit="clip"):
         clip_path = str(row["path"])
         from neuron_responsibility.common import base_key
@@ -181,9 +201,15 @@ def build_split(
             reused += 1
         else:
             clip = np.load(clip_path, mmap_mode="r")
-            hidden = resample_feature(hidden_for(mapping, key, layer), len(clip))
-            sem, struct = raw_evidence(hidden, selected, margin, center, scale, device)
-            r_sem, r_struct = raw_evidence(hidden, random_indices, margin, center, scale, device)
+            if key not in video_cache:
+                native_hidden = hidden_for(mapping, key, layer)
+                video_cache[key] = paired_raw_evidence(
+                    native_hidden, selected, random_indices, margin, center, scale, device
+                )
+            sem, struct, r_sem, r_struct = (
+                resample_feature(value, len(clip)).reshape(-1)
+                for value in video_cache[key]
+            )
             prior = calibrated_prior(sem, struct, selected_calibration)
             random_prior = calibrated_prior(r_sem, r_struct, random_calibration)
             np.save(target, np.stack([prior, random_prior, sem, struct], axis=1).astype(np.float32))

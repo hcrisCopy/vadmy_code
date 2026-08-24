@@ -198,23 +198,27 @@ def conditioner_regularization(
     return torch.stack(terms).mean()
 
 
-def conflict_controlled_step(
-    base_objective: torch.Tensor,
-    boundary_objective: torch.Tensor,
+def objective_gradients(
+    objective: torch.Tensor,
     parameters: list[torch.nn.Parameter],
+) -> tuple[list[torch.nn.Parameter], tuple[torch.Tensor | None, ...]]:
+    trainable = [parameter for parameter in parameters if parameter.requires_grad]
+    if not trainable:
+        raise RuntimeError("gradient computation has no trainable parameters")
+    gradients = torch.autograd.grad(objective, trainable, allow_unused=True)
+    return trainable, gradients
+
+
+def conflict_controlled_step(
+    trainable: list[torch.nn.Parameter],
+    base_grad: tuple[torch.Tensor | None, ...],
+    boundary_grad: tuple[torch.Tensor | None, ...],
     boundary_weight: float,
     optimizer: torch.optim.Optimizer,
 ) -> dict[str, float]:
-    trainable = [parameter for parameter in parameters if parameter.requires_grad]
-    if not trainable:
-        raise RuntimeError("conflict-controlled update has no trainable parameters")
-    base_grad = torch.autograd.grad(
-        base_objective, trainable, retain_graph=True, allow_unused=True
-    )
-    boundary_grad = torch.autograd.grad(
-        boundary_objective, trainable, allow_unused=True
-    )
-    dot = torch.zeros((), device=base_objective.device)
+    if len(trainable) != len(base_grad) or len(trainable) != len(boundary_grad):
+        raise ValueError("parameter and gradient lists have different lengths")
+    dot = torch.zeros((), device=trainable[0].device)
     base_norm = torch.zeros_like(dot)
     for first, second in zip(base_grad, boundary_grad):
         if first is not None and second is not None:
@@ -549,6 +553,18 @@ def main() -> None:
                 + args.normal_delta_weight * normal_delta
                 + args.anchor_weight * anchor
             )
+            trainable_parameters = conditioner_parameters + temporal_parameters + head_parameters
+            trainable, base_grad = objective_gradients(
+                base_objective, trainable_parameters
+            )
+            base_values = {
+                "baseline": float(baseline_loss.detach()),
+                "preserve": float(preserve.detach()),
+                "normal_delta": float(normal_delta.detach()),
+                "anchor": float(anchor.detach()),
+                "base_objective": float(base_objective.detach()),
+            }
+            del current_output, records, baseline_loss, preserve, normal_delta, anchor, base_objective
 
             normal_clip = normal["clip"].to(device, non_blocking=True)
             normal_neurons = normal["neurons"].to(device, non_blocking=True)
@@ -581,30 +597,42 @@ def main() -> None:
                 + args.synthetic_dice_weight * boundary["dice"]
                 + args.boundary_shape_weight * boundary["boundary"]
             )
-            trainable_parameters = conditioner_parameters + temporal_parameters + head_parameters
+            boundary_values = {
+                "synthetic_bce": float(boundary["bce"].detach()),
+                "synthetic_dice": float(boundary["dice"].detach()),
+                "boundary_shape": float(boundary["boundary"].detach()),
+                "boundary_objective": float(boundary_objective.detach()),
+            }
+            boundary_trainable, boundary_grad = objective_gradients(
+                boundary_objective, trainable_parameters
+            )
+            if any(first is not second for first, second in zip(trainable, boundary_trainable)):
+                raise RuntimeError("trainable parameter set changed between serial objectives")
             gradient = conflict_controlled_step(
-                base_objective,
-                boundary_objective,
-                trainable_parameters,
+                trainable,
+                base_grad,
+                boundary_grad,
                 args.boundary_objective_weight,
                 optimizer,
             )
             processed_samples += int(labels.numel())
-            total = base_objective + args.boundary_objective_weight * boundary_objective
+            total = base_values["base_objective"] + (
+                args.boundary_objective_weight * boundary_values["boundary_objective"]
+            )
             values = {
                 "total": total,
-                "baseline": baseline_loss,
-                "preserve": preserve,
-                "normal_delta": normal_delta,
-                "anchor": anchor,
-                "synthetic_bce": boundary["bce"],
-                "synthetic_dice": boundary["dice"],
-                "boundary_shape": boundary["boundary"],
+                "baseline": base_values["baseline"],
+                "preserve": base_values["preserve"],
+                "normal_delta": base_values["normal_delta"],
+                "anchor": base_values["anchor"],
+                "synthetic_bce": boundary_values["synthetic_bce"],
+                "synthetic_dice": boundary_values["synthetic_dice"],
+                "boundary_shape": boundary_values["boundary_shape"],
                 "gradient_dot": gradient["gradient_dot"],
                 "gradient_conflict": gradient["gradient_conflict"],
             }
             for name, value in values.items():
-                running[name] += float(value.detach()) if isinstance(value, torch.Tensor) else float(value)
+                running[name] += float(value)
             progress.set_postfix(
                 stage=stage,
                 loss=f"{running['total'] / step:.4f}",

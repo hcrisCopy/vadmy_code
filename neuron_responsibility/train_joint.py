@@ -90,7 +90,13 @@ def main() -> None:
     parser.add_argument("--val-list", required=True)
     parser.add_argument("--probe-model", required=True)
     parser.add_argument("--out-dir", required=True)
-    parser.add_argument("--train-scope", choices=["frozen", "heads", "temporal_heads", "all_non_clip"], default="temporal_heads")
+    parser.add_argument("--train-scope", choices=["frozen", "heads", "temporal_heads", "all_non_clip"], default="heads")
+    parser.add_argument(
+        "--training-mode",
+        choices=["baseline_only", "responsibility"],
+        default="responsibility",
+        help="Fair ablation switch: both modes use the same train scope; only responsibility adds the probe-guided loss.",
+    )
     parser.add_argument("--max-epoch", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=0.0, help="0 keeps the official dataset/baseline learning rate.")
@@ -104,6 +110,11 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--clean", action="store_true")
     args = parser.parse_args()
+    if args.training_mode == "responsibility" and args.responsibility_weight <= 0:
+        parser.error("responsibility mode requires --responsibility-weight > 0")
+    effective_responsibility_weight = (
+        float(args.responsibility_weight) if args.training_mode == "responsibility" else 0.0
+    )
 
     out_dir = Path(args.out_dir)
     if args.clean and out_dir.exists():
@@ -133,6 +144,8 @@ def main() -> None:
         raise RuntimeError(f"CLIP parameters unexpectedly trainable: {clip_trainable_names[:5]}")
     parameter_report = {
         "baseline": args.baseline,
+        "training_mode": args.training_mode,
+        "responsibility_weight": effective_responsibility_weight,
         "train_scope": args.train_scope,
         "baseline_total_parameters": int(sum(parameter.numel() for parameter in adapter.parameters())),
         "baseline_trainable_parameters": int(sum(parameter.numel() for parameter in trainable)),
@@ -170,6 +183,19 @@ def main() -> None:
     start_epoch, best = 0, -float("inf")
     if args.resume and checkpoint_path.exists():
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        expected = {
+            "baseline": args.baseline,
+            "dataset": args.dataset,
+            "train_scope": args.train_scope,
+            "training_mode": args.training_mode,
+            "responsibility_weight": effective_responsibility_weight,
+        }
+        actual = {key: checkpoint.get(key) for key in expected}
+        if actual != expected:
+            raise RuntimeError(
+                f"resume configuration mismatch: checkpoint={actual}, command={expected}; "
+                "use the matching command or a different --out-dir"
+            )
         adapter.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
@@ -188,12 +214,17 @@ def main() -> None:
             lengths = batch["length"].to(device, non_blocking=True)
             labels = batch["binary_label"].to(device, non_blocking=True)
             texts = list(batch["label_text"])
-            with torch.no_grad():
-                neuron_probability = torch.sigmoid(probe(neurons, lengths))
             output = adapter.forward_baseline(clip, lengths)
             base_loss = adapter.original_loss(output, labels, texts, lengths)
-            resp_loss = responsibility_mil_loss(output.binary_logits, neuron_probability, labels, lengths)
-            loss = base_loss + args.responsibility_weight * resp_loss
+            if args.training_mode == "responsibility":
+                with torch.no_grad():
+                    neuron_probability = torch.sigmoid(probe(neurons, lengths))
+                resp_loss = responsibility_mil_loss(
+                    output.binary_logits, neuron_probability, labels, lengths
+                )
+            else:
+                resp_loss = output.binary_logits.sum() * 0.0
+            loss = base_loss + effective_responsibility_weight * resp_loss
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
@@ -226,6 +257,8 @@ def main() -> None:
             "baseline": args.baseline,
             "dataset": args.dataset,
             "train_scope": args.train_scope,
+            "training_mode": args.training_mode,
+            "responsibility_weight": effective_responsibility_weight,
             "probe_model": args.probe_model,
             "metrics": metrics,
         }

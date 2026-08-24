@@ -182,7 +182,7 @@ def main() -> None:
     parser.add_argument("--atlas", required=True); parser.add_argument("--gt-path", required=True)
     parser.add_argument("--out-dir", required=True); parser.add_argument("--teacher-cache", default="")
     parser.add_argument("--max-epoch", type=int, default=10); parser.add_argument("--warmup-epochs", type=int, default=1)
-    parser.add_argument("--batch-size", type=int, default=64); parser.add_argument("--lr", type=float, default=7e-5)
+    parser.add_argument("--batch-size", type=int, default=64); parser.add_argument("--lr", type=float, default=1e-6)
     parser.add_argument("--micro-batch-size", type=int, default=16)
     parser.add_argument("--router-lr", type=float, default=7e-5); parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--counterfactual-weight", type=float, default=0.50)

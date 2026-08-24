@@ -42,12 +42,12 @@ python neuron_responsibility/train_circuit_routing.py \
   --atlas ../vadmy_data/neuron_responsibility/ucf/cncr_v1/atlas/circuit_atlas.json \
   --gt-path ../vadmy_data/annotations/ucf/gt.npy \
   --teacher-cache ../vadmy_data/neuron_responsibility/ucf/dsanet_text_responsibility_v1/author_train_logits.pth \
-  --out-dir ../vadmy_data/neuron_responsibility/ucf/cncr_v1/dsanet \
+  --out-dir ../vadmy_data/neuron_responsibility/ucf/cncr_v1/dsanet_lr1e6 \
   --max-epoch 10 \
   --warmup-epochs 1 \
   --batch-size 64 \
   --micro-batch-size 16 \
-  --lr 7e-5 \
+  --lr 1e-6 \
   --router-lr 7e-5 \
   --weight-decay 0.0 \
   --counterfactual-weight 0.50 \
@@ -67,7 +67,7 @@ python neuron_responsibility/train_circuit_routing.py \
   --clean
 ```
 
-输出位于 `../vadmy_data/neuron_responsibility/ucf/cncr_v1/dsanet`，包括 `checkpoint_last.pth`、`model_best.pth`、`history.jsonl` 和 `parameter_report.json`。中断后执行同一条命令，删除 `--clean` 并添加 `--resume`。
+输出位于 `../vadmy_data/neuron_responsibility/ucf/cncr_v1/dsanet_lr1e6`，包括 `checkpoint_last.pth`、`model_best.pth`、`history.jsonl` 和 `parameter_report.json`。中断后执行同一条命令，删除 `--clean` 并添加 `--resume`。`1e-6` 是最后时序块的局部适配学习率；作者从头训练使用的 `7e-5` 会使已训练权重剧烈振荡。
 
 ## 3. 正式评测
 
@@ -79,9 +79,9 @@ python neuron_responsibility/evaluate_circuit_routing.py \
   --dataset ucf \
   --test-list ../vadmy_data/neuron_responsibility/ucf/cncr_v1/atlas/test.csv \
   --atlas ../vadmy_data/neuron_responsibility/ucf/cncr_v1/atlas/circuit_atlas.json \
-  --model-path ../vadmy_data/neuron_responsibility/ucf/cncr_v1/dsanet/model_best.pth \
+  --model-path ../vadmy_data/neuron_responsibility/ucf/cncr_v1/dsanet_lr1e6/model_best.pth \
   --gt-path ../vadmy_data/annotations/ucf/gt.npy \
-  --out-dir ../vadmy_data/neuron_responsibility/ucf/cncr_v1/evaluation \
+  --out-dir ../vadmy_data/neuron_responsibility/ucf/cncr_v1/evaluation_lr1e6 \
   --frames-per-snippet 16 \
   --gate-temperature 0.05 \
   --max-gain 0.50 \
@@ -90,4 +90,4 @@ python neuron_responsibility/evaluate_circuit_routing.py \
   --clean
 ```
 
-正式帧级 AUC/AP 写入 `../vadmy_data/neuron_responsibility/ucf/cncr_v1/evaluation/metrics.json`。其中 `cncr` 是正式结果，`author_same_adapter` 是同一模型在不经过通路路由时的诊断结果。
+正式帧级 AUC/AP 写入 `../vadmy_data/neuron_responsibility/ucf/cncr_v1/evaluation_lr1e6/metrics.json`。其中 `cncr` 是路由结果，`author_same_adapter` 是同一训练后模型不经过路由的结果，`released_author` 是作者权重。

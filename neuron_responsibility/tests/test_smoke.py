@@ -22,6 +22,12 @@ from neuron_responsibility.feature_modulation import (
     SparseNeuronFeatureModulator,
     score_free_modulation_losses,
 )
+from neuron_responsibility.event_experts import (
+    NeuronRoutedEventExperts,
+    event_complete_targets,
+    event_expert_losses,
+    route_targets,
+)
 from neuron_responsibility.model import (
     NeuronResponsibilityProbe,
     ResponsibilityCorrectionHead,
@@ -322,3 +328,45 @@ def test_trace_score_free_evidence_and_student_losses_are_finite() -> None:
     (sum(pretraining.values()) + sum(trainable)).backward()
     assert evidence.neuron_logits.grad is not None
     assert binary_logits.grad is not None
+
+
+def test_event_experts_preserve_baseline_and_route_classes(tmp_path: Path) -> None:
+    atlas = {
+        "class_names": ["abuse", "arrest"],
+        "blocks": [{
+            "width": 4,
+            "center": [0.0] * 4,
+            "scale": [1.0] * 4,
+            "class_mask": [[1, 1, 0, 0], [0, 0, 1, 1]],
+            "directions": [[1, -1, 0, 0], [0, 0, 1, -1]],
+            "weights": [[1, 1, 0, 0], [0, 0, 1, 1]],
+        }],
+    }
+    atlas_path = tmp_path / "atlas.json"
+    atlas_path.write_text(__import__("json").dumps(atlas), encoding="utf-8")
+    experts = NeuronRoutedEventExperts(
+        str(atlas_path), feature_width=8, rank=4, slow_dilation=2
+    )
+    features = torch.randn(3, 9, 8)
+    neurons = torch.randn(3, 9, 4)
+    lengths = torch.tensor([9, 7, 5])
+    labels = torch.tensor([1.0, 1.0, 0.0])
+    modulated, record = experts(features, neurons, lengths)
+    assert torch.equal(modulated, features)
+    assert record["route"].shape == (3, 3)
+    assert torch.allclose(record["route"].sum(-1), torch.ones(3))
+    targets = route_targets(["Abuse", "Arrest", "Normal"], experts.class_names, features.device)
+    assert torch.equal(targets.argmax(-1), torch.tensor([1, 2, 0]))
+    logits = torch.randn(3, 9, requires_grad=True)
+    event_targets = event_complete_targets(logits, labels, lengths)
+    assert event_targets[0, :9].max() == 1
+    assert event_targets[2].sum() == 0
+    losses = event_expert_losses(
+        [record], logits, labels, ["Abuse", "Arrest", "Normal"],
+        experts.class_names, lengths,
+    )
+    assert set(losses) == {"route", "event", "normal", "smooth"}
+    assert all(torch.isfinite(value) for value in losses.values())
+    sum(losses.values()).backward()
+    assert experts.up.weight.grad is not None
+    assert logits.grad is not None

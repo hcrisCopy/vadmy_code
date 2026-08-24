@@ -7,6 +7,8 @@ import numpy as np
 import torch
 
 from neuron_responsibility.common import base_key, resample_feature
+from neuron_responsibility.cacc import CrossLayerAnomalyConceptCircuit, cacc_losses
+from neuron_responsibility.cacc_data import CACCFeatureDataset, VideoGroupedSampler
 from neuron_responsibility.circuit_routing import ConceptCircuitRouter
 from neuron_responsibility.boundary_localization import (
     IndependentNeuronLocalizer,
@@ -236,3 +238,48 @@ def test_definition_evidence_is_training_only_and_finite(tmp_path: Path) -> None
     assert set(losses) == {"binary_rank", "semantic_hard_negative", "normal_suppression", "dnp_rank"}
     assert all(torch.isfinite(value) for value in losses.values())
     sum(losses.values()).backward()
+
+
+def test_cacc_preserves_initial_baseline_and_has_score_free_losses() -> None:
+    torch.manual_seed(5)
+    circuit = CrossLayerAnomalyConceptCircuit(
+        center=torch.zeros(3, 8), scale=torch.ones(3, 8),
+        normal_anchors=torch.randn(2, 16), abnormal_anchors=torch.randn(4, 16),
+        concept_width=6, temporal_kernel=3,
+    )
+    features = torch.randn(2, 9, 16)
+    hidden = torch.randn(2, 9, 3, 8)
+    lengths = torch.tensor([9, 6])
+    labels = torch.tensor([1.0, 0.0])
+    conditioned, record = circuit(features, hidden, lengths)
+    assert torch.equal(conditioned, features)
+    assert record["layer_weights"].shape == (2, 9, 3)
+    assert torch.allclose(record["layer_weights"].sum(-1), torch.ones(2, 9))
+    losses = cacc_losses([record], labels, lengths)
+    assert set(losses) == {"mil", "normal", "compact", "smooth", "layer_sparse", "anchor"}
+    assert all(torch.isfinite(value) for value in losses.values())
+    sum(losses.values()).backward()
+    assert circuit.layer_projection.grad is not None
+    assert circuit.config()["method"] == circuit.method_name
+
+
+def test_cacc_dataset_reuses_hidden_manifest_rows(tmp_path: Path) -> None:
+    clip = np.random.randn(7, 512).astype(np.float32)
+    hidden = np.random.randn(8, 3, 8).astype(np.float16)
+    clip_paths = []
+    for index in range(2):
+        path = tmp_path / f"Normal001__{index}.npy"
+        np.save(path, clip); clip_paths.append(path)
+    hidden_path = tmp_path / "Normal001.npz"
+    np.savez_compressed(hidden_path, hidden=hidden)
+    csv_path = tmp_path / "cacc.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle); writer.writerow(["clip_path", "hidden_path", "label", "key"])
+        for path in clip_paths:
+            writer.writerow([path, hidden_path, "Normal", "Normal001"])
+    dataset = CACCFeatureDataset(str(csv_path), "ucf", visual_length=10, cache_videos=1)
+    item = dataset[0]
+    assert item["clip"].shape == (10, 512)
+    assert item["hidden"].shape == (10, 3, 8)
+    assert item["length"].item() == 7
+    assert sorted(VideoGroupedSampler(dataset, seed=7)) == [0, 1]

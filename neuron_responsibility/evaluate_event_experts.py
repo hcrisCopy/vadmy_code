@@ -22,7 +22,10 @@ if str(PACKAGE_ROOT) not in sys.path:
 
 from neuron_responsibility.baselines import build_baseline
 from neuron_responsibility.common import clean_output
-from neuron_responsibility.event_experts import NeuronRoutedEventExperts
+from neuron_responsibility.event_experts import (
+    NeuronRoutedEventExperts,
+    route_targets,
+)
 from neuron_responsibility.train_feature_modulation import (
     add_baseline_arguments,
     pad_chunks,
@@ -49,7 +52,7 @@ def evaluate(
     device: torch.device,
     frames_per_snippet: int,
     use_experts: bool,
-) -> tuple[np.ndarray, list[list[object]], dict[str, float]]:
+) -> tuple[np.ndarray, list[list[object]], dict[str, object]]:
     adapter.eval()
     frame = pd.read_csv(aligned_csv)
     if "key" not in frame.columns:
@@ -57,6 +60,12 @@ def evaluate(
     snippets, rows = [], []
     route_total = None
     route_videos = 0
+    route_correct = 0
+    abnormal_correct = 0
+    abnormal_videos = 0
+    normal_correct = 0
+    normal_videos = 0
+    prediction_histogram: dict[str, int] = {}
     fast_total = 0.0
     fast_count = 0.0
     groups = list(frame.groupby("key", sort=False))
@@ -81,9 +90,29 @@ def evaluate(
                     record["route"] for record in records
                     if isinstance(record["route"], torch.Tensor)
                 ]).mean(dim=0)
-                route_sum = routes.sum(dim=0).cpu().numpy()
+                video_route = routes.mean(dim=0)
+                route_sum = video_route.cpu().numpy()
                 route_total = route_sum if route_total is None else route_total + route_sum
-                route_videos += routes.shape[0]
+                route_videos += 1
+                class_names = ["Normal"] + list(adapter.feature_modulator.class_names)
+                target = route_targets(
+                    [str(group.iloc[0]["label"])],
+                    list(adapter.feature_modulator.class_names),
+                    device,
+                )[0]
+                target_index = int(target.argmax().item())
+                prediction_index = int(video_route.argmax().item())
+                route_correct += int(target_index == prediction_index)
+                prediction_name = class_names[prediction_index]
+                prediction_histogram[prediction_name] = (
+                    prediction_histogram.get(prediction_name, 0) + 1
+                )
+                if target_index == 0:
+                    normal_videos += 1
+                    normal_correct += int(prediction_index == 0)
+                else:
+                    abnormal_videos += 1
+                    abnormal_correct += int(target_index == prediction_index)
                 for record in records:
                     fast_gate = record["fast_gate"]
                     mask = record["mask"]
@@ -107,12 +136,16 @@ def evaluate(
             ])
     snippet_scores = np.concatenate(snippets).astype(np.float32)
     frame_scores = np.repeat(snippet_scores, frames_per_snippet)
-    diagnostics: dict[str, float] = {}
+    diagnostics: dict[str, object] = {}
     if route_total is not None and route_videos:
         mean_route = route_total / route_videos
         for index, value in enumerate(mean_route):
             diagnostics[f"route_{index}_mean"] = float(value)
         diagnostics["fast_gate_mean"] = fast_total / max(1.0, fast_count)
+        diagnostics["video_route_accuracy"] = route_correct / route_videos
+        diagnostics["abnormal_class_accuracy"] = abnormal_correct / max(1, abnormal_videos)
+        diagnostics["normal_recall"] = normal_correct / max(1, normal_videos)
+        diagnostics["prediction_histogram"] = prediction_histogram
     return frame_scores, rows, diagnostics
 
 

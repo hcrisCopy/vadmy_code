@@ -210,7 +210,7 @@ python neuron_responsibility/train_boundary_conditioning.py \
   --dsanet-ucf-eval-samples 1280 --num-workers 4 --seed 234 --device cuda
 ```
 
-各实验输出为 `parameter_report.json`、`history.jsonl`、`checkpoint_last.pth` 和 `model_best.pth`。恢复或清理方式与定位器相同。
+各实验会先生成并复用 `author_train_logits.pth`，随后释放作者 teacher 以控制单卡显存。训练输出还包括 `parameter_report.json`、`history.jsonl`、`checkpoint_last.pth` 和 `model_best.pth`。恢复或清理方式与定位器相同。
 
 ## 3. DSANet / UCF-Crime 正式评测
 
@@ -229,4 +229,3 @@ python neuron_responsibility/evaluate_boundary_conditioning.py \
 ```
 
 主结果写入 `evaluation/metrics.json`；`binary` 为正式检测结果，`independent_neuron` 只用于诊断。
-

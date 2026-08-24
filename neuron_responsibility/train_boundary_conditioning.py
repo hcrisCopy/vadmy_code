@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import random
 import sys
@@ -59,9 +60,51 @@ def merge_paired_batches(normal: dict, abnormal: dict) -> dict:
     merged = {}
     for key in ("clip", "neurons", "length", "binary_label"):
         merged[key] = torch.cat([normal[key], abnormal[key]], dim=0)
-    for key in ("label_text", "key"):
+    for key in ("label_text", "key", "sample_id"):
         merged[key] = list(normal[key]) + list(abnormal[key])
     return merged
+
+
+def cache_teacher_logits(
+    teacher,
+    dataset: AlignedFeatureDataset,
+    cache_path: Path,
+    batch_size: int,
+    num_workers: int,
+    device: torch.device,
+) -> tuple[torch.Tensor, dict[str, int]]:
+    if cache_path.exists():
+        payload = torch.load(cache_path, map_location="cpu")
+        sample_ids = [str(value) for value in payload["sample_ids"]]
+        logits = payload["logits"].float()
+        if logits.shape != (len(sample_ids), teacher.visual_length):
+            raise ValueError("cached teacher logits have an invalid shape")
+        print(f"reusing {cache_path} with {len(sample_ids)} rows", flush=True)
+        return logits, {sample_id: index for index, sample_id in enumerate(sample_ids)}
+
+    loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=device.type == "cuda",
+    )
+    teacher.eval()
+    all_logits, sample_ids = [], []
+    with torch.no_grad():
+        for batch in tqdm(loader, desc="cache author logits", unit="batch"):
+            output = teacher.forward_baseline(
+                batch["clip"].to(device, non_blocking=True),
+                batch["length"].to(device, non_blocking=True),
+            )
+            all_logits.append(output.binary_logits.float().cpu())
+            sample_ids.extend(str(value) for value in batch["sample_id"])
+    if len(set(sample_ids)) != len(sample_ids):
+        raise ValueError("aligned training list contains duplicate clip_path sample IDs")
+    logits = torch.cat(all_logits, dim=0)
+    torch.save({"sample_ids": sample_ids, "logits": logits}, cache_path)
+    print(f"wrote {cache_path} with {len(sample_ids)} rows", flush=True)
+    return logits, {sample_id: index for index, sample_id in enumerate(sample_ids)}
 
 
 def epoch_batches(
@@ -307,9 +350,28 @@ def main() -> None:
         args.device if torch.cuda.is_available() and args.device.startswith("cuda") else "cpu"
     )
 
-    adapter = build_baseline(args, str(device)).to(device)
+    # Cache the released model once, then release it before constructing the
+    # trainable model.  This preserves an exact fixed teacher without keeping
+    # two large baselines resident on a single GPU during backpropagation.
     teacher = build_baseline(args, str(device)).to(device).eval()
     teacher.requires_grad_(False)
+    teacher_set = AlignedFeatureDataset(
+        args.train_list, args.dataset, teacher.visual_length
+    )
+    teacher_logits, teacher_index = cache_teacher_logits(
+        teacher,
+        teacher_set,
+        out_dir / "author_train_logits.pth",
+        args.batch_size * 2,
+        args.num_workers,
+        device,
+    )
+    del teacher, teacher_set
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+
+    adapter = build_baseline(args, str(device)).to(device)
     adapter.set_train_scope("temporal_heads")
     baseline_parameters = {
         name: parameter for name, parameter in adapter.named_parameters() if parameter.requires_grad
@@ -465,14 +527,19 @@ def main() -> None:
             neurons = real["neurons"].to(device, non_blocking=True)
             lengths = real["length"].to(device, non_blocking=True)
             labels = real["binary_label"].to(device, non_blocking=True)
-            with torch.no_grad():
-                teacher_output = teacher.forward_baseline(clip, lengths)
+            teacher_rows = torch.tensor(
+                [teacher_index[str(value)] for value in real["sample_id"]],
+                dtype=torch.long,
+            )
+            teacher_batch_logits = teacher_logits.index_select(
+                0, teacher_rows
+            ).to(device, non_blocking=True)
             current_output, records = adapter.forward_conditioned(clip, neurons, lengths)
             baseline_loss = adapter.original_loss(
                 current_output, labels, list(real["label_text"]), lengths
             )
             preserve = preservation_loss(
-                current_output.binary_logits, teacher_output.binary_logits, lengths
+                current_output.binary_logits, teacher_batch_logits, lengths
             )
             normal_delta = conditioner_regularization(records, labels)
             anchor = relative_parameter_anchor(baseline_parameters, initial_parameters)
@@ -570,4 +637,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

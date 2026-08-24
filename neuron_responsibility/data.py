@@ -74,6 +74,7 @@ class AlignedFeatureDataset(Dataset):
             ),
             "label_text": label_text,
             "key": str(row.get("key", Path(str(row["clip_path"])).stem)),
+            "sample_id": str(row["clip_path"]),
         }
 
 

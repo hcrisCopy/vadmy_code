@@ -124,8 +124,11 @@ python neuron_responsibility/build_aligned_features.py \
   --hidden-manifest ../vad_data/work_xd/clip_hidden_stride16_train_8gpu/manifest.csv \
   --neuron-json ../vadmy_data/neuron_responsibility/xd/selection/selected_neurons.json \
   --out-dir ../vadmy_data/neuron_responsibility/xd/aligned/train \
-  --out-csv ../vadmy_data/neuron_responsibility/xd/aligned_train.csv
+  --out-csv ../vadmy_data/neuron_responsibility/xd/aligned_train.csv \
+  --skip-missing-hidden
 ```
+
+当前 XD 训练集有 4 个视频未提取 hidden states。上面的命令会跳过这些视频对应的全部 CSV 行，并写入 `aligned/train/skipped_rows.csv`；已生成的对齐文件会直接校验并复用。
 
 ### XD-Violence test
 

@@ -37,6 +37,11 @@ def main() -> None:
     parser.add_argument("--neuron-json", required=True)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--out-csv", required=True)
+    parser.add_argument(
+        "--skip-missing-hidden",
+        action="store_true",
+        help="Skip source rows whose base video is absent from the hidden manifest and record them.",
+    )
     parser.add_argument("--clean", action="store_true")
     args = parser.parse_args()
 
@@ -58,12 +63,36 @@ def main() -> None:
         raise ValueError("selected_neurons.json neuron_width does not match selected dimensions")
 
     rows = []
+    skipped_rows = []
+    skipped_keys: set[str] = set()
     hidden_cache: dict[str, np.ndarray] = {}
     for _, row in tqdm(source.iterrows(), total=len(source), desc="aligned neuron features", unit="row"):
         clip_path = str(row["path"])
         key = base_key(clip_path)
         if key not in hidden_by_key:
-            raise FileNotFoundError(f"missing hidden state for {key}")
+            if not args.skip_missing_hidden:
+                raise FileNotFoundError(
+                    f"missing hidden state for {key}; rerun with --skip-missing-hidden only if these videos "
+                    "are intentionally excluded"
+                )
+            skipped_keys.add(key)
+            skipped_rows.append([key, str(row["label"]), clip_path, "missing_hidden"])
+            continue
+
+        clip = np.load(clip_path, mmap_mode="r")
+        if clip.ndim != 2 or clip.shape[1] != 512:
+            raise ValueError(f"{clip_path}: expected official CLIP [T,512], got {clip.shape}")
+        output = out_dir / f"{Path(clip_path).stem}.npy"
+        if output.exists() and not args.clean:
+            existing = np.load(output, mmap_mode="r")
+            expected_shape = (int(clip.shape[0]), expected_width)
+            if existing.shape != expected_shape:
+                raise ValueError(
+                    f"stale output {output}: {existing.shape} != {expected_shape}; rerun with --clean"
+                )
+            rows.append([clip_path, str(output), str(row["label"]), key, int(clip.shape[0])])
+            continue
+
         if key not in hidden_cache:
             hidden, _ = load_hidden(hidden_by_key[key])
             if hidden.shape[1:] != mean.shape:
@@ -72,21 +101,21 @@ def main() -> None:
             pieces = [z_hidden[:, layer, dims] * direction[None, :] for layer, dims, direction in selected]
             hidden_cache[key] = np.concatenate(pieces, axis=1).astype(np.float32)
 
-        clip = np.load(clip_path, mmap_mode="r")
-        if clip.ndim != 2 or clip.shape[1] != 512:
-            raise ValueError(f"{clip_path}: expected official CLIP [T,512], got {clip.shape}")
         neuron = resample_feature(hidden_cache[key], int(clip.shape[0]))
-        output = out_dir / f"{Path(clip_path).stem}.npy"
-        if not output.exists() or args.clean:
-            np.save(output, neuron)
-        else:
-            existing = np.load(output, mmap_mode="r")
-            if existing.shape != neuron.shape:
-                raise ValueError(f"stale output {output}: {existing.shape} != {neuron.shape}; rerun with --clean")
+        np.save(output, neuron)
         rows.append([clip_path, str(output), str(row["label"]), key, int(clip.shape[0])])
 
     write_csv(args.out_csv, ["clip_path", "neuron_path", "label", "key", "length"], rows)
-    print(f"wrote {args.out_csv} with {len(rows)} rows; original 512D CLIP files were not copied", flush=True)
+    write_csv(
+        out_dir / "skipped_rows.csv",
+        ["key", "label", "clip_path", "reason"],
+        skipped_rows,
+    )
+    print(
+        f"wrote {args.out_csv} with {len(rows)} rows; skipped "
+        f"{len(skipped_keys)} videos/{len(skipped_rows)} rows; original 512D CLIP files were not copied",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

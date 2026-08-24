@@ -60,6 +60,11 @@ def main() -> None:
         if previous != signature:
             reuse_existing = False
             print("selection/input signature changed; rebuilding aligned neuron files", flush=True)
+    elif not args.clean and any(out_dir.glob("*.npy")):
+        # Outputs created before signatures were introduced cannot be proven
+        # to use the same neuron coordinates, even when their width matches.
+        reuse_existing = False
+        print("legacy aligned files have no build signature; rebuilding them", flush=True)
     source = read_feature_csv(args.source_csv)
     hidden_by_key, token_pool = read_hidden_manifest(args.hidden_manifest)
     config = load_json(args.neuron_json)

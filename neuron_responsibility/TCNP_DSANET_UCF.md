@@ -27,17 +27,17 @@ python neuron_responsibility/train_tcnp_probe.py \
   --top-fraction 0.10 \
   --consistency-weight 0.20 \
   --validation-fraction 0.20 \
-  --normal-quantile 0.99 \
+  --normal-quantile 0.98 \
   --prototype-count 32 \
   --prototype-samples 50000 \
-  --candidate-threshold 0.25 \
+  --candidate-threshold 0.50 \
   --frames-per-snippet 16 \
   --num-workers 4 \
   --seed 234 \
   --device cuda
 ```
 
-质量门槛写入 `gate_report.json`：正常训练视频片段误报率不高于 2%，异常训练视频候选覆盖率不低于 50%，且已覆盖视频的异常类别准确率不低于 30%。划分按视频完成，十裁剪只取一个代表，杜绝同视频泄漏。测试帧标注只产生一次最终诊断，不参与门槛、训练或阈值校准。
+质量门槛写入 `gate_report.json`：正常训练视频片段误报率不高于 2%，异常训练视频候选覆盖率不低于 50%，且已覆盖视频的异常类别准确率不低于 30%。文本回路语义是主定位信号；正常原型距离和跨层一致性作为独立审计量，不强制取三者交集。划分按视频完成，十裁剪只取一个代表，杜绝同视频泄漏。测试帧标注只产生一次最终诊断，不参与门槛、训练或阈值校准。
 
 中断后原命令末尾添加 `--resume`；确认废弃旧输出时添加 `--clean`，二者不能同时使用。
 

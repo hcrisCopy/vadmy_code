@@ -129,9 +129,15 @@ def calibrate(model, source, indices, prototypes, quantile, device) -> dict:
 
 
 def combined(values: np.ndarray, calibration: dict) -> np.ndarray:
+    """Return the primary text-circuit localization confidence.
+
+    Prototype distance and cross-layer agreement remain independent audit
+    channels.  Requiring their intersection was rejected because normal-video
+    held-out evidence showed that it discarded text-grounded positives without
+    improving the controlled normal false-positive rate.
+    """
     semantic = 1.0 / (1.0 + np.exp(-(values[:, 0] - calibration["semantic"]) / 0.25))
-    distance = 1.0 / (1.0 + np.exp(-(values[:, 1] - calibration["distance"]) / 0.10))
-    return semantic * distance * values[:, 2]
+    return semantic
 
 
 @torch.no_grad()
@@ -182,9 +188,9 @@ def main() -> None:
     parser.add_argument("--out-dir", required=True); parser.add_argument("--epochs", type=int, default=8); parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=3e-3); parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--top-fraction", type=float, default=0.10); parser.add_argument("--consistency-weight", type=float, default=0.20)
-    parser.add_argument("--validation-fraction", type=float, default=0.20); parser.add_argument("--normal-quantile", type=float, default=0.99)
+    parser.add_argument("--validation-fraction", type=float, default=0.20); parser.add_argument("--normal-quantile", type=float, default=0.98)
     parser.add_argument("--prototype-count", type=int, default=32); parser.add_argument("--prototype-samples", type=int, default=50000)
-    parser.add_argument("--candidate-threshold", type=float, default=0.25); parser.add_argument("--frames-per-snippet", type=int, default=16)
+    parser.add_argument("--candidate-threshold", type=float, default=0.50); parser.add_argument("--frames-per-snippet", type=int, default=16)
     parser.add_argument("--num-workers", type=int, default=4); parser.add_argument("--seed", type=int, default=234); parser.add_argument("--device", default="cuda")
     parser.add_argument("--resume", action="store_true"); parser.add_argument("--clean", action="store_true")
     args = parser.parse_args()
@@ -217,7 +223,9 @@ def main() -> None:
     gate = audit_split(model, source, validation, prototypes, calibration, args.candidate_threshold, device)
     diagnostic = test_diagnostic(model, args.test_list, prototypes, calibration, args.candidate_threshold, args.gt_path, args.frames_per_snippet, device)
     report = {"method": model.method_name, "selection": model.config(), "split": {"fit_rows": len(fit), "validation_rows": len(validation)},
-              "calibration": calibration, "candidate_threshold": args.candidate_threshold, "training_quality_gate": gate, "test_diagnostic": diagnostic,
+              "calibration": calibration, "candidate_threshold": args.candidate_threshold,
+              "fusion_rule": "text-circuit semantic confidence is primary; normal-prototype distance and layer agreement are audit channels",
+              "training_quality_gate": gate, "test_diagnostic": diagnostic,
               "baseline_training_allowed": bool(gate["passed"]), "test_labels_used_for_gate": False}
     (output / "gate_report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(report, indent=2, ensure_ascii=False))

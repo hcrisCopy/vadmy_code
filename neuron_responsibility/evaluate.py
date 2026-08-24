@@ -23,13 +23,16 @@ if str(PACKAGE_ROOT) not in sys.path:
 
 from neuron_responsibility.baselines import build_baseline
 from neuron_responsibility.common import clean_output
-from neuron_responsibility.model import NeuronResponsibilityProbe
+from neuron_responsibility.model import NeuronResponsibilityProbe, ResponsibilityCorrectionHead
 
 
 def load_probe(path: str, device: torch.device) -> NeuronResponsibilityProbe:
     checkpoint = torch.load(path, map_location="cpu")
     config = checkpoint["config"]
-    probe = NeuronResponsibilityProbe(config["neuron_width"], config["hidden_width"])
+    probe = NeuronResponsibilityProbe(
+        config["neuron_width"], config["hidden_width"],
+        active_neurons=config.get("active_neurons", config["neuron_width"]),
+    )
     probe.load_state_dict(checkpoint["model_state_dict"])
     return probe.to(device).eval()
 
@@ -130,9 +133,11 @@ def main() -> None:
     score_dir.mkdir(exist_ok=True)
     device = torch.device(args.device if torch.cuda.is_available() and args.device.startswith("cuda") else "cpu")
     adapter = build_baseline(args, str(device)).to(device).eval()
+    correction = ResponsibilityCorrectionHead().to(device).eval()
     if args.joint_model:
         checkpoint = torch.load(args.joint_model, map_location="cpu")
         adapter.load_state_dict(checkpoint["model_state_dict"], strict=True)
+        correction.load_state_dict(checkpoint["correction_state_dict"], strict=True)
     probe = load_probe(args.probe_model, device)
     frame = pd.read_csv(args.test_list)
     missing = {"clip_path", "neuron_path", "label"} - set(frame.columns)
@@ -178,13 +183,14 @@ def main() -> None:
                     raise RuntimeError(f"{key}: modality chunk lengths differ")
                 output = adapter.forward_baseline(clip_chunks.to(device), lengths.to(device))
                 neuron_prob = torch.sigmoid(probe(neuron_chunks.to(device), lengths.to(device)))
+                corrected_logits = correction(output.binary_logits, neuron_prob, lengths.to(device))
                 valid_binary, valid_semantic, valid_neuron, valid_class = [], [], [], [],
                 class_prob_batch = class_probabilities(
-                    output.binary_logits, output.semantic_logits, args.baseline, temperature
+                    corrected_logits, output.semantic_logits, args.baseline, temperature
                 )
                 semantic_batch = 1.0 - F.softmax(output.semantic_logits / temperature, dim=-1)[..., 0]
                 for index, length in enumerate(lengths.tolist()):
-                    valid_binary.append(torch.sigmoid(output.binary_logits[index, :length]).cpu())
+                    valid_binary.append(torch.sigmoid(corrected_logits[index, :length]).cpu())
                     valid_semantic.append(semantic_batch[index, :length].cpu())
                     valid_neuron.append(neuron_prob[index, :length].cpu())
                     valid_class.append(class_prob_batch[index, :length].cpu())

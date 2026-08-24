@@ -70,6 +70,8 @@ python neuron_responsibility/select_neurons.py \
   --out-dir ../vadmy_data/neuron_responsibility/ucf/selection \
   --top-p 0.10 \
   --topk-global 768 \
+  --normal-coverage-quantile 0.95 \
+  --max-per-layer 96 \
   --normal-stat-snippets-per-video 256 \
   --sigma-min 1e-6
 ```
@@ -84,11 +86,13 @@ python neuron_responsibility/select_neurons.py \
   --out-dir ../vadmy_data/neuron_responsibility/xd/selection \
   --top-p 0.10 \
   --topk-global 768 \
+  --normal-coverage-quantile 0.95 \
+  --max-per-layer 96 \
   --normal-stat-snippets-per-video 256 \
   --sigma-min 1e-6
 ```
 
-输出包括 `selected_neurons.json`、normal mean/std、tail statistics 和可恢复的逐视频 `bag_cache`。只有需要强制重算时才在原命令后添加 `--clean`。
+输出包括 `selected_neurons.json`、normal mean/std、局部对比/覆盖率统计和可恢复的逐视频 `local_contrast_v2_*` 缓存。只有需要强制重算时才在原命令后添加 `--clean`。
 
 ## 2. 构建对齐 neuron 特征
 
@@ -152,15 +156,20 @@ python neuron_responsibility/train_probe.py \
   --dataset ucf \
   --train-list ../vadmy_data/neuron_responsibility/ucf/aligned_train.csv \
   --val-list ../vadmy_data/neuron_responsibility/ucf/aligned_test.csv \
-  --out-dir ../vadmy_data/neuron_responsibility/ucf/probe \
+  --out-dir ../vadmy_data/neuron_responsibility/ucf/probe_v2 \
   --visual-length 256 \
   --hidden-width 128 \
+  --active-neurons 128 \
   --max-epoch 10 \
   --batch-size 64 \
   --lr 7e-5 \
   --weight-decay 1e-4 \
   --sparsity-weight 1e-3 \
   --normal-instance-weight 0.25 \
+  --ranking-weight 0.2 \
+  --smoothness-weight 0.05 \
+  --anomaly-sparsity-weight 0.01 \
+  --normal-quantile 0.99 \
   --num-workers 4 \
   --seed 234 \
   --device cuda
@@ -173,15 +182,20 @@ python neuron_responsibility/train_probe.py \
   --dataset xd \
   --train-list ../vadmy_data/neuron_responsibility/xd/aligned_train.csv \
   --val-list ../vadmy_data/neuron_responsibility/xd/aligned_test.csv \
-  --out-dir ../vadmy_data/neuron_responsibility/xd/probe \
+  --out-dir ../vadmy_data/neuron_responsibility/xd/probe_v2 \
   --visual-length 256 \
   --hidden-width 128 \
+  --active-neurons 128 \
   --max-epoch 10 \
   --batch-size 96 \
   --lr 1e-5 \
   --weight-decay 1e-4 \
   --sparsity-weight 1e-3 \
   --normal-instance-weight 0.25 \
+  --ranking-weight 0.2 \
+  --smoothness-weight 0.05 \
+  --anomaly-sparsity-weight 0.01 \
+  --normal-quantile 0.99 \
   --num-workers 4 \
   --seed 234 \
   --device cuda
@@ -191,9 +205,7 @@ Stage A 输出 `probe_best.pth`、`checkpoint_last.pth` 和 `history.jsonl`。�
 
 ## 4. Stage B：责任引导的 baseline 训练
 
-正式主实验统一采用 head-only：CLIP、probe 和三个 baseline 的时序表示全部固定，只训练功能对应的异常分类/语义 heads。每个 baseline 必须成对运行 `baseline_only` 和 `responsibility`；二者除责任损失外完全一致。
-
-下面六条是 responsibility 方法组。六条 baseline-only 训练命令及其六条评测命令已经完整写在 `neuron_responsibility/FAIR_HEAD_ONLY_CONTROLS.md`，不需要手动替换任何参数。
+前 2 个 epoch 只训练零初始化的校正头；第 3 个 epoch 起解冻每个 baseline 功能对应的分类头和最后时序精炼块。CLIP 与 probe 始终冻结。校正头、heads、最后时序块分别使用 `5e-5 / 1e-5 / 1e-6`。
 
 ### DSANet / UCF-Crime
 
@@ -205,15 +217,21 @@ python neuron_responsibility/train_joint.py \
   --baseline-weight ../vadmy_data/model/DSANet/model_ucf.pth \
   --train-list ../vadmy_data/neuron_responsibility/ucf/aligned_train.csv \
   --val-list ../vadmy_data/neuron_responsibility/ucf/aligned_test.csv \
-  --probe-model ../vadmy_data/neuron_responsibility/ucf/probe/probe_best.pth \
-  --out-dir ../vadmy_data/neuron_responsibility/ucf/dsanet_head_responsibility \
-  --train-scope heads \
-  --training-mode responsibility \
+  --gt-path ../vadmy_data/annotations/ucf/gt.npy \
+  --probe-model ../vadmy_data/neuron_responsibility/ucf/probe_v2/probe_best.pth \
+  --out-dir ../vadmy_data/neuron_responsibility/ucf/dsanet_gradual \
   --max-epoch 10 \
+  --warmup-epochs 2 \
   --batch-size 64 \
-  --lr 7e-5 \
+  --correction-lr 5e-5 \
+  --head-lr 1e-5 \
+  --temporal-lr 1e-6 \
   --weight-decay 0 \
   --responsibility-weight 1.0 \
+  --anchor-weight 1e-4 \
+  --persistence 3 \
+  --frames-per-snippet 16 \
+  --dsanet-ucf-eval-samples 1280 \
   --num-workers 4 \
   --seed 234 \
   --device cuda
@@ -230,16 +248,20 @@ python neuron_responsibility/train_joint.py \
   --consistency-weight ../vadmy_data/model/DeSC/ucf_consistency_stream.pth \
   --train-list ../vadmy_data/neuron_responsibility/ucf/aligned_train.csv \
   --val-list ../vadmy_data/neuron_responsibility/ucf/aligned_test.csv \
-  --probe-model ../vadmy_data/neuron_responsibility/ucf/probe/probe_best.pth \
-  --out-dir ../vadmy_data/neuron_responsibility/ucf/desc_head_responsibility \
-  --train-scope heads \
-  --training-mode responsibility \
+  --gt-path ../vadmy_data/annotations/ucf/gt.npy \
+  --probe-model ../vadmy_data/neuron_responsibility/ucf/probe_v2/probe_best.pth \
+  --out-dir ../vadmy_data/neuron_responsibility/ucf/desc_gradual \
   --max-epoch 10 \
+  --warmup-epochs 2 \
   --batch-size 64 \
-  --sensitivity-lr 1e-3 \
-  --consistency-lr 5e-5 \
-  --weight-decay 1e-5 \
+  --correction-lr 5e-5 \
+  --head-lr 1e-5 \
+  --temporal-lr 1e-6 \
+  --weight-decay 0 \
   --responsibility-weight 1.0 \
+  --anchor-weight 1e-4 \
+  --persistence 3 \
+  --frames-per-snippet 16 \
   --num-workers 4 \
   --seed 234 \
   --device cuda
@@ -255,15 +277,20 @@ python neuron_responsibility/train_joint.py \
   --baseline-weight ../vadmy_data/model/LaGoVAD/best.ckpt \
   --train-list ../vadmy_data/neuron_responsibility/ucf/aligned_train.csv \
   --val-list ../vadmy_data/neuron_responsibility/ucf/aligned_test.csv \
-  --probe-model ../vadmy_data/neuron_responsibility/ucf/probe/probe_best.pth \
-  --out-dir ../vadmy_data/neuron_responsibility/ucf/lagovad_head_responsibility \
-  --train-scope heads \
-  --training-mode responsibility \
+  --gt-path ../vadmy_data/annotations/ucf/gt.npy \
+  --probe-model ../vadmy_data/neuron_responsibility/ucf/probe_v2/probe_best.pth \
+  --out-dir ../vadmy_data/neuron_responsibility/ucf/lagovad_gradual \
   --max-epoch 20 \
+  --warmup-epochs 2 \
   --batch-size 64 \
-  --lr 1e-5 \
-  --weight-decay 0.01 \
+  --correction-lr 5e-5 \
+  --head-lr 1e-5 \
+  --temporal-lr 1e-6 \
+  --weight-decay 0 \
   --responsibility-weight 1.0 \
+  --anchor-weight 1e-4 \
+  --persistence 3 \
+  --frames-per-snippet 16 \
   --num-workers 4 \
   --seed 234 \
   --device cuda
@@ -279,15 +306,20 @@ python neuron_responsibility/train_joint.py \
   --baseline-weight ../vadmy_data/model/DSANet/model_xd.pth \
   --train-list ../vadmy_data/neuron_responsibility/xd/aligned_train.csv \
   --val-list ../vadmy_data/neuron_responsibility/xd/aligned_test.csv \
-  --probe-model ../vadmy_data/neuron_responsibility/xd/probe/probe_best.pth \
-  --out-dir ../vadmy_data/neuron_responsibility/xd/dsanet_head_responsibility \
-  --train-scope heads \
-  --training-mode responsibility \
+  --gt-path ../vadmy_data/annotations/xd/gt.npy \
+  --probe-model ../vadmy_data/neuron_responsibility/xd/probe_v2/probe_best.pth \
+  --out-dir ../vadmy_data/neuron_responsibility/xd/dsanet_gradual \
   --max-epoch 10 \
+  --warmup-epochs 2 \
   --batch-size 96 \
-  --lr 1e-5 \
+  --correction-lr 5e-5 \
+  --head-lr 1e-5 \
+  --temporal-lr 1e-6 \
   --weight-decay 0 \
   --responsibility-weight 1.0 \
+  --anchor-weight 1e-4 \
+  --persistence 3 \
+  --frames-per-snippet 16 \
   --num-workers 4 \
   --seed 234 \
   --device cuda
@@ -304,16 +336,20 @@ python neuron_responsibility/train_joint.py \
   --consistency-weight ../vadmy_data/model/DeSC/xd_consistency_stream.pth \
   --train-list ../vadmy_data/neuron_responsibility/xd/aligned_train.csv \
   --val-list ../vadmy_data/neuron_responsibility/xd/aligned_test.csv \
-  --probe-model ../vadmy_data/neuron_responsibility/xd/probe/probe_best.pth \
-  --out-dir ../vadmy_data/neuron_responsibility/xd/desc_head_responsibility \
-  --train-scope heads \
-  --training-mode responsibility \
+  --gt-path ../vadmy_data/annotations/xd/gt.npy \
+  --probe-model ../vadmy_data/neuron_responsibility/xd/probe_v2/probe_best.pth \
+  --out-dir ../vadmy_data/neuron_responsibility/xd/desc_gradual \
   --max-epoch 10 \
+  --warmup-epochs 2 \
   --batch-size 96 \
-  --sensitivity-lr 1e-3 \
-  --consistency-lr 1e-5 \
-  --weight-decay 1e-3 \
+  --correction-lr 5e-5 \
+  --head-lr 1e-5 \
+  --temporal-lr 1e-6 \
+  --weight-decay 0 \
   --responsibility-weight 1.0 \
+  --anchor-weight 1e-4 \
+  --persistence 3 \
+  --frames-per-snippet 16 \
   --num-workers 4 \
   --seed 234 \
   --device cuda
@@ -329,21 +365,28 @@ python neuron_responsibility/train_joint.py \
   --baseline-weight ../vadmy_data/model/LaGoVAD/best.ckpt \
   --train-list ../vadmy_data/neuron_responsibility/xd/aligned_train.csv \
   --val-list ../vadmy_data/neuron_responsibility/xd/aligned_test.csv \
-  --probe-model ../vadmy_data/neuron_responsibility/xd/probe/probe_best.pth \
-  --out-dir ../vadmy_data/neuron_responsibility/xd/lagovad_head_responsibility \
-  --train-scope heads \
-  --training-mode responsibility \
+  --gt-path ../vadmy_data/annotations/xd/gt.npy \
+  --probe-model ../vadmy_data/neuron_responsibility/xd/probe_v2/probe_best.pth \
+  --out-dir ../vadmy_data/neuron_responsibility/xd/lagovad_gradual \
   --max-epoch 20 \
+  --warmup-epochs 2 \
   --batch-size 64 \
-  --lr 1e-5 \
-  --weight-decay 0.01 \
+  --correction-lr 5e-5 \
+  --head-lr 1e-5 \
+  --temporal-lr 1e-6 \
+  --weight-decay 0 \
   --responsibility-weight 1.0 \
+  --anchor-weight 1e-4 \
+  --persistence 3 \
+  --frames-per-snippet 16 \
   --num-workers 4 \
   --seed 234 \
   --device cuda
 ```
 
-Stage B 输出 `checkpoint_last.pth`、`model_best.pth`、`history.jsonl` 和 `parameter_report.json`。后者记录实际可训练张量，程序强制断言 CLIP 可训练参数为 0。中断后使用完全相同的命令并在末尾添加 `--resume`。
+Stage B 输出 `checkpoint_last.pth`、`model_best.pth`、`history.jsonl` 和 `parameter_report.json`。UCF 按官方帧级 AUC 选优，XD 按官方帧级 AP 选优；DSANet/UCF 还保持作者的每 1280 个训练样本验证一次。中断后使用完全相同的命令并在末尾添加 `--resume`。
+
+模型选择依据来自各自发布代码：DSANet/UCF 固定训练间隔按帧级 AUC，DSANet/XD 每 epoch 按帧级 AP；LaGoVAD 每 epoch 保存 UCF AUC / XD AP 最优 checkpoint。DeSC 发布包没有训练脚本，只有官方 UCF AUC / XD AP 测试代码，因此采用相同主指标并每 epoch 验证，不虚构它未发布的 step 频率。
 
 ## 5. 正式评测
 
@@ -357,13 +400,13 @@ python neuron_responsibility/evaluate.py \
   --dataset ucf \
   --baseline-root baseline/DSANet \
   --baseline-weight ../vadmy_data/model/DSANet/model_ucf.pth \
-  --joint-model ../vadmy_data/neuron_responsibility/ucf/dsanet_head_responsibility/model_best.pth \
-  --probe-model ../vadmy_data/neuron_responsibility/ucf/probe/probe_best.pth \
+  --joint-model ../vadmy_data/neuron_responsibility/ucf/dsanet_gradual/model_best.pth \
+  --probe-model ../vadmy_data/neuron_responsibility/ucf/probe_v2/probe_best.pth \
   --test-list ../vadmy_data/neuron_responsibility/ucf/aligned_test.csv \
   --gt-path ../vadmy_data/annotations/ucf/gt.npy \
   --gt-segment-path ../vadmy_data/annotations/ucf/gt_segment.npy \
   --gt-label-path ../vadmy_data/annotations/ucf/gt_label.npy \
-  --out-dir ../vadmy_data/neuron_responsibility/ucf/dsanet_head_responsibility/evaluation \
+  --out-dir ../vadmy_data/neuron_responsibility/ucf/dsanet_gradual/evaluation \
   --frames-per-snippet 16 \
   --temperature 5.0 \
   --device cuda
@@ -378,11 +421,11 @@ python neuron_responsibility/evaluate.py \
   --baseline-root baseline/DeSC \
   --sensitivity-weight ../vadmy_data/model/DeSC/ucf_sensitivity_stream.pth \
   --consistency-weight ../vadmy_data/model/DeSC/ucf_consistency_stream.pth \
-  --joint-model ../vadmy_data/neuron_responsibility/ucf/desc_head_responsibility/model_best.pth \
-  --probe-model ../vadmy_data/neuron_responsibility/ucf/probe/probe_best.pth \
+  --joint-model ../vadmy_data/neuron_responsibility/ucf/desc_gradual/model_best.pth \
+  --probe-model ../vadmy_data/neuron_responsibility/ucf/probe_v2/probe_best.pth \
   --test-list ../vadmy_data/neuron_responsibility/ucf/aligned_test.csv \
   --gt-path ../vadmy_data/annotations/ucf/gt.npy \
-  --out-dir ../vadmy_data/neuron_responsibility/ucf/desc_head_responsibility/evaluation \
+  --out-dir ../vadmy_data/neuron_responsibility/ucf/desc_gradual/evaluation \
   --frames-per-snippet 16 \
   --temperature 1.0 \
   --device cuda
@@ -396,11 +439,11 @@ python neuron_responsibility/evaluate.py \
   --dataset ucf \
   --baseline-root baseline/LaGoVAD-PreVAD \
   --baseline-weight ../vadmy_data/model/LaGoVAD/best.ckpt \
-  --joint-model ../vadmy_data/neuron_responsibility/ucf/lagovad_head_responsibility/model_best.pth \
-  --probe-model ../vadmy_data/neuron_responsibility/ucf/probe/probe_best.pth \
+  --joint-model ../vadmy_data/neuron_responsibility/ucf/lagovad_gradual/model_best.pth \
+  --probe-model ../vadmy_data/neuron_responsibility/ucf/probe_v2/probe_best.pth \
   --test-list ../vadmy_data/neuron_responsibility/ucf/aligned_test.csv \
   --gt-path ../vadmy_data/annotations/ucf/gt.npy \
-  --out-dir ../vadmy_data/neuron_responsibility/ucf/lagovad_head_responsibility/evaluation \
+  --out-dir ../vadmy_data/neuron_responsibility/ucf/lagovad_gradual/evaluation \
   --frames-per-snippet 16 \
   --temperature 1.0 \
   --device cuda
@@ -414,13 +457,13 @@ python neuron_responsibility/evaluate.py \
   --dataset xd \
   --baseline-root baseline/DSANet \
   --baseline-weight ../vadmy_data/model/DSANet/model_xd.pth \
-  --joint-model ../vadmy_data/neuron_responsibility/xd/dsanet_head_responsibility/model_best.pth \
-  --probe-model ../vadmy_data/neuron_responsibility/xd/probe/probe_best.pth \
+  --joint-model ../vadmy_data/neuron_responsibility/xd/dsanet_gradual/model_best.pth \
+  --probe-model ../vadmy_data/neuron_responsibility/xd/probe_v2/probe_best.pth \
   --test-list ../vadmy_data/neuron_responsibility/xd/aligned_test.csv \
   --gt-path ../vadmy_data/annotations/xd/gt.npy \
   --gt-segment-path ../vadmy_data/annotations/xd/gt_segment.npy \
   --gt-label-path ../vadmy_data/annotations/xd/gt_label.npy \
-  --out-dir ../vadmy_data/neuron_responsibility/xd/dsanet_head_responsibility/evaluation \
+  --out-dir ../vadmy_data/neuron_responsibility/xd/dsanet_gradual/evaluation \
   --frames-per-snippet 16 \
   --temperature 1.0 \
   --device cuda
@@ -435,11 +478,11 @@ python neuron_responsibility/evaluate.py \
   --baseline-root baseline/DeSC \
   --sensitivity-weight ../vadmy_data/model/DeSC/xd_sensitivity_stream.pth \
   --consistency-weight ../vadmy_data/model/DeSC/xd_consistency_stream.pth \
-  --joint-model ../vadmy_data/neuron_responsibility/xd/desc_head_responsibility/model_best.pth \
-  --probe-model ../vadmy_data/neuron_responsibility/xd/probe/probe_best.pth \
+  --joint-model ../vadmy_data/neuron_responsibility/xd/desc_gradual/model_best.pth \
+  --probe-model ../vadmy_data/neuron_responsibility/xd/probe_v2/probe_best.pth \
   --test-list ../vadmy_data/neuron_responsibility/xd/aligned_test.csv \
   --gt-path ../vadmy_data/annotations/xd/gt.npy \
-  --out-dir ../vadmy_data/neuron_responsibility/xd/desc_head_responsibility/evaluation \
+  --out-dir ../vadmy_data/neuron_responsibility/xd/desc_gradual/evaluation \
   --frames-per-snippet 16 \
   --temperature 1.0 \
   --device cuda
@@ -453,11 +496,11 @@ python neuron_responsibility/evaluate.py \
   --dataset xd \
   --baseline-root baseline/LaGoVAD-PreVAD \
   --baseline-weight ../vadmy_data/model/LaGoVAD/best.ckpt \
-  --joint-model ../vadmy_data/neuron_responsibility/xd/lagovad_head_responsibility/model_best.pth \
-  --probe-model ../vadmy_data/neuron_responsibility/xd/probe/probe_best.pth \
+  --joint-model ../vadmy_data/neuron_responsibility/xd/lagovad_gradual/model_best.pth \
+  --probe-model ../vadmy_data/neuron_responsibility/xd/probe_v2/probe_best.pth \
   --test-list ../vadmy_data/neuron_responsibility/xd/aligned_test.csv \
   --gt-path ../vadmy_data/annotations/xd/gt.npy \
-  --out-dir ../vadmy_data/neuron_responsibility/xd/lagovad_head_responsibility/evaluation \
+  --out-dir ../vadmy_data/neuron_responsibility/xd/lagovad_gradual/evaluation \
   --frames-per-snippet 16 \
   --temperature 1.0 \
   --device cuda
@@ -472,8 +515,8 @@ python neuron_responsibility/evaluate.py \
 | 阶段 | CLIP | Probe | Baseline |
 |---|---|---|---|
 | Stage A | 不执行 | 训练 | 不加载 |
-| DSANet Stage B | 冻结 | 冻结 | classifier、mlp1、mlp2 |
-| DeSC Stage B | 冻结 | 冻结 | 两个 stream 的 heads |
-| LaGoVAD Stage B | 冻结 | 冻结 | bin_head、sim_head |
+| DSANet Stage B | 冻结 | 冻结 | heads + 最后一层 temporal + gc2/gc4/linear |
+| DeSC Stage B | 冻结 | 冻结 | 双流 heads + 各自最后时序块 |
+| LaGoVAD Stage B | 冻结 | 冻结 | bin/sim heads + temporal encoder 最后一层 |
 
 DeSC 是双流前向，因此三者中训练/推理开销最高。其余新增开销主要来自很小的冻结 probe 前向。

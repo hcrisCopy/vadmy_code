@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -46,6 +48,18 @@ def main() -> None:
     args = parser.parse_args()
 
     out_dir = clean_output(args.out_dir, args.clean)
+    signature = {
+        "neuron_json_sha256": hashlib.sha256(Path(args.neuron_json).read_bytes()).hexdigest(),
+        "source_csv_sha256": hashlib.sha256(Path(args.source_csv).read_bytes()).hexdigest(),
+        "hidden_manifest_sha256": hashlib.sha256(Path(args.hidden_manifest).read_bytes()).hexdigest(),
+    }
+    signature_path = out_dir / "build_signature.json"
+    reuse_existing = not args.clean
+    if signature_path.exists() and not args.clean:
+        previous = json.loads(signature_path.read_text(encoding="utf-8"))
+        if previous != signature:
+            reuse_existing = False
+            print("selection/input signature changed; rebuilding aligned neuron files", flush=True)
     source = read_feature_csv(args.source_csv)
     hidden_by_key, token_pool = read_hidden_manifest(args.hidden_manifest)
     config = load_json(args.neuron_json)
@@ -83,7 +97,7 @@ def main() -> None:
         if clip.ndim != 2 or clip.shape[1] != 512:
             raise ValueError(f"{clip_path}: expected official CLIP [T,512], got {clip.shape}")
         output = out_dir / f"{Path(clip_path).stem}.npy"
-        if output.exists() and not args.clean:
+        if output.exists() and reuse_existing:
             existing = np.load(output, mmap_mode="r")
             expected_shape = (int(clip.shape[0]), expected_width)
             if existing.shape != expected_shape:
@@ -106,6 +120,7 @@ def main() -> None:
         rows.append([clip_path, str(output), str(row["label"]), key, int(clip.shape[0])])
 
     write_csv(args.out_csv, ["clip_path", "neuron_path", "label", "key", "length"], rows)
+    signature_path.write_text(json.dumps(signature, indent=2), encoding="utf-8")
     write_csv(
         out_dir / "skipped_rows.csv",
         ["key", "label", "clip_path", "reason"],

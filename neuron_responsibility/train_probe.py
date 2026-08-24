@@ -47,6 +47,24 @@ def evaluate_probe(model, loader, device) -> dict[str, float]:
     }
 
 
+def calibrate_normal_threshold(model, loader, device, quantile: float) -> float:
+    model.eval()
+    values = []
+    with torch.no_grad():
+        for batch in tqdm(loader, desc="calibrate normal threshold", leave=False):
+            normal = batch["binary_label"] == 0
+            if not normal.any():
+                continue
+            neurons = batch["neurons"][normal].to(device)
+            lengths = batch["length"][normal].to(device)
+            probability = torch.sigmoid(model(neurons, lengths))
+            for row, length in zip(probability, lengths):
+                values.append(row[: int(length.item())].cpu())
+    if not values:
+        raise RuntimeError("normal-threshold calibration requires normal training videos")
+    return float(torch.quantile(torch.cat(values), float(quantile)).item())
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Stage A: train the baseline-independent neuron probe.")
     parser.add_argument("--dataset", choices=["ucf", "xd"], required=True)
@@ -55,12 +73,17 @@ def main() -> None:
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--visual-length", type=int, default=256)
     parser.add_argument("--hidden-width", type=int, default=128)
+    parser.add_argument("--active-neurons", type=int, default=128)
     parser.add_argument("--max-epoch", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=7e-5)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--sparsity-weight", type=float, default=1e-3)
     parser.add_argument("--normal-instance-weight", type=float, default=0.25)
+    parser.add_argument("--ranking-weight", type=float, default=0.2)
+    parser.add_argument("--smoothness-weight", type=float, default=0.05)
+    parser.add_argument("--anomaly-sparsity-weight", type=float, default=0.01)
+    parser.add_argument("--normal-quantile", type=float, default=0.99)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=234)
     parser.add_argument("--device", default="cuda")
@@ -88,7 +111,11 @@ def main() -> None:
         val_set, batch_size=args.batch_size, shuffle=False,
         num_workers=args.num_workers, pin_memory=device.type == "cuda",
     )
-    model = NeuronResponsibilityProbe(neuron_width, args.hidden_width).to(device)
+    if not 0.5 < args.normal_quantile < 1.0:
+        parser.error("--normal-quantile must be in (0.5, 1.0)")
+    model = NeuronResponsibilityProbe(
+        neuron_width, args.hidden_width, active_neurons=args.active_neurons
+    ).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.max_epoch)
     checkpoint_path = out_dir / "checkpoint_last.pth"
@@ -96,6 +123,14 @@ def main() -> None:
     start_epoch, best = 0, -float("inf")
     if args.resume and checkpoint_path.exists():
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        expected = {
+            "neuron_width": neuron_width,
+            "hidden_width": args.hidden_width,
+            "active_neurons": args.active_neurons,
+        }
+        actual = {key: checkpoint.get("config", {}).get(key) for key in expected}
+        if actual != expected:
+            raise RuntimeError(f"resume configuration mismatch: checkpoint={actual}, command={expected}")
         model.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
@@ -113,7 +148,15 @@ def main() -> None:
             lengths = batch["length"].to(device, non_blocking=True)
             labels = batch["binary_label"].to(device, non_blocking=True)
             logits = model(neurons, lengths)
-            loss = probe_mil_loss(logits, labels, lengths, args.normal_instance_weight)
+            loss = probe_mil_loss(
+                logits,
+                labels,
+                lengths,
+                args.normal_instance_weight,
+                args.ranking_weight,
+                args.smoothness_weight,
+                args.anomaly_sparsity_weight,
+            )
             loss = loss + args.sparsity_weight * model.sparsity_loss()
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -126,20 +169,32 @@ def main() -> None:
         record = {"epoch": epoch + 1, "train_loss": running / max(1, len(train_loader)), **metrics}
         with history_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        normal_threshold = calibrate_normal_threshold(
+            model, train_loader, device, args.normal_quantile
+        )
         checkpoint = {
             "epoch": epoch,
             "best_metric": max(best, selection_metric),
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict(),
-            "config": {"neuron_width": neuron_width, "hidden_width": args.hidden_width},
+            "config": {
+                "neuron_width": neuron_width,
+                "hidden_width": args.hidden_width,
+                "active_neurons": args.active_neurons,
+                "normal_quantile": args.normal_quantile,
+                "normal_threshold": normal_threshold,
+            },
             "metrics": metrics,
         }
         torch.save(checkpoint, checkpoint_path)
         if selection_metric > best:
             best = selection_metric
             torch.save(checkpoint, best_path)
-        print(f"epoch {epoch + 1}: {metrics} | best={best:.6f}", flush=True)
+        print(
+            f"epoch {epoch + 1}: {metrics} | normal_q={normal_threshold:.6f} | best={best:.6f}",
+            flush=True,
+        )
 
 
 if __name__ == "__main__":

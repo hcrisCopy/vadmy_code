@@ -65,11 +65,12 @@ def collect_normal_stats(
 
 
 def bag_extremes(z_hidden: np.ndarray, top_p: float) -> np.ndarray:
-    """Return positive and negative tail evidence with shape [2,L,D]."""
+    """Return within-video upper/lower tail contrast with shape [2,L,D]."""
     count = max(1, int(np.ceil(z_hidden.shape[0] * top_p)))
     count = min(count, z_hidden.shape[0])
-    positive = np.partition(z_hidden, z_hidden.shape[0] - count, axis=0)[-count:].mean(axis=0)
-    negative = -np.partition(z_hidden, count - 1, axis=0)[:count].mean(axis=0)
+    median = np.median(z_hidden, axis=0)
+    positive = np.partition(z_hidden, z_hidden.shape[0] - count, axis=0)[-count:].mean(axis=0) - median
+    negative = median - np.partition(z_hidden, count - 1, axis=0)[:count].mean(axis=0)
     return np.stack([positive, negative], axis=0).astype(np.float32)
 
 
@@ -105,6 +106,8 @@ def main() -> None:
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--top-p", type=float, default=0.10)
     parser.add_argument("--topk-global", type=int, default=768)
+    parser.add_argument("--normal-coverage-quantile", type=float, default=0.95)
+    parser.add_argument("--max-per-layer", type=int, default=96)
     parser.add_argument("--normal-stat-snippets-per-video", type=int, default=256)
     parser.add_argument("--sigma-min", type=float, default=1e-6)
     parser.add_argument("--clean", action="store_true")
@@ -112,11 +115,13 @@ def main() -> None:
 
     if not 0.0 < args.top_p <= 0.5:
         parser.error("--top-p must be in (0, 0.5]")
-    if args.topk_global <= 0 or args.normal_stat_snippets_per_video <= 0 or args.sigma_min <= 0:
+    if not 0.5 < args.normal_coverage_quantile < 1.0:
+        parser.error("--normal-coverage-quantile must be in (0.5, 1.0)")
+    if args.topk_global <= 0 or args.max_per_layer <= 0 or args.normal_stat_snippets_per_video <= 0 or args.sigma_min <= 0:
         parser.error("top-k, sample count and sigma must be positive")
 
     out_dir = clean_output(args.out_dir, args.clean)
-    cache_dir = out_dir / "bag_cache"
+    cache_dir = out_dir / f"local_contrast_v2_p{args.top_p:.4f}"
     cache_dir.mkdir(exist_ok=True)
     groups = grouped_rows(read_feature_csv(args.source_train_csv))
     hidden_by_key, token_pool = read_hidden_manifest(args.hidden_manifest)
@@ -164,14 +169,34 @@ def main() -> None:
     delta = abnormal_tail_mean - normal_tail_mean
     pooled_variance = normal_array.var(axis=0, ddof=1) + abnormal_array.var(axis=0, ddof=1)
     stability = delta / (np.sqrt(np.maximum(pooled_variance, 0.0)) + args.sigma_min)
+    normal_threshold = np.quantile(normal_array, args.normal_coverage_quantile, axis=0)
+    abnormal_coverage = (abnormal_array > normal_threshold[None, ...]).mean(axis=0)
+    coverage_gain = np.maximum(
+        abnormal_coverage - (1.0 - args.normal_coverage_quantile), 0.0
+    )
+    selection_score = np.maximum(stability, 0.0) * np.sqrt(coverage_gain)
 
-    direction_index = np.argmax(stability, axis=0)
+    direction_index = np.argmax(selection_score, axis=0)
     layer_indices, dimensions = np.indices(normal_mean.shape)
-    chosen_score = np.take_along_axis(stability, direction_index[None, ...], axis=0)[0]
+    chosen_score = np.take_along_axis(selection_score, direction_index[None, ...], axis=0)[0]
     total = chosen_score.size
     if args.topk_global > total:
         raise ValueError(f"--topk-global={args.topk_global} exceeds available neurons={total}")
-    flat = np.argsort(-chosen_score.reshape(-1), kind="mergesort")[:args.topk_global]
+    ranked = np.argsort(-chosen_score.reshape(-1), kind="mergesort")
+    layer_counts = np.zeros(normal_mean.shape[0], dtype=np.int64)
+    kept = []
+    flat_layers = layer_indices.reshape(-1)
+    for index in ranked:
+        layer = flat_layers[index]
+        if layer_counts[layer] >= args.max_per_layer:
+            continue
+        kept.append(index)
+        layer_counts[layer] += 1
+        if len(kept) == args.topk_global:
+            break
+    if len(kept) != args.topk_global:
+        raise RuntimeError("--max-per-layer is too small to select --topk-global neurons")
+    flat = np.asarray(kept, dtype=np.int64)
 
     selected = []
     for layer in range(normal_mean.shape[0]):
@@ -189,13 +214,16 @@ def main() -> None:
 
     np.save(out_dir / "tail_delta.npy", delta.astype(np.float32))
     np.save(out_dir / "tail_stability.npy", stability.astype(np.float32))
+    np.save(out_dir / "abnormal_coverage.npy", abnormal_coverage.astype(np.float32))
     metadata = {
-        "method": "baseline_independent_bag_tail_v1",
+        "method": "baseline_independent_local_contrast_v2",
         "dataset": args.dataset,
         "token_pool": token_pool,
         "hidden_shape": list(normal_mean.shape),
         "neuron_width": int(args.topk_global),
         "top_p": float(args.top_p),
+        "normal_coverage_quantile": float(args.normal_coverage_quantile),
+        "max_per_layer": int(args.max_per_layer),
         "sigma_min": float(args.sigma_min),
         "normal_stat_snippet_count": int(normal_count),
         "normal_video_count": len(normal_keys),

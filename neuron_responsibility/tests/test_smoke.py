@@ -10,6 +10,8 @@ from neuron_responsibility.common import base_key, resample_feature
 from neuron_responsibility.data import AlignedFeatureDataset
 from neuron_responsibility.model import (
     NeuronResponsibilityProbe,
+    ResponsibilityCorrectionHead,
+    partition_responsibility_loss,
     probe_mil_loss,
     responsibility_mil_loss,
     responsibility_sets,
@@ -36,6 +38,19 @@ def test_probe_and_losses_are_finite() -> None:
     assert logits.shape == (2, 16)
     assert torch.isfinite(loss_probe)
     assert torch.isfinite(loss_resp)
+    probe.eval()
+    assert int(probe.feature_gates().sum().item()) == 12
+    correction = ResponsibilityCorrectionHead(hidden_width=4)
+    corrected = correction(base_logits, torch.sigmoid(logits), lengths)
+    assert torch.allclose(corrected, base_logits)
+    partition_loss, partitions = partition_responsibility_loss(
+        corrected, base_logits, torch.sigmoid(logits), labels, lengths,
+        neuron_threshold=0.8, persistence=3,
+    )
+    assert torch.isfinite(partition_loss)
+    assert set(partitions) == {
+        "agreement_high", "baseline_only", "neuron_only", "agreement_low", "pure_normal"
+    }
     assert torch.allclose(
         sets["positive"] + sets["normal"] + sets["uncertain"],
         sets["mask"],

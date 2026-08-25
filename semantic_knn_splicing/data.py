@@ -1,61 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
 from .common import is_normal, uniform_process
-from .prompts import abnormal_class_names, label_targets
-
-
-class LocalizerDataset(Dataset):
-    def __init__(self, csv_path: str, dataset: str, sequence_length: int, split: str = "all") -> None:
-        self.frame = pd.read_csv(csv_path)
-        missing = {"clip_path", "hidden_path", "label", "key"} - set(self.frame.columns)
-        if missing:
-            raise ValueError(f"{csv_path} is missing columns: {sorted(missing)}")
-        if split == "normal":
-            self.frame = self.frame[self.frame["label"].map(lambda value: is_normal(dataset, str(value)))]
-        elif split == "abnormal":
-            self.frame = self.frame[~self.frame["label"].map(lambda value: is_normal(dataset, str(value)))]
-        elif split != "all":
-            raise ValueError(f"unknown split: {split}")
-        self.frame = self.frame.reset_index(drop=True)
-        self.dataset = dataset
-        self.sequence_length = sequence_length
-        self.num_classes = len(abnormal_class_names(dataset))
-
-    def __len__(self) -> int:
-        return len(self.frame)
-
-    def __getitem__(self, index: int) -> dict:
-        row = self.frame.iloc[index]
-        clip = np.load(str(row["clip_path"])).astype(np.float32)
-        hidden_file = np.load(str(row["hidden_path"]))
-        hidden = hidden_file["hidden"].astype(np.float32)
-        if len(clip) != len(hidden):
-            raise ValueError(f"{row['key']}: clip/hidden length mismatch {len(clip)} != {len(hidden)}")
-        clip, length = uniform_process(clip, self.sequence_length)
-        hidden, hidden_length = uniform_process(hidden, self.sequence_length)
-        if length != hidden_length:
-            raise RuntimeError("aligned modalities produced different lengths")
-        target = np.zeros(self.num_classes, dtype=np.float32)
-        for class_index in label_targets(self.dataset, str(row["label"])):
-            target[class_index] = 1.0
-        return {
-            "clip": torch.from_numpy(clip),
-            "hidden": torch.from_numpy(hidden),
-            "length": torch.tensor(length, dtype=torch.long),
-            "binary_label": torch.tensor(not is_normal(self.dataset, str(row["label"])), dtype=torch.float32),
-            "target_mask": torch.from_numpy(target),
-            "label": str(row["label"]),
-            "key": str(row["key"]),
-            "clip_path": str(row["clip_path"]),
-            "hidden_path": str(row["hidden_path"]),
-        }
 
 
 class BaselineTrainDataset(Dataset):
@@ -68,6 +18,7 @@ class BaselineTrainDataset(Dataset):
         dataset: str,
         sequence_length: int,
         baseline: str,
+        split: str = "all",
     ) -> None:
         original = pd.read_csv(original_csv).rename(columns={"path": "clip_path"})
         if not {"clip_path", "label"}.issubset(original.columns):
@@ -79,6 +30,21 @@ class BaselineTrainDataset(Dataset):
         synthetic = synthetic.rename(columns={"feature_path": "clip_path"})
         synthetic["kind"] = "synthetic"
         self.frame = pd.concat([original[["clip_path", "label", "kind"]], synthetic[["clip_path", "label", "kind"]]], ignore_index=True)
+        if split == "normal":
+            self.frame = self.frame[
+                (self.frame["kind"] == "original")
+                & self.frame["label"].map(lambda value: is_normal(dataset, str(value)))
+            ]
+        elif split == "abnormal":
+            self.frame = self.frame[
+                (self.frame["kind"] == "original")
+                & ~self.frame["label"].map(lambda value: is_normal(dataset, str(value)))
+            ]
+        elif split == "synthetic":
+            self.frame = self.frame[self.frame["kind"] == "synthetic"]
+        elif split != "all":
+            raise ValueError(f"unknown baseline training split: {split}")
+        self.frame = self.frame.reset_index(drop=True)
         self.dataset = dataset
         self.sequence_length = sequence_length
         self.baseline = baseline

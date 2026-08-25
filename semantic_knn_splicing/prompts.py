@@ -1,11 +1,18 @@
-"""Dataset prompt banks copied from LaGoVAD's DatasetSpecVerbalizer.
+"""Published event-prompt dictionaries for UCF-Crime and XD-Violence.
 
-Only visually observable descriptions for UCF-Crime and XD-Violence are
-retained.  No new LLM-generated description is introduced here.
+Abnormal prompts are copied from Tables A1/A2 of LAP (TOMM 2026):
+https://doi.org/10.1145/3801554
+
+Normal prompts are copied from LaGoVAD's ``DatasetSpecVerbalizer`` because LAP
+only publishes abnormal-event prompts. No prompt here was generated for this
+project.
 """
 
 from __future__ import annotations
 
+
+LAP_REFERENCE = "Tao et al., LAP, TOMM 2026, Tables A1/A2"
+LAGOVAD_REFERENCE = "Liu et al., LaGoVAD, ICLR 2026, DatasetSpecVerbalizer"
 
 NORMAL = [
     "Normal",
@@ -14,81 +21,82 @@ NORMAL = [
     "Normal behavior, views or surveillance content captured by camera that not involve any unexpected or unusual events.",
 ]
 
-FIGHTING = [
-    "Fighting",
-    "Violence",
-    "Using violence to injure or kill someone, usually involving group fights.",
-    "A group of people fighting and brawling, which can be seen in punches, kicks.",
-    "In sports, players have conflicts and start fighting each other.",
-    "A man knocked down another person to the ground.",
+UCF_FIGHTING = [
+    "A group of people are fighting", "Two people are fighting fiercely",
+    "A person is kicking another person", "A person is punching someone",
+    "Someone is beating a person on the ground", "People are chasing and hitting someone",
+    "A person is pushing another person violently",
+]
+UCF_SHOOTING = [
+    "A man is shooting a gun", "A person is firing a weapon",
+    "A man is holding a gun to rob someone", "A person is aiming a pistol",
+    "Someone is throwing a knife",
+]
+UCF_THEFT = [
+    "A person is breaking into a house", "A thief is stealing items from a shelf",
+    "Someone is taking money from the cashier", "A person is snatching a bag",
+    "People are breaking a window to enter", "A person is putting stolen goods in a pocket",
+    "Masked men are robbing a store",
+]
+UCF_ACCIDENT = [
+    "A car crashes into another car", "A car hits a pedestrian",
+    "A vehicle overturns on the road", "Two vehicles collide at an intersection",
+    "A truck crashes into a building",
+]
+UCF_FIRE = [
+    "A fire is burning", "Smoke is rising from a fire",
+    "A large explosion occurs", "Something explodes with fire",
+]
+UCF_VANDALISM = [
+    "A person is destroying public property", "Someone is smashing a car window",
+    "A group is throwing stones",
+]
+UCF_ARREST = [
+    "Police are arresting a suspect", "A person is being handcuffed by police",
 ]
 
-SHOOTING = [
-    "Shooting",
-    "Firing a weapon, usually involving muzzle flash and the trajectory of the bullets",
-    "The act of firing a firearm, often with gun flame and people lying down.",
-    "A person points a gun at another person and shoots, and the muzzle emits flames and smoke.",
+XD_FIGHTING_ABUSE = [
+    "Two people are fighting", "A person is kicking another person",
+    "A group of people are arguing", "A man is throwing something to a man",
+    "A group of people are fighting", "A person is punching someone",
+    "Someone is beating a person on the ground", "People are chasing and hitting someone",
+    "A man is slapping a woman",
 ]
-
-RIOT = [
-    "Riot scene",
-    "The chaotic riot scene. There are many people and special police officers who are suppressing it.",
-    "large-scale, public riot, often involving breaking windows, setting fires, and clashing with law enforcement.",
-    "Riot scene, armed police wearing helmets and holding shields forming a human wall, with smoke and flames in the background.",
+XD_SHOOTING = [
+    "A man is shooting a gun", "A man is throwing a knife",
+    "A person is firing a rifle", "A man is holding a pistol",
+    "Gunmen are shooting in the street", "A person is aiming a weapon",
+    "Someone is wielding a machete",
 ]
-
-CAR_ACCIDENT = [
-    "A collision between two or more vehicles, often resulting in injury or damage.",
-    "Traffic accident scene, vehicle colliding with pedestrian",
-    "The driving recorder recorded that two cars collided with each other",
-    "Road accident scene",
+XD_ACCIDENT = [
+    "A person is getting hit by a car", "A car crashes into a vehicle",
+    "A vehicle overturns on the road", "A truck hits a pedestrian",
+    "Two vehicles collide at high speed", "A car crashes into a guardrail",
 ]
-
-EXPLOSION = [
-    "Explosion",
-    "Explosion, often resulting in fire, smoke, and scattered debris.",
-    "The scene of the explosion, with mushroom clouds and smoke after the explosion.",
+XD_EXPLOSION = [
+    "A fire is burning", "A large explosion occurs",
+    "A bomb explodes with smoke", "A building is blown up",
 ]
-
+XD_RIOT = [
+    "A crowd is throwing stones", "People are smashing car windows",
+    "A mob is destroying property", "Protesters are clashing with police",
+]
 
 PROMPT_BANKS: dict[str, dict[str, list[str]]] = {
     "ucf": {
         "Normal": NORMAL,
-        "Abuse": [
-            "Intentional beating or abuse of animals like dogs.",
-            "Abuse, ill-treatment of pets like dogs or cats.",
-            "Beating or kicking pets, torture of animals",
-        ],
-        "Arrest": ["Police arresting suspects, which may involve pressing them to the ground, controlling hands or aiming with guns."],
-        "Arson": ["The deliberate setting of a fire by someone, usually characterized by flames, smoke, puring gasoline."],
-        "Assault": [
-            "Assault",
-            "The man unilaterally attacked the victim, using fists or sticks",
-            "Multiple people surround and assault one person with fists and cudgels.",
-            "Continuous assault by one person on another",
-        ],
-        "Burglary": ["Burglary, usually characterized by crossing the cashier, breaking doors and windows, and carry things."],
-        "Explosion": EXPLOSION,
-        "Fighting": FIGHTING,
-        "RoadAccidents": CAR_ACCIDENT,
-        "Robbery": ["Robbing others property through violent means such as beating or holding a gun"],
-        "Shooting": SHOOTING,
-        "Shoplifting": ["Shoplifting, sneak things into bags, clothes or under skirts in stores."],
-        "Stealing": ["Stealing property from cars or stealing motorcycles and batteries."],
-        "Vandalism": ["Damaging vehicles, overturning shelves, or smashing store door."],
+        "Abuse": UCF_FIGHTING, "Arrest": UCF_ARREST, "Arson": UCF_FIRE,
+        "Assault": UCF_FIGHTING, "Burglary": UCF_THEFT, "Explosion": UCF_FIRE,
+        "Fighting": UCF_FIGHTING, "RoadAccidents": UCF_ACCIDENT,
+        "Robbery": UCF_THEFT, "Shooting": UCF_SHOOTING,
+        "Shoplifting": UCF_THEFT, "Stealing": UCF_THEFT,
+        "Vandalism": UCF_VANDALISM,
     },
     "xd": {
-        "normal": NORMAL,
-        "fighting": FIGHTING,
-        "shooting": SHOOTING,
-        "riot": RIOT,
-        "abuse": [
-            "Abuse, ill-treatment of people.",
-            "Someone suffering from physical abuse",
-            "A person is being abused by others.",
-        ],
-        "car accident": CAR_ACCIDENT,
-        "explosion": EXPLOSION,
+        "normal": NORMAL, "fighting": XD_FIGHTING_ABUSE,
+        "shooting": XD_SHOOTING, "riot": XD_RIOT,
+        "abuse": XD_FIGHTING_ABUSE, "car accident": XD_ACCIDENT,
+        "explosion": XD_EXPLOSION,
     },
 }
 
@@ -106,8 +114,12 @@ def class_names(dataset: str) -> list[str]:
 
 
 def abnormal_class_names(dataset: str) -> list[str]:
-    normal = "Normal" if dataset == "ucf" else "normal"
+    normal = normal_class_name(dataset)
     return [name for name in class_names(dataset) if name != normal]
+
+
+def normal_class_name(dataset: str) -> str:
+    return "Normal" if dataset == "ucf" else "normal"
 
 
 def label_targets(dataset: str, label: str) -> list[int]:
@@ -115,3 +127,7 @@ def label_targets(dataset: str, label: str) -> list[int]:
     raw = [label] if dataset == "ucf" else str(label).split("-")
     mapped = [LABEL_MAPS[dataset][value] for value in raw if value in LABEL_MAPS[dataset]]
     return [names.index(value) for value in mapped if value in names]
+
+
+def prompt_provenance() -> dict[str, str]:
+    return {"abnormal": LAP_REFERENCE, "normal": LAGOVAD_REFERENCE}

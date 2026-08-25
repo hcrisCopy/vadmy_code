@@ -20,6 +20,14 @@ from semantic_knn_splicing.common import base_key, clean_output, seed_everything
 from semantic_knn_splicing.data import BaselineTrainDataset
 
 
+def merge_original_batches(normal: dict, abnormal: dict) -> dict:
+    merged = {}
+    for key in ("clip", "length", "binary_label", "dense_label", "synthetic"):
+        merged[key] = torch.cat([normal[key], abnormal[key]], dim=0)
+    merged["label_text"] = list(normal["label_text"]) + list(abnormal["label_text"])
+    return merged
+
+
 def pad_chunks(array: np.ndarray, chunk_length: int) -> tuple[torch.Tensor, torch.Tensor]:
     chunks, lengths = [], []
     for start in range(0, max(1, len(array)), chunk_length):
@@ -120,10 +128,10 @@ def official_frame_metrics(
     }
 
 
-def parameter_groups(adapter, lr: float, temporal_lr: float) -> tuple[list[dict], list[str]]:
-    adapter.set_train_scope("temporal_heads")
-    head_tokens = ("classifier", "mlp1", "mlp2", "bin_head", "sim_head", "text_adapter", "text_prompt", "prompt_embedding", "fusion")
-    heads, temporal, names = [], [], []
+def parameter_groups(adapter, lr: float) -> tuple[list[dict], list[str]]:
+    """Train only native visual-text interaction and score-head parameters."""
+    adapter.set_train_scope("heads")
+    parameters, names = [], []
     for name, parameter in adapter.named_parameters():
         if not parameter.requires_grad:
             continue
@@ -131,14 +139,11 @@ def parameter_groups(adapter, lr: float, temporal_lr: float) -> tuple[list[dict]
         if "clipmodel." in lowered or "clip_text_model.model" in lowered:
             raise RuntimeError(f"CLIP backbone unexpectedly trainable: {name}")
         names.append(name)
-        (heads if any(token in name for token in head_tokens) else temporal).append(parameter)
-    if not heads or not temporal:
-        raise RuntimeError("functional head/temporal parameter partition is empty")
+        parameters.append(parameter)
+    if not parameters:
+        raise RuntimeError("visual-text interaction/head parameter group is empty")
     adapter.set_train_scope("frozen")
-    return [
-        {"params": heads, "lr": lr, "name": "interaction_and_heads"},
-        {"params": temporal, "lr": temporal_lr, "name": "last_temporal"},
-    ], names
+    return [{"params": parameters, "lr": lr, "name": "interaction_and_heads"}], names
 
 
 def build_scheduler(optimizer, baseline: str, dataset: str, max_epoch: int):
@@ -172,10 +177,8 @@ def main() -> None:
     parser.add_argument("--gt-path", required=True)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--max-epoch", type=int, default=10)
-    parser.add_argument("--head-only-epochs", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, required=True)
-    parser.add_argument("--temporal-lr", type=float, default=1e-6)
     parser.add_argument("--weight-decay", type=float, required=True)
     parser.add_argument("--pseudo-dense-weight", type=float, default=1.0)
     parser.add_argument("--pseudo-mil-weight", type=float, default=1.0)
@@ -190,8 +193,6 @@ def main() -> None:
     args = parser.parse_args()
     if args.clean and args.resume:
         parser.error("--clean and --resume are mutually exclusive")
-    if not 0 <= args.head_only_epochs < args.max_epoch:
-        parser.error("head-only epochs must be smaller than max epoch")
     output = clean_output(args.out_dir, args.clean)
     checkpoint_path, best_path = output / "checkpoint_last.pth", output / "model_best.pth"
     resume = args.resume or checkpoint_path.exists()
@@ -200,22 +201,31 @@ def main() -> None:
     seed_everything(args.seed)
     device = torch.device(args.device if torch.cuda.is_available() and args.device.startswith("cuda") else "cpu")
     adapter = build_baseline(args, str(device)).to(device)
-    groups, trainable_names = parameter_groups(adapter, args.lr, args.temporal_lr)
+    groups, trainable_names = parameter_groups(adapter, args.lr)
     optimizer = torch.optim.AdamW(groups, weight_decay=args.weight_decay)
     scheduler = build_scheduler(optimizer, args.baseline, args.dataset, args.max_epoch)
-    dataset = BaselineTrainDataset(
+    dataset_args = (
         args.train_list, args.synthetic_list, args.dataset,
         adapter.visual_length, args.baseline,
     )
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True, num_workers=args.num_workers, pin_memory=device.type == "cuda")
+    loader_options = dict(
+        batch_size=args.batch_size, shuffle=True, drop_last=True,
+        num_workers=args.num_workers, pin_memory=device.type == "cuda",
+    )
+    normal_loader = DataLoader(BaselineTrainDataset(*dataset_args, split="normal"), **loader_options)
+    abnormal_loader = DataLoader(BaselineTrainDataset(*dataset_args, split="abnormal"), **loader_options)
+    synthetic_loader = DataLoader(BaselineTrainDataset(*dataset_args, split="synthetic"), **loader_options)
+    steps_per_epoch = min(len(normal_loader), len(abnormal_loader))
+    if steps_per_epoch == 0 or len(synthetic_loader) == 0:
+        raise RuntimeError("normal, abnormal, and synthetic training loaders must all be non-empty")
     run_config = {
         "method": "semantic_knn_splicing_partial_baseline_adaptation_v1",
         "baseline": args.baseline, "dataset": args.dataset, "lr": args.lr,
-        "temporal_lr": args.temporal_lr, "weight_decay": args.weight_decay,
+        "weight_decay": args.weight_decay,
         "pseudo_dense_weight": args.pseudo_dense_weight,
         "pseudo_mil_weight": args.pseudo_mil_weight,
         "pseudo_topk_ratio": args.pseudo_topk_ratio,
-        "head_only_epochs": args.head_only_epochs,
+        "train_scope": "native visual-text interaction and scoring heads only",
     }
     (output / "parameter_report.json").write_text(json.dumps({
         **run_config, "trainable_tensors": trainable_names,
@@ -260,32 +270,44 @@ def main() -> None:
         return
     next_eval = ((processed // args.dsanet_ucf_eval_samples) + 1) * args.dsanet_ucf_eval_samples
     for epoch in range(start_epoch, args.max_epoch):
-        scope = "heads" if epoch < args.head_only_epochs else "temporal_heads"
-        adapter.set_train_scope(scope)
+        scope = "interaction_heads"
+        adapter.set_train_scope("heads")
         adapter.train()
         keep_clip_eval(adapter, args.baseline)
         running = {"total": 0.0, "author": 0.0, "pseudo_dense": 0.0, "pseudo_mil": 0.0}
-        progress = tqdm(loader, desc=f"{args.baseline} {epoch + 1}/{args.max_epoch}", unit="batch")
-        for step, batch in enumerate(progress, 1):
+        synthetic_iterator = iter(synthetic_loader)
+        paired = zip(normal_loader, abnormal_loader)
+        progress = tqdm(paired, total=steps_per_epoch, desc=f"{args.baseline} {epoch + 1}/{args.max_epoch}", unit="batch")
+        for step, (normal_batch, abnormal_batch) in enumerate(progress, 1):
+            try:
+                synthetic_batch = next(synthetic_iterator)
+            except StopIteration:
+                synthetic_iterator = iter(synthetic_loader)
+                synthetic_batch = next(synthetic_iterator)
+            batch = merge_original_batches(normal_batch, abnormal_batch)
             clip = batch["clip"].to(device, non_blocking=True)
             lengths = batch["length"].to(device, non_blocking=True)
             labels = batch["binary_label"].to(device, non_blocking=True)
             output_value = adapter.forward_baseline(clip, lengths)
             author = adapter.original_loss(output_value, labels, list(batch["label_text"]), lengths)
+
+            optimizer.zero_grad(set_to_none=True)
+            author.backward()
+            synthetic_clip = synthetic_batch["clip"].to(device, non_blocking=True)
+            synthetic_lengths = synthetic_batch["length"].to(device, non_blocking=True)
+            synthetic_output = adapter.forward_baseline(synthetic_clip, synthetic_lengths)
             pseudo_dense, pseudo_mil = pseudo_supervision_losses(
-                output_value.binary_logits, batch["dense_label"].to(device), lengths,
-                batch["synthetic"].to(device), args.pseudo_topk_ratio,
+                synthetic_output.binary_logits, synthetic_batch["dense_label"].to(device),
+                synthetic_lengths, synthetic_batch["synthetic"].to(device), args.pseudo_topk_ratio,
             )
-            loss = (
-                author
-                + args.pseudo_dense_weight * pseudo_dense
+            pseudo_loss = (
+                args.pseudo_dense_weight * pseudo_dense
                 + args.pseudo_mil_weight * pseudo_mil
             )
-            optimizer.zero_grad(set_to_none=True)
-            loss.backward()
+            pseudo_loss.backward()
             optimizer.step()
             processed += int(labels.numel())
-            running["total"] += float(loss.detach())
+            running["total"] += float(author.detach() + pseudo_loss.detach())
             running["author"] += float(author.detach())
             running["pseudo_dense"] += float(pseudo_dense.detach())
             running["pseudo_mil"] += float(pseudo_mil.detach())
@@ -304,7 +326,7 @@ def main() -> None:
         metrics = {"selection_deferred_to_fixed_step": True}
         if not (args.baseline == "dsanet" and args.dataset == "ucf"):
             metrics = validate(epoch, f"epoch_{epoch + 1}")
-        record = {"epoch": epoch + 1, "scope": scope, **{f"{key}_loss": value / max(1, len(loader)) for key, value in running.items()}, "metrics": metrics, "best_metric": best}
+        record = {"epoch": epoch + 1, "scope": scope, **{f"{key}_loss": value / max(1, steps_per_epoch) for key, value in running.items()}, "metrics": metrics, "best_metric": best}
         with history_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         torch.save(payload(epoch, metrics, "epoch_recovery"), checkpoint_path)

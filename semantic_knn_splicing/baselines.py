@@ -146,14 +146,6 @@ def _batch_mask(lengths: torch.Tensor, steps: int) -> torch.Tensor:
     return positions >= lengths.unsqueeze(1)
 
 
-def _unfreeze_last(container: nn.Module) -> None:
-    children = list(container.children())
-    if not children:
-        container.requires_grad_(True)
-        return
-    children[-1].requires_grad_(True)
-
-
 class BaselineAdapter(nn.Module):
     visual_length: int
 
@@ -279,25 +271,13 @@ class DSANetAdapter(BaselineAdapter):
         self.base.requires_grad_(False)
         if scope == "frozen":
             return
-        if scope in {"heads", "temporal_heads", "evidence_adaptation", "all_non_clip"}:
+        if scope == "heads":
             for module in (self.base.classifier, self.base.mlp1, self.base.mlp2):
                 module.requires_grad_(True)
             # DSANet's strongest text ablation trains these lightweight
             # adapters while keeping the CLIP text transformer frozen.
             self.base.clip_adapter.text_adapter.requires_grad_(True)
-        if scope in {"temporal_only", "temporal_heads", "evidence_adaptation", "all_non_clip"}:
-            _unfreeze_last(self.base.temporal.resblocks)
-            for module in (self.base.gc2, self.base.gc4, self.base.linear):
-                module.requires_grad_(True)
-        if scope == "evidence_adaptation":
-            # DNP is DSANet's normal-pattern reference module.  The definition
-            # evidence loss supervises its reconstruction error, so it must be
-            # trainable in the final stage while CLIP stays frozen.
-            self.base.video_anomaly_refiner.requires_grad_(True)
-        if scope == "all_non_clip":
-            self.base.requires_grad_(True)
-            self.base.clipmodel.requires_grad_(False)
-        if scope not in {"frozen", "heads", "temporal_only", "temporal_heads", "evidence_adaptation", "all_non_clip"}:
+        if scope not in {"frozen", "heads"}:
             raise ValueError(f"unknown train scope: {scope}")
 
 
@@ -368,24 +348,17 @@ class DeSCAdapter(BaselineAdapter):
         return total
 
     def set_train_scope(self, scope: str) -> None:
-        if scope not in {"frozen", "heads", "temporal_only", "temporal_heads"}:
+        if scope not in {"frozen", "heads"}:
             raise ValueError(f"unknown DeSC train scope: {scope}")
         for model in (self.sensitivity, self.consistency):
             model.requires_grad_(False)
         if scope == "frozen":
             return
-        if scope in {"heads", "temporal_heads"}:
+        if scope == "heads":
             for model in (self.sensitivity, self.consistency):
                 for module in (model.classifier, model.mlp1, model.mlp2):
                     module.requires_grad_(True)
                 model.text_prompt_embeddings.requires_grad_(True)
-        if scope in {"temporal_only", "temporal_heads"}:
-            _unfreeze_last(self.sensitivity.tcn_module.layers)
-            _unfreeze_last(self.sensitivity.gt_module.resblocks)
-            self.sensitivity.fusion_mlp.requires_grad_(True)
-            _unfreeze_last(self.consistency.temporal.resblocks)
-            for module in (self.consistency.gc2, self.consistency.gc4, self.consistency.linear):
-                module.requires_grad_(True)
 
 
 class LaGoVADAdapter(BaselineAdapter):
@@ -441,32 +414,14 @@ class LaGoVADAdapter(BaselineAdapter):
         self.base.requires_grad_(False)
         if scope == "frozen":
             return
-        if scope in {"heads", "temporal_heads", "all_non_clip"}:
+        if scope == "heads":
             for module in (self.base.bin_head, self.base.sim_head):
                 module.requires_grad_(True)
             if self.base.fusion is not None:
                 self.base.fusion.requires_grad_(True)
             if self.base.clip_text_model.prompt_embedding is not None:
                 self.base.clip_text_model.prompt_embedding.requires_grad_(True)
-        if scope in {"temporal_only", "temporal_heads", "all_non_clip"}:
-            temporal = self.base.temporal_encoder
-            if hasattr(temporal, "temporal") and hasattr(temporal.temporal, "resblocks"):
-                _unfreeze_last(temporal.temporal.resblocks)
-                for name in ("gc2", "gc4", "linear"):
-                    if hasattr(temporal, name):
-                        getattr(temporal, name).requires_grad_(True)
-            elif hasattr(temporal, "encoder") and hasattr(temporal.encoder, "layer"):
-                _unfreeze_last(temporal.encoder.layer)
-            elif hasattr(temporal, "layer"):
-                _unfreeze_last(temporal.layer)
-            else:
-                _unfreeze_last(temporal)
-            if self.base.fusion is not None:
-                _unfreeze_last(self.base.fusion)
-        if scope == "all_non_clip":
-            self.base.requires_grad_(True)
-            self.base.clip_text_model.model.requires_grad_(False)
-        if scope not in {"frozen", "heads", "temporal_only", "temporal_heads", "all_non_clip"}:
+        if scope not in {"frozen", "heads"}:
             raise ValueError(f"unknown train scope: {scope}")
 
 

@@ -45,49 +45,24 @@ python -m semantic_knn_splicing.extract_full_layers \
 
 输出 `full_layers/train.csv`、`test.csv` 和 float16 两层完整 CLS 文件。
 
-### 3. 训练文本语义定位器
-
-```bash
-python -m semantic_knn_splicing.train_localizer \
-  --dataset ucf \
-  --train-csv ../vadmy_data/semantic_knn_splicing/ucf/full_layers/train.csv \
-  --clip-weight ../vadmy_data/model/DSANet/model_ucf.pth \
-  --layer-atlas ../vadmy_data/semantic_knn_splicing/ucf/layers/definition_circuits.json \
-  --out-dir ../vadmy_data/semantic_knn_splicing/ucf/localizer \
-  --max-epoch 10 \
-  --batch-size 16 \
-  --sequence-length 256 \
-  --context-length 8 \
-  --lr 1e-4 \
-  --weight-decay 1e-5 \
-  --topk-ratio 16 \
-  --smooth-weight 8e-4 \
-  --sparse-weight 8e-3 \
-  --val-fraction 0.10 \
-  --num-workers 4 \
-  --seed 234 \
-  --device cuda
-```
-
-输出 `localizer/localizer_best.pth`、恢复点、训练历史和参数报告。
-
-### 4. 选择候选异常段
+### 3. 用冻结完整层语义透镜选择候选异常段
 
 ```bash
 python -m semantic_knn_splicing.select_pseudo_segments \
   --dataset ucf \
   --train-csv ../vadmy_data/semantic_knn_splicing/ucf/full_layers/train.csv \
-  --localizer-model ../vadmy_data/semantic_knn_splicing/ucf/localizer/localizer_best.pth \
+  --layer-atlas ../vadmy_data/semantic_knn_splicing/ucf/layers/definition_circuits.json \
   --clip-weight ../vadmy_data/model/DSANet/model_ucf.pth \
   --out-dir ../vadmy_data/semantic_knn_splicing/ucf/pseudo \
   --num-segments 32 \
-  --topk-segments 3 \
+  --threshold-tau 1.0 \
+  --max-spans-per-crop 3 \
   --device cuda
 ```
 
 输出 `pseudo/pseudo_segments.csv` 和逐视频分数缓存。
 
-### 5. 建立正常 KNN 并合成训练特征
+### 4. 建立正常 KNN 并合成训练特征
 
 ```bash
 python -m semantic_knn_splicing.build_knn_cache \
@@ -106,6 +81,13 @@ python -m semantic_knn_splicing.build_synthetic_features \
   --max-normal-length 96 \
   --retrieval-probability 0.5 \
   --seed 234
+
+python -m semantic_knn_splicing.visualize_outputs \
+  --layer-atlas ../vadmy_data/semantic_knn_splicing/ucf/layers/definition_circuits.json \
+  --pseudo-csv ../vadmy_data/semantic_knn_splicing/ucf/pseudo/pseudo_segments.csv \
+  --synthetic-list ../vadmy_data/semantic_knn_splicing/ucf/synthetic/synthetic_train.csv \
+  --out-dir ../vadmy_data/semantic_knn_splicing/ucf/visualizations \
+  --examples 8
 ```
 
 三个 baseline 共用 `synthetic/synthetic_train.csv`。
@@ -124,10 +106,8 @@ python -m semantic_knn_splicing.train_baseline \
   --gt-path ../vadmy_data/annotations/ucf/gt.npy \
   --out-dir ../vadmy_data/semantic_knn_splicing/ucf/dsanet \
   --max-epoch 10 \
-  --head-only-epochs 2 \
   --batch-size 64 \
   --lr 7e-5 \
-  --temporal-lr 1e-6 \
   --weight-decay 0 \
   --pseudo-dense-weight 1.0 \
   --pseudo-mil-weight 1.0 \
@@ -170,10 +150,8 @@ python -m semantic_knn_splicing.train_baseline \
   --gt-path ../vadmy_data/annotations/ucf/gt.npy \
   --out-dir ../vadmy_data/semantic_knn_splicing/ucf/desc \
   --max-epoch 10 \
-  --head-only-epochs 2 \
   --batch-size 64 \
   --lr 5e-5 \
-  --temporal-lr 1e-6 \
   --weight-decay 1e-5 \
   --pseudo-dense-weight 1.0 \
   --pseudo-mil-weight 1.0 \
@@ -199,10 +177,8 @@ python -m semantic_knn_splicing.train_baseline \
   --gt-path ../vadmy_data/annotations/ucf/gt.npy \
   --out-dir ../vadmy_data/semantic_knn_splicing/ucf/lagovad \
   --max-epoch 20 \
-  --head-only-epochs 2 \
   --batch-size 64 \
   --lr 1e-5 \
-  --temporal-lr 1e-6 \
   --weight-decay 0.01 \
   --pseudo-dense-weight 1.0 \
   --pseudo-mil-weight 1.0 \
@@ -248,34 +224,15 @@ python -m semantic_knn_splicing.extract_full_layers \
   --out-dir ../vadmy_data/semantic_knn_splicing/xd/full_layers \
   --skip-missing-hidden
 
-python -m semantic_knn_splicing.train_localizer \
-  --dataset xd \
-  --train-csv ../vadmy_data/semantic_knn_splicing/xd/full_layers/train.csv \
-  --clip-weight ../vadmy_data/model/DSANet/model_xd.pth \
-  --layer-atlas ../vadmy_data/semantic_knn_splicing/xd/layers/definition_circuits.json \
-  --out-dir ../vadmy_data/semantic_knn_splicing/xd/localizer \
-  --max-epoch 10 \
-  --batch-size 16 \
-  --sequence-length 256 \
-  --context-length 8 \
-  --lr 1e-4 \
-  --weight-decay 1e-5 \
-  --topk-ratio 16 \
-  --smooth-weight 8e-4 \
-  --sparse-weight 8e-3 \
-  --val-fraction 0.10 \
-  --num-workers 4 \
-  --seed 234 \
-  --device cuda
-
 python -m semantic_knn_splicing.select_pseudo_segments \
   --dataset xd \
   --train-csv ../vadmy_data/semantic_knn_splicing/xd/full_layers/train.csv \
-  --localizer-model ../vadmy_data/semantic_knn_splicing/xd/localizer/localizer_best.pth \
+  --layer-atlas ../vadmy_data/semantic_knn_splicing/xd/layers/definition_circuits.json \
   --clip-weight ../vadmy_data/model/DSANet/model_xd.pth \
   --out-dir ../vadmy_data/semantic_knn_splicing/xd/pseudo \
   --num-segments 32 \
-  --topk-segments 3 \
+  --threshold-tau 1.0 \
+  --max-spans-per-crop 3 \
   --device cuda
 
 python -m semantic_knn_splicing.build_knn_cache \
@@ -294,6 +251,13 @@ python -m semantic_knn_splicing.build_synthetic_features \
   --max-normal-length 96 \
   --retrieval-probability 0.5 \
   --seed 234
+
+python -m semantic_knn_splicing.visualize_outputs \
+  --layer-atlas ../vadmy_data/semantic_knn_splicing/xd/layers/definition_circuits.json \
+  --pseudo-csv ../vadmy_data/semantic_knn_splicing/xd/pseudo/pseudo_segments.csv \
+  --synthetic-list ../vadmy_data/semantic_knn_splicing/xd/synthetic/synthetic_train.csv \
+  --out-dir ../vadmy_data/semantic_knn_splicing/xd/visualizations \
+  --examples 8
 ```
 
 缺失 hidden states 的 4 个 XD 训练视频会记录在 `full_layers/train_skipped.csv`，不会使流程中断。
@@ -314,10 +278,8 @@ python -m semantic_knn_splicing.train_baseline \
   --gt-path ../vadmy_data/annotations/xd/gt.npy \
   --out-dir ../vadmy_data/semantic_knn_splicing/xd/dsanet \
   --max-epoch 10 \
-  --head-only-epochs 2 \
   --batch-size 64 \
   --lr 1e-5 \
-  --temporal-lr 1e-6 \
   --weight-decay 0 \
   --pseudo-dense-weight 1.0 \
   --pseudo-mil-weight 1.0 \
@@ -344,10 +306,8 @@ python -m semantic_knn_splicing.train_baseline \
   --gt-path ../vadmy_data/annotations/xd/gt.npy \
   --out-dir ../vadmy_data/semantic_knn_splicing/xd/desc \
   --max-epoch 10 \
-  --head-only-epochs 2 \
   --batch-size 64 \
   --lr 1e-5 \
-  --temporal-lr 1e-6 \
   --weight-decay 1e-3 \
   --pseudo-dense-weight 1.0 \
   --pseudo-mil-weight 1.0 \
@@ -373,10 +333,8 @@ python -m semantic_knn_splicing.train_baseline \
   --gt-path ../vadmy_data/annotations/xd/gt.npy \
   --out-dir ../vadmy_data/semantic_knn_splicing/xd/lagovad \
   --max-epoch 20 \
-  --head-only-epochs 2 \
   --batch-size 64 \
   --lr 1e-5 \
-  --temporal-lr 1e-6 \
   --weight-decay 0.01 \
   --pseudo-dense-weight 1.0 \
   --pseudo-mil-weight 1.0 \

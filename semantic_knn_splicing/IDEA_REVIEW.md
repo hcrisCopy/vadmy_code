@@ -90,3 +90,9 @@ CLIP视觉和文本backbone、baseline时序主干全部冻结。只训练作者
 ## 最终评价
 
 **Accept with major experimental validation。** 方案逻辑已经干净，文献依据也明确；真正的不确定性只剩一个：公开Prompt和责任层能否在UCF/XD长视频中定位出比原MIL更可靠的异常段。
+
+## 实验后结论（UCF/DSANet）
+
+完整10 epoch实验已经完成，详细数据见[UCF_DSANET_RESULT.md](UCF_DSANET_RESULT.md)。最佳frame AUC仅从89.4446升至89.4983（+0.0537个百分点），同时frame AP从37.4196降至34.8382。因此上面的实验前评价需要更新为：
+
+**Reject当前“相对文本峰值→硬异常伪标签→等权密集训练”的具体形式。** 责任整层仍具有可解释差异，但冻结CLIP文本边际没有提供足够可靠的时间真值；KNN只能制造准确的拼接边界，不能修正被拼接异常段本身的语义错误。按照本页停止条件，不继续靠调阈值或损失权重包装该结果。

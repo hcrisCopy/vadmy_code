@@ -17,7 +17,9 @@
 - `build_synthetic_features.py`：生成正常—候选异常穿插序列和密集边界标签。
 - `train_baseline.py`：保留原始MIL数据与选模规则，只解冻原有视觉—文本交互模块和打分头。
 - `evaluate_baseline.py`：使用baseline原二值分数计算UCF frame AUC或XD frame AP。
-- `visualize_outputs.py`：输出层责任图、神经元数量热力图、时间边际曲线和拼接边界图。
+- `visualize_outputs.py`：输出层责任排序、类别在所选整层上的责任占比、时间边际曲线和拼接边界图。
+
+DSANet/UCF完整实验及负结果分析见 [UCF_DSANET_RESULT.md](UCF_DSANET_RESULT.md)。
 
 ## 开销
 

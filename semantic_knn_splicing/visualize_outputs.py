@@ -32,21 +32,35 @@ def plot_layer_evidence(atlas_path: str, output: Path) -> list[str]:
     plt.close(fig)
 
     class_names = atlas["class_names"]
-    matrix = np.asarray([value["k_per_class"] for value in ranking], dtype=np.float32).T
-    fig, axis = plt.subplots(figsize=(10, max(4.5, 0.42 * len(class_names))))
-    image = axis.imshow(matrix, aspect="auto", cmap="YlOrRd")
-    axis.set_xticks(np.arange(len(layers)), layers)
+    blocks = sorted(atlas["blocks"], key=lambda value: value["layer_zero_based"])
+    selected_layers = np.asarray([int(value["layer_zero_based"]) + 1 for value in blocks])
+    # Each block stores non-negative responsibility weights for every class and
+    # selected neuron.  Summing within a layer measures how much responsibility
+    # evidence that layer contributes; row normalization makes classes comparable.
+    matrix = np.stack(
+        [np.asarray(value["weights"], dtype=np.float32).sum(axis=1) for value in blocks], axis=1
+    )
+    matrix /= np.maximum(matrix.sum(axis=1, keepdims=True), 1e-8)
+    fig, axis = plt.subplots(figsize=(6.5, max(4.5, 0.42 * len(class_names))))
+    image = axis.imshow(matrix, aspect="auto", cmap="YlGnBu", vmin=0.0, vmax=1.0)
+    axis.set_xticks(np.arange(len(selected_layers)), selected_layers)
     axis.set_yticks(np.arange(len(class_names)), class_names)
-    axis.set(xlabel="CLIP layer (1-based)", title="Responsible-neuron count by class and layer")
-    fig.colorbar(image, ax=axis, label="smallest sufficient neuron count")
+    axis.set(xlabel="selected CLIP layer (1-based)", title="Per-class responsibility across selected layers")
+    for row in range(matrix.shape[0]):
+        for column in range(matrix.shape[1]):
+            color = "white" if matrix[row, column] >= 0.55 else "#222222"
+            axis.text(column, row, f"{matrix[row, column]:.2f}", ha="center", va="center", color=color)
+    fig.colorbar(image, ax=axis, label="fraction of class responsibility")
     fig.tight_layout()
-    path_b = output / "class_layer_neuron_heatmap.png"
+    path_b = output / "class_layer_responsibility_heatmap.png"
     fig.savefig(path_b, dpi=180)
     plt.close(fig)
     return [str(path_a), str(path_b)]
 
 
-def plot_temporal_localization(pseudo_csv: str, output: Path, examples: int) -> str | None:
+def plot_temporal_localization(
+    pseudo_csv: str, output: Path, examples: int, layer_numbers: list[int]
+) -> str | None:
     frame = pd.read_csv(pseudo_csv)
     if frame.empty:
         return None
@@ -58,7 +72,8 @@ def plot_temporal_localization(pseudo_csv: str, output: Path, examples: int) -> 
         layer = cache["layer_score"]
         axis.plot(score, color="#111111", linewidth=1.8, label="weighted text margin")
         for index in range(layer.shape[1]):
-            axis.plot(layer[:, index], linewidth=1.0, alpha=0.65, label=f"selected layer {index + 1}")
+            number = layer_numbers[index] if index < len(layer_numbers) else index + 1
+            axis.plot(layer[:, index], linewidth=1.0, alpha=0.65, label=f"CLIP layer {number}")
         matches = frame[frame["key"].astype(str) == str(row["key"])]
         for _, span in matches.iterrows():
             axis.axvspan(int(span["start"]), int(span["end"]), color="#d62728", alpha=0.18)
@@ -112,8 +127,13 @@ def main() -> None:
         parser.error("--examples must be positive")
     output = clean_output(args.out_dir, args.clean)
     paths = plot_layer_evidence(args.layer_atlas, output)
+    atlas = json.loads(Path(args.layer_atlas).read_text(encoding="utf-8"))
+    layer_numbers = [
+        int(value["layer_zero_based"]) + 1
+        for value in sorted(atlas["blocks"], key=lambda value: value["layer_zero_based"])
+    ]
     for value in (
-        plot_temporal_localization(args.pseudo_csv, output, args.examples),
+        plot_temporal_localization(args.pseudo_csv, output, args.examples, layer_numbers),
         plot_synthetic_labels(args.synthetic_list, output, args.examples),
     ):
         if value is not None:

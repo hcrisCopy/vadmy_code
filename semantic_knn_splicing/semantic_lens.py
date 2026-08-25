@@ -101,10 +101,13 @@ class FrozenWholeLayerSemanticLens(nn.Module):
         normal_texts = PROMPT_BANKS[dataset][normal_class_name(dataset)]
         device = next(clip_model.parameters()).device
         with torch.no_grad():
-            event = clip_model.encode_text(torch.cat([tokenize(value) for value in texts]).to(device))
-            normal = clip_model.encode_text(
-                torch.cat([tokenize(value) for value in normal_texts]).to(device)
-            )
+            event_tokens = torch.cat([tokenize(value) for value in texts]).to(device)
+            normal_tokens = torch.cat([tokenize(value) for value in normal_texts]).to(device)
+            # DSANet's published CLIP fork exposes ``encode_text(embedding,
+            # token_ids)`` so its lightweight text adapter can replace token
+            # embeddings. This frozen lens uses the unmodified token embedding.
+            event = clip_model.encode_text(clip_model.encode_token(event_tokens), event_tokens)
+            normal = clip_model.encode_text(clip_model.encode_token(normal_tokens), normal_tokens)
         self.register_buffer("event_text", F.normalize(event.float(), dim=-1))
         self.register_buffer("normal_text", F.normalize(normal.float(), dim=-1))
         self.register_buffer("event_owners", torch.tensor(owners, dtype=torch.long))

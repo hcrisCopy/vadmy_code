@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -61,9 +62,15 @@ def main() -> None:
             sample_id = f"{row['pseudo_id']}_{copy_index:02d}"
             rng = random.Random(f"{args.seed}:{sample_id}")
             target = feature_dir / f"{sample_id}.npz"
+            valid_cache = False
             if target.exists() and not args.clean:
-                stored = np.load(target)
-                length = len(stored["feature"])
+                try:
+                    with np.load(target) as stored:
+                        length = len(stored["feature"])
+                        valid_cache = len(stored["frame_label"]) == length
+                except (OSError, ValueError, EOFError, zipfile.BadZipFile):
+                    valid_cache = False
+            if valid_cache:
                 reused += 1
             else:
                 num_clips = rng.randint(1, args.max_num_clips)
@@ -82,7 +89,13 @@ def main() -> None:
                 feature = np.concatenate(clips).astype(np.float32)
                 frame_label = np.concatenate(labels).astype(np.float32)
                 length = len(feature)
-                np.savez_compressed(target, feature=feature, frame_label=frame_label)
+                # CLIP floats compress poorly and compressed archives make this
+                # offline stage roughly an order of magnitude slower. Write an
+                # uncompressed archive atomically so an interruption never
+                # leaves a corrupt cache that looks complete.
+                temporary = target.with_suffix(".tmp.npz")
+                np.savez(temporary, feature=feature, frame_label=frame_label)
+                temporary.replace(target)
             rows.append([sample_id, str(target), str(row["label"]), length, str(row["pseudo_id"])])
             progress.update(1)
     progress.close()
@@ -92,6 +105,7 @@ def main() -> None:
         "method": "lagovad_knn_temporal_synthesis_from_text_topk_v1",
         "samples": len(rows), "reused": reused, "max_num_clips": args.max_num_clips,
         "retrieval_probability": args.retrieval_probability, "csv": str(csv_path),
+        "storage": "uncompressed npz with atomic replacement",
     }
     save_json(output / "synthesis_report.json", report)
     print(json.dumps(report, indent=2, ensure_ascii=False), flush=True)

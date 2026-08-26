@@ -437,6 +437,11 @@ class LaGoVADAdapter(BaselineAdapter):
         _capture_lagovad_temporal(self.base, self)
 
     def forward_baseline(self, clip: torch.Tensor, lengths: torch.Tensor) -> BaselineOutput:
+        # Moving LaGoVAD through the outer adapter moves its parameters but does
+        # not update LightningModule.device.  Synchronize the Lightning module
+        # itself before its tokenizer uses that property for text tensors.
+        if self.base.device != clip.device:
+            self.base.to(clip.device)
         batch = {"v_feat": clip, "v_feat_l": lengths}
         raw = self.base(batch, class_names=self.class_names)
         return BaselineOutput(raw["cls_bin_logits"], raw["cls_sim_mat"], raw["vis_feats"], raw)

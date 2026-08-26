@@ -44,6 +44,8 @@ python -m intrinsic_anomaly_subspace.discover_subspace \
   --pair-manifest ../vadmy_data/intrinsic_anomaly_subspace/ucf/pairs/pairs.csv \
   --out-dir ../vadmy_data/intrinsic_anomaly_subspace/ucf/discovery \
   --layer-rule threshold_union \
+  --neuron-selection topk_effect \
+  --topk-neurons 200 \
   --effect-threshold 1.5 \
   --probe-epochs 300 \
   --probe-lr 1e-2 \
@@ -203,6 +205,8 @@ python -m intrinsic_anomaly_subspace.discover_subspace \
   --pair-manifest ../vadmy_data/intrinsic_anomaly_subspace/xd/pairs/pairs.csv \
   --out-dir ../vadmy_data/intrinsic_anomaly_subspace/xd/discovery \
   --layer-rule threshold_union \
+  --neuron-selection topk_effect \
+  --topk-neurons 200 \
   --effect-threshold 1.5 \
   --probe-epochs 300 \
   --probe-lr 1e-2 \

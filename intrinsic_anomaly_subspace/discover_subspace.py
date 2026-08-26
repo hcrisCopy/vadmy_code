@@ -114,6 +114,13 @@ def main() -> None:
         ),
     )
     parser.add_argument("--effect-threshold", type=float, default=1.5)
+    parser.add_argument(
+        "--neuron-selection",
+        choices=["effect_threshold", "topk_effect"],
+        default="topk_effect",
+        help="Use the paper's absolute threshold or its fixed-budget sensitivity protocol.",
+    )
+    parser.add_argument("--topk-neurons", type=int, default=200)
     parser.add_argument("--probe-epochs", type=int, default=300)
     parser.add_argument("--probe-lr", type=float, default=1e-2)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
@@ -123,7 +130,10 @@ def main() -> None:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--clean", action="store_true")
     args = parser.parse_args()
-    if args.effect_threshold <= 0 or args.probe_epochs <= 0 or args.probe_lr <= 0 or args.epsilon <= 0:
+    if (
+        args.effect_threshold <= 0 or args.topk_neurons <= 0 or args.probe_epochs <= 0
+        or args.probe_lr <= 0 or args.epsilon <= 0
+    ):
         parser.error("threshold, epochs, learning rate, and epsilon must be positive")
     output = clean_output(args.out_dir, args.clean)
     result_path = output / "selected_subspace.json"
@@ -160,7 +170,7 @@ def main() -> None:
     probe_root = output / "layer_probes"
     probe_root.mkdir(parents=True, exist_ok=True)
     labels = np.concatenate([np.ones(len(positive)), np.zeros(len(negative))]).astype(np.float32)
-    selected, neuron_rows = [], []
+    layer_results: dict[int, tuple[np.ndarray, np.ndarray, float]] = {}
     all_effect = np.zeros((positive.shape[1], positive.shape[2]), dtype=np.float32)
     for layer in critical:
         layer_dir = probe_root / f"layer_{layer:02d}"
@@ -172,9 +182,29 @@ def main() -> None:
         )
         effect = neuron_effect_size(positive[:, layer], negative[:, layer], weight, args.epsilon)
         all_effect[layer] = effect
-        dims = np.flatnonzero(effect >= args.effect_threshold)
-        if len(dims):
-            order = dims[np.argsort(-effect[dims], kind="mergesort")]
+        layer_results[layer] = effect, weight, bias
+
+    selected_mask = np.zeros_like(all_effect, dtype=bool)
+    if args.neuron_selection == "effect_threshold":
+        for layer in critical:
+            selected_mask[layer] = all_effect[layer] >= args.effect_threshold
+    else:
+        candidates = np.asarray(
+            [layer * positive.shape[2] + dim for layer in critical for dim in range(positive.shape[2])],
+            dtype=np.int64,
+        )
+        if args.topk_neurons > len(candidates):
+            raise ValueError(f"--topk-neurons={args.topk_neurons} exceeds candidate neurons={len(candidates)}")
+        candidate_scores = all_effect.reshape(-1)[candidates]
+        chosen = candidates[np.argsort(-candidate_scores, kind="mergesort")[:args.topk_neurons]]
+        selected_mask.reshape(-1)[chosen] = True
+
+    selected, neuron_rows = [], []
+    for layer in critical:
+        effect, weight, bias = layer_results[layer]
+        dims = np.flatnonzero(selected_mask[layer])
+        order = dims[np.argsort(-effect[dims], kind="mergesort")]
+        if len(order):
             selected.append({
                 "layer_index": layer,
                 "dims": order.astype(int).tolist(),
@@ -183,14 +213,14 @@ def main() -> None:
                 "probe_bias": bias,
             })
         neuron_rows.extend(
-            [layer, dim, float(effect[dim]), float(weight[dim]), bool(effect[dim] >= args.effect_threshold)]
+            [layer, dim, float(effect[dim]), float(weight[dim]), bool(selected_mask[layer, dim])]
             for dim in range(len(effect))
         )
     np.save(output / "neuron_effect_sizes.npy", all_effect)
     write_csv(output / "neuron_metrics.csv", ["layer_index", "dimension", "effect_size", "probe_weight", "selected"], neuron_rows)
     selected_width = sum(len(item["dims"]) for item in selected)
     if selected_width == 0:
-        raise RuntimeError("no neuron met V-FIND's default effect threshold; neuron metrics were saved")
+        raise RuntimeError("neuron selection returned an empty subspace; neuron metrics were saved")
     save_json(result_path, {
         "method": "shift_vfind_intrinsic_anomaly_subspace_v1",
         "pair_manifest": args.pair_manifest,
@@ -208,7 +238,9 @@ def main() -> None:
         "vfind_intersection_layers": intersection,
         "threshold_union_layers": threshold_union,
         "critical_layers": critical,
+        "neuron_selection": args.neuron_selection,
         "effect_threshold": args.effect_threshold,
+        "topk_neurons": args.topk_neurons,
         "num_layers": int(positive.shape[1]),
         "hidden_dim": int(positive.shape[2]),
         "selected_width": selected_width,
@@ -217,7 +249,12 @@ def main() -> None:
         "backbone_trained": False,
         "baseline_trained": False,
     })
-    print(f"critical layers={critical} | selected neurons={selected_width} | wrote {result_path}", flush=True)
+    counts = {item["layer_index"]: len(item["dims"]) for item in selected}
+    print(
+        f"critical layers={critical} | neuron selection={args.neuron_selection} | "
+        f"selected neurons={selected_width} | per-layer={counts} | wrote {result_path}",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

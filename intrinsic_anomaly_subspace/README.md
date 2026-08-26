@@ -46,7 +46,9 @@ r_n(x) = |a_n(x)| * |w_n|
 d_n = |mean_pos(r_n)-mean_neg(r_n)| / (pooled_std_n + epsilon)
 ```
 
-默认保留 `d_n >= 1.5` 的神经元，与 V-FIND 一致。最终分类器读取的是这些神经元的**原始 activation**，不是人为构造的 `r_n` 或 baseline 分数。
+V-FIND主设置用 `d_n >= 1.5`，但其固定预算消融还比较了10、20、50、100、200、211、500等神经元，并在约200/211附近达到最佳区域。UCF实测最大效应量只有0.137，说明伪造检测器的绝对阈值不能迁移到弱监督VAD；正式命令因此采用论文已有的固定预算协议，按同一 `d_n` 全局取Top-200。`--neuron-selection effect_threshold`仍可复核原始阈值。
+
+最终分类器读取的是这些神经元的**原始 activation**，不是人为构造的 `r_n` 或 baseline 分数。
 
 ### 4. 直接帧级分类
 

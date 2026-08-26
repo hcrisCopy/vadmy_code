@@ -153,6 +153,10 @@ def main() -> None:
         "baseline_weight": file_signature(args.baseline_weight),
         "sensitivity_weight": file_signature(args.sensitivity_weight),
         "consistency_weight": file_signature(args.consistency_weight),
+        "lagovad_config": file_signature(
+            str(Path(args.baseline_weight).with_name("config.yaml"))
+            if args.baseline == "lagovad" else ""
+        ),
         "selection_provenance": selection_provenance,
         "batch_size": args.batch_size,
         "lr": args.lr,

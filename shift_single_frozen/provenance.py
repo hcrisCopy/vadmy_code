@@ -17,6 +17,9 @@ def sha256(path: str | Path) -> str:
 
 
 def score_contract(args: argparse.Namespace) -> dict:
+    lagovad_config = ""
+    if args.baseline == "lagovad" and args.baseline_weight:
+        lagovad_config = str(Path(args.baseline_weight).with_name("config.yaml"))
     return {
         "schema": "baseline_specific_shift_score_v1",
         "baseline": args.baseline,
@@ -25,6 +28,7 @@ def score_contract(args: argparse.Namespace) -> dict:
         "baseline_weight": file_signature(args.baseline_weight),
         "sensitivity_weight": file_signature(args.sensitivity_weight),
         "consistency_weight": file_signature(args.consistency_weight),
+        "lagovad_config": file_signature(lagovad_config),
     }
 
 

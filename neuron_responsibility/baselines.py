@@ -394,9 +394,36 @@ class LaGoVADAdapter(BaselineAdapter):
         sys.path.insert(0, project)
         sys.path.insert(0, source)
         try:
-            from models.LaGoVAD import LaGoVADLightModel
+            import yaml
+            from models.LaGoVAD import (
+                LaGoVADLightModel, LaGoVADModelConfig, LaGoVADTrainingConfig,
+            )
             from models.LaGoVAD.losses import mil_loss, multi_class_mil_loss, multi_class_mil_loss_v2
-            self.base = LaGoVADLightModel.load_from_checkpoint(weight, map_location="cpu")
+            config_path = Path(weight).with_name("config.yaml")
+            if not config_path.exists():
+                raise FileNotFoundError(
+                    f"LaGoVAD requires the author config beside its PreVAD checkpoint: {config_path}"
+                )
+            release = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            specification = release["model"]
+            if not str(specification.get("class_path", "")).endswith("LaGoVADLightModel"):
+                raise ValueError(f"{config_path}: expected a LaGoVADLightModel specification")
+            arguments = specification["init_args"]
+            model_config = LaGoVADModelConfig(**arguments["model_config"]["init_args"])
+            training_config = LaGoVADTrainingConfig(**arguments["training_config"]["init_args"])
+            self.base = LaGoVADLightModel(model_config, training_config)
+            checkpoint = torch.load(weight, map_location="cpu")
+            state = checkpoint.get("state_dict", checkpoint)
+            incompatible = self.base.load_state_dict(state, strict=False)
+            invalid_missing = [
+                key for key in incompatible.missing_keys
+                if not key.startswith("clip_text_model.model.")
+            ]
+            if invalid_missing or incompatible.unexpected_keys:
+                raise RuntimeError(
+                    "LaGoVAD PreVAD initialization mismatch: "
+                    f"missing={invalid_missing}, unexpected={incompatible.unexpected_keys}"
+                )
         finally:
             sys.path.pop(0)
             sys.path.pop(0)

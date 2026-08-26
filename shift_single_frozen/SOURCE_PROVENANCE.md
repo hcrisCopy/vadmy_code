@@ -11,4 +11,4 @@
 
 本目录没有修改`baseline/`、`rely/`或既有实验目录。新增内容是baseline身份/权重可验证的产物契约，以及单残差全冻结训练与评估入口。
 
-LaGoVAD发布代码同时使用`models.*`和`src.*`导入。`neuron_responsibility/baselines.py`只修正适配器的模块搜索路径，不修改作者源码；依赖版本来自`baseline/LaGoVAD-PreVAD/environment.yaml`。
+LaGoVAD发布代码同时使用`models.*`和`src.*`导入。`neuron_responsibility/baselines.py`只修正适配器的模块搜索路径，不修改作者源码。作者提供的`best.ckpt`是PreVAD初始化权重，适配器按同目录`config.yaml`构造LaGoVAD后加载任务参数，并只允许CLIP文本backbone参数由Hugging Face原始权重补齐。Lightning和TorchMetrics沿用作者环境版本；Transformers固定为兼容服务器Torch 2.5读取OpenAI CLIP权重的4.44.2。

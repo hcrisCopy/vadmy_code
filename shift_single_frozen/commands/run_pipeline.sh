@@ -3,6 +3,7 @@ set -euo pipefail
 
 BASELINE="$1"
 DATASET="$2"
+SEED=234
 
 if [[ "$DATASET" == "ucf" ]]; then
   TRAIN_CSV="../vad_data/work_ucf/ucf_train_local.csv"
@@ -62,6 +63,8 @@ case "$BASELINE" in
     WEIGHT_DECAY="0"
     BATCH_SIZE=128
     MAX_EPOCH=40
+    # Match the seed recorded in the released LaGoVAD config.yaml.
+    SEED=2024
     ;;
   *)
     echo "unsupported baseline: $BASELINE" >&2
@@ -143,7 +146,7 @@ python -m shift_single_frozen.train \
   --frames-per-snippet 16 \
   --dsanet-ucf-eval-samples 1280 \
   --num-workers 4 \
-  --seed 234 \
+  --seed "$SEED" \
   --device cuda \
   "${RESUME_OPTION[@]}"
 

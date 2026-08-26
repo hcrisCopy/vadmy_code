@@ -387,13 +387,18 @@ class DeSCAdapter(BaselineAdapter):
 class LaGoVADAdapter(BaselineAdapter):
     def __init__(self, root: str, dataset: str, weight: str, device: str) -> None:
         super().__init__()
+        project = str(Path(root))
         source = str(Path(root) / "src")
+        # Released LaGoVAD mixes top-level ``models`` imports with ``src.*``
+        # imports.  Expose both package roots without editing the baseline.
+        sys.path.insert(0, project)
         sys.path.insert(0, source)
         try:
             from models.LaGoVAD import LaGoVADLightModel
             from models.LaGoVAD.losses import mil_loss, multi_class_mil_loss, multi_class_mil_loss_v2
             self.base = LaGoVADLightModel.load_from_checkpoint(weight, map_location="cpu")
         finally:
+            sys.path.pop(0)
             sys.path.pop(0)
         self._mil_loss = mil_loss
         self._multi_class_mil_loss = multi_class_mil_loss

@@ -10,3 +10,5 @@
 | loss、scheduler、选模指标 | 三个作者baseline的既有适配逻辑 |
 
 本目录没有修改`baseline/`、`rely/`或既有实验目录。新增内容是baseline身份/权重可验证的产物契约，以及单残差全冻结训练与评估入口。
+
+LaGoVAD发布代码同时使用`models.*`和`src.*`导入。`neuron_responsibility/baselines.py`只修正适配器的模块搜索路径，不修改作者源码；依赖版本来自`baseline/LaGoVAD-PreVAD/environment.yaml`。

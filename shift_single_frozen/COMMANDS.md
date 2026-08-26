@@ -2,6 +2,12 @@
 
 所有命令从`vadmy_code`根目录运行。
 
+LaGoVAD首次在`dsanet`环境运行时，先安装作者固定版本的必要依赖：
+
+```bash
+python -m pip install -r shift_single_frozen/requirements-lagovad.txt
+```
+
 ## 分阶段Python指令：DSANet / UCF-Crime
 
 下面是完整正式参数，不需要替换。

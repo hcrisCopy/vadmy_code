@@ -19,13 +19,13 @@ def layer_figure(metrics: pd.DataFrame, output: Path) -> None:
     for axis, column, threshold in zip(axes, ("d_cos", "d_shift"), ("tau_cos", "tau_shift")):
         axis.plot(metrics["layer_index"], metrics[column], marker="o", linewidth=2, label=column)
         axis.axhline(float(metrics[threshold].iloc[0]), color="#d95f02", linestyle="--", label=f"{threshold}")
-        critical = metrics[metrics["critical"].astype(str).str.lower().isin(["true", "1"])]
+        critical = metrics[metrics["selected_by_layer_rule"].astype(str).str.lower().isin(["true", "1"])]
         axis.scatter(critical["layer_index"], critical[column], color="#1b9e77", s=80, zorder=3, label="critical")
         axis.set_ylabel(column)
         axis.grid(alpha=0.25)
         axis.legend(frameon=False)
     axes[-1].set_xlabel("CLIP transformer layer index")
-    figure.suptitle("V-FIND critical-layer intersection")
+    figure.suptitle("Complementary CLIP layer evidence and selected candidates")
     figure.tight_layout()
     figure.savefig(output / "critical_layers.png", dpi=180)
     plt.close(figure)

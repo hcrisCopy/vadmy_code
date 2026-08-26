@@ -24,16 +24,17 @@ sigma_bar(l)^2 = 两类、全部神经元的类内方差均值
 D_shift(l) = ||mu_pos(l)-mu_neg(l)||_2 / sqrt(M * sigma_bar(l)^2)
 ```
 
-阈值严格采用 V-FIND：
+阈值采用 V-FIND：
 
 ```text
 tau_cos   = mean(D_cos)   + std(D_cos)
 tau_shift = mean(D_shift) + std(D_shift)
 
-critical layers = {D_cos > tau_cos} ∩ {D_shift > tau_shift}
+L_cos   = {D_cos > tau_cos}
+L_shift = {D_shift > tau_shift}
 ```
 
-如果交集为空，程序直接停止并保存层统计，不会悄悄手选某层。
+V-FIND 在其32层伪造检测器上取交集。UCF实测显示，CLIP的幅值位移集中在早层，而方向分离集中在末层，二者交集为空。因此本任务默认显式采用 `L_cos ∪ L_shift` 作为**候选层**，随后仍由神经元效应量筛选；它不是手选层，也不会隐藏原始交集，`layer_metrics.csv` 会同时保存两种结果。需要核验原论文规则时可用 `--layer-rule intersection`，交集为空会直接停止。
 
 ### 3. V-FIND 式神经元探测
 
@@ -71,7 +72,7 @@ test hidden [T, L, 768]
 
 只有 selected 同时显著超过二者，才能说发现的是功能神经元；否则最多说明关键层整体有判别信息。
 
-可视化只保留能回答关键问题的四张图：关键层交集、神经元效应量热力图、等宽随机对照、代表性时间曲线。
+可视化只保留能回答关键问题的四张图：两种层证据与候选层、神经元效应量热力图、等宽随机对照、代表性时间曲线。
 
 ## 产物
 

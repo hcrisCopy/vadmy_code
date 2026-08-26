@@ -104,6 +104,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="V-FIND-style critical-layer and anomaly-neuron discovery.")
     parser.add_argument("--pair-manifest", required=True)
     parser.add_argument("--out-dir", required=True)
+    parser.add_argument(
+        "--layer-rule",
+        choices=["intersection", "threshold_union"],
+        default="threshold_union",
+        help=(
+            "V-FIND uses intersection. threshold_union is the explicit VAD adaptation: "
+            "retain layers highlighted by either complementary signal, then let neuron effect size filter them."
+        ),
+    )
     parser.add_argument("--effect-threshold", type=float, default=1.5)
     parser.add_argument("--probe-epochs", type=int, default=300)
     parser.add_argument("--probe-lr", type=float, default=1e-2)
@@ -129,17 +138,24 @@ def main() -> None:
     d_cos, d_shift = layer_statistics(positive, negative, args.epsilon)
     tau_cos = float(d_cos.mean() + d_cos.std())
     tau_shift = float(d_shift.mean() + d_shift.std())
-    critical = np.flatnonzero((d_cos > tau_cos) & (d_shift > tau_shift)).astype(int).tolist()
+    above_cos = d_cos > tau_cos
+    above_shift = d_shift > tau_shift
+    intersection = np.flatnonzero(above_cos & above_shift).astype(int).tolist()
+    threshold_union = np.flatnonzero(above_cos | above_shift).astype(int).tolist()
+    critical = intersection if args.layer_rule == "intersection" else threshold_union
     write_csv(
         output / "layer_metrics.csv",
-        ["layer_index", "d_cos", "d_shift", "tau_cos", "tau_shift", "above_cos", "above_shift", "critical"],
-        [[i, float(d_cos[i]), float(d_shift[i]), tau_cos, tau_shift, bool(d_cos[i] > tau_cos), bool(d_shift[i] > tau_shift), i in critical] for i in range(len(d_cos))],
+        [
+            "layer_index", "d_cos", "d_shift", "tau_cos", "tau_shift",
+            "above_cos", "above_shift", "vfind_intersection", "selected_by_layer_rule",
+        ],
+        [[
+            i, float(d_cos[i]), float(d_shift[i]), tau_cos, tau_shift,
+            bool(above_cos[i]), bool(above_shift[i]), i in intersection, i in critical,
+        ] for i in range(len(d_cos))],
     )
     if not critical:
-        raise RuntimeError(
-            "V-FIND's strict intersection selected no critical layer. layer_metrics.csv was saved; "
-            "do not silently replace the paper rule with a hand-picked layer."
-        )
+        raise RuntimeError(f"layer rule {args.layer_rule!r} selected no layer; layer_metrics.csv was saved")
 
     probe_root = output / "layer_probes"
     probe_root.mkdir(parents=True, exist_ok=True)
@@ -179,11 +195,18 @@ def main() -> None:
         "method": "shift_vfind_intrinsic_anomaly_subspace_v1",
         "pair_manifest": args.pair_manifest,
         "sample_unit_for_discovery": "per-video mean of top/bottom snippet tails",
-        "critical_layer_rule": "Dcos > mean(Dcos)+std(Dcos) INTERSECTION Dshift > mean(Dshift)+std(Dshift)",
+        "layer_rule": args.layer_rule,
+        "critical_layer_rule": (
+            "V-FIND threshold intersection"
+            if args.layer_rule == "intersection"
+            else "explicit VAD adaptation: threshold union, followed by unchanged neuron effect-size filtering"
+        ),
         "d_cos": d_cos.astype(float).tolist(),
         "d_shift": d_shift.astype(float).tolist(),
         "tau_cos": tau_cos,
         "tau_shift": tau_shift,
+        "vfind_intersection_layers": intersection,
+        "threshold_union_layers": threshold_union,
         "critical_layers": critical,
         "effect_threshold": args.effect_threshold,
         "num_layers": int(positive.shape[1]),

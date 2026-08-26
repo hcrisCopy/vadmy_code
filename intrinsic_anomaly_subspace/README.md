@@ -91,3 +91,5 @@ diagnostics/                 # 四张证据图和 diagnostic_summary.json
 XD 训练 hidden 已知缺 4 个视频，`build_shift_pairs` 会跳过并写入 `skipped_videos.csv`。测试视频不允许跳过。
 
 完整、无需替换参数的 UCF/XD 指令见 [COMMANDS.md](COMMANDS.md)。研究价值和风险见 [IDEA_REVIEW.md](IDEA_REVIEW.md)。
+
+UCF完整诊断已经完成并得到负面结果，见 [UCF_DIAGNOSTIC_RESULT.md](UCF_DIAGNOSTIC_RESULT.md)。

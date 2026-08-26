@@ -29,6 +29,10 @@ def score_contract(args: argparse.Namespace) -> dict:
         "sensitivity_weight": file_signature(args.sensitivity_weight),
         "consistency_weight": file_signature(args.consistency_weight),
         "lagovad_config": file_signature(lagovad_config),
+        "inference_protocol": (
+            f"desc_author_release_{args.dataset}_v1"
+            if args.baseline == "desc" else "native_chunked_v1"
+        ),
     }
 
 

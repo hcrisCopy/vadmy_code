@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export TOKENIZERS_PARALLELISM=false
 
 BASELINE="$1"
 DATASET="$2"
@@ -47,14 +48,15 @@ case "$BASELINE" in
     if [[ "$DATASET" == "ucf" ]]; then
       SENSITIVITY="../vadmy_data/model/DeSC/ucf_sensitivity_stream.pth"
       CONSISTENCY="../vadmy_data/model/DeSC/ucf_consistency_stream.pth"
-      LR="5e-5"
+      WEIGHT_DECAY="1e-5"
     else
       SENSITIVITY="../vadmy_data/model/DeSC/xd_sensitivity_stream.pth"
       CONSISTENCY="../vadmy_data/model/DeSC/xd_consistency_stream.pth"
-      LR="1e-5"
+      WEIGHT_DECAY="1e-3"
     fi
+    # DeSC paper: the Temporal Sensitivity stream is optimized at 1e-3.
+    LR="1e-3"
     WEIGHT_ARGS=(--sensitivity-weight "$SENSITIVITY" --consistency-weight "$CONSISTENCY")
-    WEIGHT_DECAY="1e-5"
     ;;
   lagovad)
     BASELINE_ROOT="baseline/LaGoVAD-PreVAD"
@@ -73,7 +75,13 @@ case "$BASELINE" in
 esac
 
 # Scores and neuron selections are intentionally isolated by both dataset and baseline.
-OUT="../vadmy_data/shift_single_frozen/${DATASET}/${BASELINE}"
+RUN_NAME="$BASELINE"
+if [[ "$BASELINE" == "desc" ]]; then
+  # Keep corrected decoupled-stream products separate from the previous
+  # two-stream-injection implementation; never overwrite experimental data.
+  RUN_NAME="desc_sensitivity_v2"
+fi
+OUT="../vadmy_data/shift_single_frozen/${DATASET}/${RUN_NAME}"
 
 python -m shift_single_frozen.provenance prepare-score \
   --baseline "$BASELINE" \

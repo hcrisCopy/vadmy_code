@@ -22,6 +22,7 @@ if str(PACKAGE_ROOT) not in sys.path:
 
 from neuron_responsibility.baselines import build_baseline
 from neuron_responsibility.common import clean_output
+from neuron_responsibility.desc_inference import desc_official_probabilities
 from neuron_responsibility.evaluate import class_probabilities, load_detection_map, pad_chunks
 from shift_residual_head_tuning.train import add_baseline_arguments
 from shift_single_frozen.method import FrozenSingleResidualInjector
@@ -59,6 +60,8 @@ def main() -> None:
     injector = FrozenSingleResidualInjector.from_config(checkpoint["injector_config"]).to(device)
     injector.load_state_dict(checkpoint["injector_state_dict"], strict=True)
     adapter.attach_pre_temporal_conditioner(injector)
+    if args.baseline == "desc":
+        adapter.set_pre_temporal_conditioning_streams({"sensitivity"})
     adapter.requires_grad_(False)
     adapter.eval()
 
@@ -85,24 +88,30 @@ def main() -> None:
             else:
                 clip = np.concatenate([np.load(str(path)).astype(np.float32) for path in group["clip_path"]])
                 neurons = np.concatenate([np.load(str(path)).astype(np.float32) for path in group["neuron_path"]])
-                clip_chunks, lengths = pad_chunks(clip, adapter.visual_length)
-                neuron_chunks, neuron_lengths = pad_chunks(neurons, adapter.visual_length)
-                if not torch.equal(lengths, neuron_lengths):
-                    raise RuntimeError(f"{key}: modality lengths differ")
-                result, _ = adapter.forward_conditioned(
-                    clip_chunks.to(device), neuron_chunks.to(device), lengths.to(device),
-                )
-                class_batch = class_probabilities(
-                    result.binary_logits, result.semantic_logits, args.baseline, temperature,
-                )
-                binary_parts, refined_parts, class_parts = [], [], []
-                for index, length in enumerate(lengths.tolist()):
-                    binary_parts.append(torch.sigmoid(result.binary_logits[index, :length]).cpu())
-                    class_parts.append(class_batch[index, :length].cpu())
-                    refined_parts.append((1.0 - class_batch[index, :length, 0]).cpu())
-                binary = torch.cat(binary_parts).numpy().astype(np.float32)
-                refined = torch.cat(refined_parts).numpy().astype(np.float32)
-                class_prob = torch.cat(class_parts).numpy().astype(np.float32)
+                if args.baseline == "desc":
+                    probability = desc_official_probabilities(adapter, clip, device, neurons)
+                    binary = probability["binary"].numpy().astype(np.float32)
+                    class_prob = probability["semantic"].numpy().astype(np.float32)
+                    refined = (1.0 - class_prob[:, 0]).astype(np.float32)
+                else:
+                    clip_chunks, lengths = pad_chunks(clip, adapter.visual_length)
+                    neuron_chunks, neuron_lengths = pad_chunks(neurons, adapter.visual_length)
+                    if not torch.equal(lengths, neuron_lengths):
+                        raise RuntimeError(f"{key}: modality lengths differ")
+                    result, _ = adapter.forward_conditioned(
+                        clip_chunks.to(device), neuron_chunks.to(device), lengths.to(device),
+                    )
+                    class_batch = class_probabilities(
+                        result.binary_logits, result.semantic_logits, args.baseline, temperature,
+                    )
+                    binary_parts, refined_parts, class_parts = [], [], []
+                    for index, length in enumerate(lengths.tolist()):
+                        binary_parts.append(torch.sigmoid(result.binary_logits[index, :length]).cpu())
+                        class_parts.append(class_batch[index, :length].cpu())
+                        refined_parts.append((1.0 - class_batch[index, :length, 0]).cpu())
+                    binary = torch.cat(binary_parts).numpy().astype(np.float32)
+                    refined = torch.cat(refined_parts).numpy().astype(np.float32)
+                    class_prob = torch.cat(class_parts).numpy().astype(np.float32)
                 np.savez_compressed(cache_path, binary=binary, refined=refined, class_prob=class_prob)
             binary_all.append(binary)
             refined_all.append(refined)
@@ -122,6 +131,14 @@ def main() -> None:
             "ap": float(average_precision_score(ground_truth, scores)),
             "frames": len(ground_truth),
         }
+    primary_name = "official_refined" if args.baseline == "desc" and args.dataset == "xd" else "binary_score_head"
+    metrics["official_primary"] = {
+        **metrics[primary_name],
+        "source": primary_name,
+        "protocol": (
+            f"desc_author_release_{args.dataset}_v1" if args.baseline == "desc" else "native_chunked_v1"
+        ),
+    }
     if args.gt_segment_path and args.gt_label_path:
         utility = Path(args.baseline_root) / "src" / "utils" / f"{args.dataset}_detectionMAP.py"
         if utility.exists():

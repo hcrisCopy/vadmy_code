@@ -22,6 +22,10 @@ if str(PACKAGE_ROOT) not in sys.path:
 from neuron_responsibility.baselines import build_baseline
 from neuron_responsibility.common import clean_output, load_json
 from neuron_responsibility.data import AlignedFeatureDataset
+from neuron_responsibility.desc_inference import (
+    desc_official_probabilities,
+    desc_primary_anomaly_probability,
+)
 from neuron_responsibility.evaluate import file_signature, pad_chunks
 from shift_residual_head_tuning.train import add_baseline_arguments, epoch_batches, seed_everything
 from shift_single_frozen.method import (
@@ -32,6 +36,7 @@ from shift_single_frozen.provenance import load_and_verify_selection_provenance
 
 def official_frame_metrics(
     adapter,
+    baseline: str,
     aligned_csv: str,
     gt_path: str,
     frames_per_snippet: int,
@@ -48,6 +53,10 @@ def official_frame_metrics(
         ):
             clip = np.concatenate([np.load(str(path)).astype(np.float32) for path in group["clip_path"]])
             neurons = np.concatenate([np.load(str(path)).astype(np.float32) for path in group["neuron_path"]])
+            if baseline == "desc":
+                probability = desc_official_probabilities(adapter, clip, device, neurons)
+                predictions.append(desc_primary_anomaly_probability(probability, adapter.dataset))
+                continue
             clip_chunks, lengths = pad_chunks(clip, adapter.visual_length)
             neuron_chunks, neuron_lengths = pad_chunks(neurons, adapter.visual_length)
             if not torch.equal(lengths, neuron_lengths):
@@ -118,6 +127,8 @@ def main() -> None:
         depth=args.residual_depth,
     ).to(device)
     adapter.attach_pre_temporal_conditioner(injector)
+    if args.baseline == "desc":
+        adapter.set_pre_temporal_conditioning_streams({"sensitivity"})
     baseline_trainable = freeze_entire_baseline(adapter, injector)
     optimizer = torch.optim.AdamW(injector.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
@@ -136,8 +147,10 @@ def main() -> None:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.max_epoch)
         scheduler_rule, scheduler_per_step = "CosineAnnealingLR per epoch", False
     elif args.baseline == "desc":
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[4, 8], gamma=0.1)
-        scheduler_rule, scheduler_per_step = "MultiStepLR milestones=[4,8], gamma=0.1 per epoch", False
+        milestones = [4, 8] if args.dataset == "ucf" else [6, 8]
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
+        scheduler_rule = f"MultiStepLR milestones={milestones}, gamma=0.1 per epoch"
+        scheduler_per_step = False
     else:
         from transformers import get_scheduler
         scheduler = get_scheduler(
@@ -163,6 +176,11 @@ def main() -> None:
         "weight_decay": args.weight_decay,
         "max_epoch": args.max_epoch,
         "paired_training": paired,
+        "conditioning_streams": ["sensitivity"] if args.baseline == "desc" else ["all"],
+        "loss_scope": "sensitivity_mil_plus_alignment" if args.baseline == "desc" else "baseline_original",
+        "inference_protocol": (
+            f"desc_author_release_{args.dataset}_v1" if args.baseline == "desc" else "native_chunked_v1"
+        ),
         "scheduler": scheduler_rule,
         "injector_config": injector.config(),
         "baseline_trainable_tensors": baseline_trainable,
@@ -211,7 +229,10 @@ def main() -> None:
 
     def validate(epoch: int, tag: str) -> dict[str, float]:
         nonlocal best
-        metrics = official_frame_metrics(adapter, args.val_list, args.gt_path, args.frames_per_snippet, device)
+        metrics = official_frame_metrics(
+            adapter, args.baseline, args.val_list, args.gt_path,
+            args.frames_per_snippet, device,
+        )
         selected = metrics["frame_auc" if args.dataset == "ucf" else "frame_ap"]
         if selected > best:
             best = selected
@@ -236,7 +257,7 @@ def main() -> None:
             lengths = batch["length"].to(device, non_blocking=True)
             labels = batch["binary_label"].to(device, non_blocking=True)
             output, records = adapter.forward_conditioned(clip, neurons, lengths)
-            loss = adapter.original_loss(output, labels, list(batch["label_text"]), lengths)
+            loss = adapter.single_residual_loss(output, labels, list(batch["label_text"]), lengths)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()

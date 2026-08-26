@@ -18,6 +18,10 @@ if str(PACKAGE_ROOT) not in sys.path:
 
 from neuron_responsibility.baselines import build_baseline
 from neuron_responsibility.common import clean_output, grouped_rows, is_normal_label, read_feature_csv, write_csv
+from neuron_responsibility.desc_inference import (
+    desc_official_probabilities,
+    desc_primary_anomaly_probability,
+)
 from neuron_responsibility.evaluate import pad_chunks
 
 
@@ -64,12 +68,18 @@ def main() -> None:
                 clip = np.concatenate([
                     np.load(str(path)).astype(np.float32) for path in group["path"]
                 ])
-                clip_chunks, lengths = pad_chunks(clip, adapter.visual_length)
-                output = adapter.forward_baseline(clip_chunks.to(device), lengths.to(device))
-                values = []
-                for index, length in enumerate(lengths.tolist()):
-                    values.append(torch.sigmoid(output.binary_logits[index, :length]).cpu())
-                scores = torch.cat(values).numpy().astype(np.float32)
+                if args.baseline == "desc":
+                    probability = desc_official_probabilities(adapter, clip, device)
+                    scores = desc_primary_anomaly_probability(
+                        probability, args.dataset
+                    ).numpy().astype(np.float32)
+                else:
+                    clip_chunks, lengths = pad_chunks(clip, adapter.visual_length)
+                    output = adapter.forward_baseline(clip_chunks.to(device), lengths.to(device))
+                    values = []
+                    for index, length in enumerate(lengths.tolist()):
+                        values.append(torch.sigmoid(output.binary_logits[index, :length]).cpu())
+                    scores = torch.cat(values).numpy().astype(np.float32)
                 if not len(scores) or not np.isfinite(scores).all():
                     raise RuntimeError(f"{key}: baseline produced invalid scores")
                 np.save(output_path, scores)

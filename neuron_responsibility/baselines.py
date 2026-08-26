@@ -91,6 +91,11 @@ def _apply_pre_temporal_conditioning(
 ) -> torch.Tensor:
     if owner.pre_temporal_conditioner is None or owner._current_neurons is None:
         return features
+    if (
+        owner.pre_temporal_conditioning_streams is not None
+        and stream_name not in owner.pre_temporal_conditioning_streams
+    ):
+        return features
     conditioned, record = owner.pre_temporal_conditioner(
         features,
         owner._current_neurons,
@@ -161,6 +166,7 @@ class BaselineAdapter(nn.Module):
         super().__init__()
         self.feature_modulator: nn.Module | None = None
         self.pre_temporal_conditioner: nn.Module | None = None
+        self.pre_temporal_conditioning_streams: frozenset[str] | None = None
         self._current_neurons: torch.Tensor | None = None
         self._current_lengths: torch.Tensor | None = None
         self._modulation_records: list[dict[str, torch.Tensor | str]] = []
@@ -175,6 +181,14 @@ class BaselineAdapter(nn.Module):
         if self.pre_temporal_conditioner is not None:
             raise RuntimeError("a pre-temporal conditioner is already attached")
         self.pre_temporal_conditioner = conditioner
+
+    def set_pre_temporal_conditioning_streams(self, streams: set[str] | None) -> None:
+        """Restrict residual injection to named streams; ``None`` keeps legacy behavior."""
+        if streams is not None and not streams:
+            raise ValueError("conditioning stream selection cannot be empty")
+        self.pre_temporal_conditioning_streams = (
+            None if streams is None else frozenset(streams)
+        )
 
     def forward_conditioned(
         self,
@@ -227,6 +241,20 @@ class BaselineAdapter(nn.Module):
 
     def original_loss(self, output: BaselineOutput, labels: torch.Tensor, texts: list[str], lengths: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
+
+    def single_residual_loss(
+        self,
+        output: BaselineOutput,
+        labels: torch.Tensor,
+        texts: list[str],
+        lengths: torch.Tensor,
+    ) -> torch.Tensor:
+        """Loss for the frozen single-residual experiment.
+
+        Most baselines retain their released objective. DeSC overrides this
+        because its two streams were trained with decoupled objectives.
+        """
+        return self.original_loss(output, labels, texts, lengths)
 
     def set_train_scope(self, scope: str) -> None:
         raise NotImplementedError
@@ -363,6 +391,18 @@ class DeSCAdapter(BaselineAdapter):
             total = total + binary_topk_mil(stream[1].squeeze(-1), labels, lengths)
             total = total + multiclass_topk_mil(stream[2], target, lengths)
         return total
+
+    def single_residual_loss(self, output, labels, texts, lengths):
+        """Paper sensitivity objective: binary MIL plus visual-text alignment.
+
+        Only ``output.raw[0]`` is used. The released consistency stream remains
+        an untouched inference ensemble and receives no residual gradient.
+        """
+        sensitivity = output.raw[0]
+        target = class_targets(texts, self.label_map, output.binary_logits.device)
+        return binary_topk_mil(sensitivity[1].squeeze(-1), labels, lengths) + multiclass_topk_mil(
+            sensitivity[2], target, lengths
+        )
 
     def set_train_scope(self, scope: str) -> None:
         if scope not in {"frozen", "heads", "temporal_only", "temporal_heads"}:

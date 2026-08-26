@@ -133,6 +133,8 @@ python -m shift_single_frozen.visualize_diagnostics \
 
 每条都包含打分、探测、对齐、训练、评估和可视化；中断后重跑会复用完成产物并自动续训。
 
+DeSC修正版会写入`../vadmy_data/shift_single_frozen/<dataset>/desc_sensitivity_v2/`：残差只进入Sensitivity流，训练学习率为论文给出的`1e-3`；UCF/XD分别采用作者发布的滑窗/整段缩放评估。旧DeSC实验不会被覆盖。
+
 ```bash
 conda activate dsanet
 bash shift_single_frozen/commands/run_dsanet_ucf.sh

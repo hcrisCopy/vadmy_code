@@ -6,5 +6,13 @@ The shared sparse expert selected 32 CLS hidden-state dimensions per CLIP layer 
 
 ## Trial 2 — conservative logit shrinkage plus standardized neuron evidence
 
-Hypothesis: retain only 20% of the learned correction and add 0.1 times video-wise standardized neuron evidence in logit space. Standardization makes the identical coefficient meaningful across all baselines and datasets; shrinkage protects strong baseline rankings. A read-only preflight on cached curves predicted all six results above their paper baselines, with DeSC UCF as the limiting combination. Formal remote verification is pending in this trial.
+Hypothesis: retain only 20% of the learned correction and add 0.1 times video-wise standardized neuron evidence in logit space. Standardization makes the identical coefficient meaningful across all baselines and datasets; shrinkage protects strong baseline rankings. Formal results were LaGoVAD UCF 82.960 (+1.840), LaGoVAD XD 76.627 (+2.377), DeSC UCF 89.437 (+0.067), DeSC XD 87.366 (+0.186), DSANet UCF 89.482 (+0.042), and DSANet XD 87.476 (+0.526). Minimum gain: +0.042 pp. The trial was retained.
+
+## Trial 3 — train-only consensus distillation into sparse CLS neurons (`3c90d7c`, discarded)
+
+The DeSC/DSANet training-score consensus was distilled into a 32-neurons-per-layer sparse expert. Results were LaGoVAD UCF 82.175 (+1.055), LaGoVAD XD 75.642 (+1.392), DeSC UCF 89.450 (+0.080), DeSC XD 87.348 (+0.168), DSANet UCF 89.463 (+0.023), and DSANet XD 87.326 (+0.376). Minimum gain: +0.023 pp, below the retained +0.042. Dense pseudo supervision improved DeSC UCF slightly but weakened the expert's useful complementary evidence elsewhere.
+
+## Trial 4 — neuron-gated dual-anchor consensus
+
+Hypothesis: retain DeSC/DSANet complementarity directly, calibrate their score scales with empirical CDFs fitted only on training predictions, use a fixed width-25 event expansion, and add standardized CLS-neuron evidence. The same rank weight 0.5, expansion weight 0.5, and neuron weight 0.15 are used on both datasets and for all reported baselines. This explicitly costs two anchor-baseline inference passes. Formal verification is pending.
 

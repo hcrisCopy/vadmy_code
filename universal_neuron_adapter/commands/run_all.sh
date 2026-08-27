@@ -22,6 +22,13 @@ for dataset in ucf xd; do
   python -m universal_neuron_adapter.export_diverse_expert \
     --manifest "$SOURCE/$dataset/data/test.csv" --expert-model "$diverse/expert_best.pth" \
     --out-dir "$diverse/test" --device cuda
+  normality="$ROOT/normality_expert_cache/$dataset/top32_v1"
+  python -m universal_neuron_adapter.fit_normality_expert \
+    --manifest "$SOURCE/$dataset/data/expert_train.csv" --out-dir "$normality" \
+    --active-per-layer 32 --maximum-length 256 --resume
+  python -m universal_neuron_adapter.export_normality_expert \
+    --manifest "$SOURCE/$dataset/data/test.csv" --expert-model "$normality/normality_expert.npz" \
+    --out-dir "$normality/test"
   for baseline in lagovad desc dsanet; do
     source_base="$SOURCE/$dataset/$baseline"
     target="$OUT/$dataset/$baseline/evaluation"
@@ -31,6 +38,7 @@ for dataset in ucf xd; do
       --expert-train-manifest "$SOURCE/$dataset/expert/train/expert_scores.csv" \
       --expert-manifest "$SOURCE/$dataset/expert/test/expert_scores.csv" \
       --expert2-manifest "$diverse/test/expert2_scores.csv" \
+      --expert3-manifest "$normality/test/expert3_scores.csv" \
       --correction-model "$source_base/correction/model_best.pth" \
       --gt-path "../vadmy_data/annotations/$dataset/gt.npy" \
       --baseline "$baseline" --dataset "$dataset" \

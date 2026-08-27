@@ -86,4 +86,12 @@ Using the mean of both sparse experts as direct evidence reduced the minimum gai
 
 ## New run Trial 20 - short-scale Gaussian temporal denoising
 
-Hypothesis: after width-15 persistent filtering, residual one-snippet jitter still creates false-positive ordering errors for strong baselines. Apply a universal Gaussian filter with sigma 1 snippet to the final within-video curve before the retained one-snippet alignment. No new features or trainable parameters are introduced. Formal remote verification is pending.
+Hypothesis: after width-15 persistent filtering, residual one-snippet jitter still creates false-positive ordering errors for strong baselines. Apply a universal Gaussian filter with sigma 1 snippet to the final within-video curve before the retained one-snippet alignment. Formal results were LaGoVAD UCF 86.535 (+5.415), LaGoVAD XD 79.586 (+5.336), DeSC UCF 90.003 (+0.633), DeSC XD 87.797 (+0.617), DSANet UCF 89.970 (+0.530), and DSANet XD 87.944 (+0.994). Minimum gain was +0.530 pp, so the trial was retained.
+
+## New run Trial 21 - fractional temporal alignment (discarded)
+
+A universal 1.5-snippet interpolated advance reduced the minimum gain to +0.523 pp, so the trial was reverted. The retained one-snippet alignment remains preferable.
+
+## New run Trial 22 - baseline-independent normality neuron expert
+
+Hypothesis: both existing experts learn from abnormal-video top-k MIL and therefore share localization errors. Fit normal neuron moments using only normal training videos, select 32 CLS dimensions per layer whose top-k deviation separates abnormal training videos, and add their snippet-level deviation at weight 0.5 only to the universal event gate. The expert is trained once per dataset and shared by all baselines; it never consumes a baseline score or test annotation. Formal remote verification is pending.

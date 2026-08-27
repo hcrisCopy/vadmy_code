@@ -61,6 +61,7 @@ def main() -> None:
     parser.add_argument("--expert-train-manifest", required=True)
     parser.add_argument("--expert-manifest", required=True)
     parser.add_argument("--expert2-manifest", required=True)
+    parser.add_argument("--expert3-manifest", required=True)
     parser.add_argument("--correction-model", required=True)
     parser.add_argument("--gt-path", required=True)
     parser.add_argument("--baseline", choices=["lagovad", "desc", "dsanet"], required=True)
@@ -107,13 +108,15 @@ def main() -> None:
     baseline = pd.read_csv(args.baseline_manifest)
     expert = pd.read_csv(args.expert_manifest)[["key", "expert_score_path"]]
     expert2 = pd.read_csv(args.expert2_manifest)[["key", "expert2_score_path"]]
-    frame = baseline.merge(expert, on="key", validate="one_to_one").merge(expert2, on="key", validate="one_to_one")
+    expert3 = pd.read_csv(args.expert3_manifest)[["key", "expert3_score_path"]]
+    frame = baseline.merge(expert, on="key", validate="one_to_one").merge(expert2, on="key", validate="one_to_one").merge(expert3, on="key", validate="one_to_one")
     baseline_curves, corrected_curves, rows = [], [], []
     with torch.no_grad():
         for row in tqdm(frame.itertuples(index=False), total=len(frame), desc=f"evaluate {args.baseline}/{args.dataset}"):
             base = np.load(str(row.baseline_score_path)).astype(np.float32)
             neuron = resample_curve(np.load(str(row.expert_score_path)), len(base))
             neuron2 = resample_curve(np.load(str(row.expert2_score_path)), len(base))
+            neuron3 = resample_curve(np.load(str(row.expert3_score_path)), len(base))
             base_tensor = torch.from_numpy(base).unsqueeze(0).to(device)
             neuron_tensor = torch.from_numpy(neuron).unsqueeze(0).to(device)
             correction = model(base_tensor, neuron_tensor)
@@ -122,7 +125,8 @@ def main() -> None:
             )[0].cpu().numpy().astype(np.float32)
             standardized = (neuron - neuron.mean()) / max(float(neuron.std()), 1e-6)
             standardized2 = (neuron2 - neuron2.mean()) / max(float(neuron2.std()), 1e-6)
-            neuron_gate = 1.0 / (1.0 + np.exp(-(standardized + standardized2)))
+            standardized3 = (neuron3 - neuron3.mean()) / max(float(neuron3.std()), 1e-6)
+            neuron_gate = 1.0 / (1.0 + np.exp(-(standardized + standardized2 + 0.5 * standardized3)))
             expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
             corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
             decision = float(video_model.decision_function(np.asarray(joint_video_features(base, neuron))[None])[0])
@@ -165,7 +169,7 @@ def main() -> None:
             "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(2 * video-standardized neuron evidence)",
-            "event_gate_experts": "mean evidence from 32- and 64-neurons-per-layer experts",
+            "event_gate_experts": "MIL experts plus 0.5-weight baseline-independent normality expert",
             "normal_suppression_weight": args.normal_suppression_weight,
             "video_prior": "one-sided joint current-baseline and CLS-neuron training classifier",
             "persistence_width": args.persistence_width,

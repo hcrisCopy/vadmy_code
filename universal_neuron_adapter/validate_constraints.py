@@ -28,6 +28,8 @@ def main() -> None:
         raise RuntimeError("training and test must each use exactly one shared CLS-neuron stream")
     if command.count("--expert2-manifest") != 1:
         raise RuntimeError("evaluation must use exactly one shared diverse CLS-neuron expert")
+    if command.count("--expert3-manifest") != 1:
+        raise RuntimeError("evaluation must use exactly one shared normality CLS-neuron expert")
     if '"$source_base/baseline_train/' not in command or '"$source_base/baseline_test/' not in command:
         raise RuntimeError("training calibration and evaluation must use the current baseline only")
     if '--baseline "$baseline"' not in command:

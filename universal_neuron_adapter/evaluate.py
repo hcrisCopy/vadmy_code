@@ -102,6 +102,7 @@ def main() -> None:
     parser.add_argument("--event-weight", type=float, default=1.0)
     parser.add_argument("--normality-gate-weight", type=float, default=0.5)
     parser.add_argument("--normality-smoothing-blend", type=float, default=0.0)
+    parser.add_argument("--agreement-residual-weight", type=float, default=0.0)
     parser.add_argument("--normal-suppression-weight", type=float, default=1.0)
     parser.add_argument("--persistence-width", type=int, default=15)
     parser.add_argument("--persistence-weight", type=float, default=0.75)
@@ -176,6 +177,9 @@ def main() -> None:
                 smooth_neuron3 = gaussian_filter1d(neuron3, 1.0, mode="nearest")
                 neuron3 = (1.0 - args.normality_smoothing_blend) * neuron3 + args.normality_smoothing_blend * smooth_neuron3
             standardized3 = (neuron3 - neuron3.mean()) / max(float(neuron3.std()), 1e-6)
+            standardized_base = (base - base.mean()) / max(float(base.std()), 1e-6)
+            high_high = np.minimum(np.maximum(standardized_base, 0.0), np.maximum(standardized, 0.0))
+            corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.agreement_residual_weight * high_high)))
             neuron_gate = 1.0 / (1.0 + np.exp(-(standardized + standardized2 + args.normality_gate_weight * standardized3)))
             expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
             corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
@@ -225,6 +229,7 @@ def main() -> None:
             "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
             "normality_gate_weight": args.normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,
+            "agreement_residual_weight": args.agreement_residual_weight,
             "normal_suppression_weight": args.normal_suppression_weight,
             "video_prior": "retained one-sided classifier plus 0.25-weight consensus normality suppression",
             "persistence_width": args.persistence_width,

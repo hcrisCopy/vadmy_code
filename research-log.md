@@ -120,4 +120,10 @@ Hypothesis: the normality-aware video classifier contains useful DSANet normal-v
 
 ## New run Trial 30 - rebalanced neuron-gated event support
 
-Hypothesis: after adding the strong normality gate, width 51 propagates peaks slightly too far on XD, while width 31 loses UCF support. A read-only universal scan found width 41 gave a +0.664 pp minimum gain versus +0.646 at width 31 and +0.656 for the retained width 51. Fix width 41 for all six combinations; formal remote verification is pending.
+Hypothesis: after adding the strong normality gate, width 51 propagates peaks slightly too far on XD, while width 31 loses UCF support. A read-only universal scan found width 41 gave a +0.664 pp minimum gain versus +0.646 at width 31 and +0.656 for the retained width 51. Formal results were LaGoVAD UCF 86.720 (+5.600), LaGoVAD XD 79.270 (+5.020), DeSC UCF 90.034 (+0.664), DeSC XD 87.846 (+0.666), DSANet UCF 90.134 (+0.694), and DSANet XD 87.893 (+0.943). Minimum gain was +0.664 pp, so width 41 was retained.
+
+Post-Trial-30 diagnostics rejected learned three-expert snippet fusion (+0.620 minimum), normal-suppression weights 1.0/2.0 (+0.661/+0.647), persistence widths 11/19 (+0.642/+0.628), a pure-neuron video normality classifier (+0.664), normality power transforms 0.5/1.5 (+0.661/+0.663), positive video shifts (at most +0.500), top-gated positive shifts (at most +0.642), and larger direct-neuron weights 0.5/0.6 (+0.630/+0.575). These variants either relearned noisy MIL localization or improved UCF while corrupting XD cross-video ordering.
+
+## New run Trial 31 - high-high baseline-neuron agreement residual
+
+Hypothesis: a larger unconditional neuron residual helps UCF but hurts XD because it also changes baseline-neuron conflicts. Add a 0.1 logit residual only where the current single baseline and the first CLS-neuron expert are both above their within-video means, using their minimum standardized evidence. No low-low or conflicting snippet is changed by this new branch. A read-only six-way preflight reached a +0.665 pp minimum gain; formal remote verification is pending.

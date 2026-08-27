@@ -51,6 +51,7 @@ for dataset in ucf xd; do
       --event-width 41 --event-weight 1.0 \
       --normality-gate-weight 1.5 \
       --normality-smoothing-blend 0.25 \
+      --agreement-residual-weight 0.1 \
       --normal-suppression-weight 1.5 \
       --persistence-width 15 --persistence-weight 0.75 \
       --gaussian-sigma 1.0 \

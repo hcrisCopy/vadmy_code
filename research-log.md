@@ -74,4 +74,8 @@ Hypothesis: one 32-neurons-per-layer expert has insufficient localization divers
 
 ## New run Trial 16 - stronger direct neuron correction
 
-Hypothesis: the diverse expert improved all six metrics, but the direct neuron residual remains underweighted relative to event propagation. Increase the universal direct neuron weight from 0.1 to 0.2 for every dataset and baseline. A read-only global scan predicted a minimum gain of +0.523 pp without any per-dataset or per-baseline choice. Formal remote verification is pending.
+Hypothesis: the diverse expert improved all six metrics, but the direct neuron residual remains underweighted relative to event propagation. Increase the universal direct neuron weight from 0.1 to 0.2 for every dataset and baseline. Formal results were LaGoVAD UCF 86.208 (+5.088), LaGoVAD XD 79.539 (+5.289), DeSC UCF 89.924 (+0.554), DeSC XD 87.766 (+0.586), DSANet UCF 89.963 (+0.523), and DSANet XD 87.804 (+0.854). Minimum gain was +0.523 pp, so the trial was retained.
+
+## New run Trial 17 - neuron residual saturation probe
+
+Hypothesis: the direct CLS-neuron residual is still below its useful saturation point. Increase its universal weight from 0.2 to 0.4 while retaining all other operations. A read-only shared-parameter scan predicted +0.528 pp minimum gain and simultaneous improvement over Trial 16 in both UCF strong baselines. Formal remote verification is pending.

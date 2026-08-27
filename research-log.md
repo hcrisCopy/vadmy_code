@@ -18,5 +18,9 @@ The method replaced the learned correction with current-baseline training-CDF ca
 
 ## New run Trial 2 - CLS-neuron-gated event expansion
 
-Hypothesis: retain the conservative learned correction and propagate a local peak only where standardized CLS-neuron evidence independently supports anomaly. A sigmoid gate, width 25, and event weight 0.6 are fixed across all baselines and datasets. Formal remote verification is pending.
+Hypothesis: retain the conservative learned correction and propagate a local peak only where standardized CLS-neuron evidence independently supports anomaly. A sigmoid gate, width 25, and event weight 0.6 are fixed across all baselines and datasets. Formal results were LaGoVAD UCF 83.332 (+2.212), LaGoVAD XD 77.194 (+2.944), DeSC UCF 89.589 (+0.219), DeSC XD 87.511 (+0.331), DSANet UCF 89.719 (+0.279), and DSANet XD 87.535 (+0.585). Minimum gain was +0.219 pp, so the trial was retained.
+
+## New run Trial 3 - full neuron-gated propagation
+
+Hypothesis: when the CLS-neuron gate is active, use the full local event peak instead of the conservative 0.6 blend. The width-25 neighborhood and every other parameter remain unchanged across all six combinations. Formal remote verification is pending.
 

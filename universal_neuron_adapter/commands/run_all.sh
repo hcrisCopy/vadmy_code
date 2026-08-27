@@ -22,7 +22,7 @@ for dataset in ucf xd; do
       --baseline "$baseline" --dataset "$dataset" \
       --out-dir "$target" --frames-per-snippet 16 \
       --correction-weight 0.2 --neuron-weight 0.1 \
-      --event-width 25 --event-weight 0.6 --device cuda
+      --event-width 25 --event-weight 1.0 --device cuda
   done
 done
 

@@ -28,7 +28,7 @@ def main() -> None:
     parser.add_argument("--correction-weight", type=float, default=0.2)
     parser.add_argument("--neuron-weight", type=float, default=0.1)
     parser.add_argument("--event-width", type=int, default=25)
-    parser.add_argument("--event-weight", type=float, default=0.6)
+    parser.add_argument("--event-weight", type=float, default=1.0)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 

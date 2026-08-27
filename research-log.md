@@ -34,5 +34,9 @@ Hypothesis: fit the same five-feature video classifier on each current baseline'
 
 ## New run Trial 6 - persistent neuron-gated events
 
-Hypothesis: isolated corrected peaks are likely false alarms, whereas true events persist across neighboring snippets. Blend the retained score with a width-15 median filter at weight 0.75 after neuron-gated expansion and one-sided normal suppression. The same persistence parameters are fixed for all six combinations. Formal remote verification is pending.
+Hypothesis: isolated corrected peaks are likely false alarms, whereas true events persist across neighboring snippets. Blend the retained score with a width-15 median filter at weight 0.75 after neuron-gated expansion and one-sided normal suppression. Formal results were LaGoVAD UCF 83.219 (+2.099), LaGoVAD XD 77.359 (+3.109), DeSC UCF 89.781 (+0.411), DeSC XD 87.708 (+0.528), DSANet UCF 89.854 (+0.414), and DSANet XD 87.477 (+0.527). Minimum gain was +0.411 pp, so the trial was retained.
+
+## New run Trial 7 - joint baseline-neuron normal suppression
+
+Hypothesis: combine distribution, top-k, temporal-change, and agreement statistics from the current baseline and the CLS-neuron expert in the same linear video classifier. Use its output only for one-sided normal suppression; event propagation and persistence are unchanged. Formal remote verification is pending.
 

@@ -17,6 +17,7 @@ for dataset in ucf xd; do
     python -m universal_neuron_adapter.evaluate \
       --baseline-train-manifest "$source_base/baseline_train/baseline_scores.csv" \
       --baseline-manifest "$source_base/baseline_test/baseline_scores.csv" \
+      --expert-train-manifest "$SOURCE/$dataset/expert/train/expert_scores.csv" \
       --expert-manifest "$SOURCE/$dataset/expert/test/expert_scores.csv" \
       --correction-model "$source_base/correction/model_best.pth" \
       --gt-path "../vadmy_data/annotations/$dataset/gt.npy" \

@@ -18,14 +18,35 @@ from universal_neuron_adapter.data import resample_curve
 from universal_neuron_adapter.model import ScoreCorrectionHead, calibrated_probability
 
 
-def video_features(curve: np.ndarray) -> list[float]:
+def video_features(curve: np.ndarray) -> np.ndarray:
     curve = np.asarray(curve, dtype=np.float32)
-    count = max(1, int(np.ceil(0.1 * len(curve))))
-    top = np.partition(curve, len(curve) - count)[-count:]
-    return [
-        float(curve.mean()), float(curve.max()), float(top.mean()),
-        float(curve.std()), float(np.quantile(curve, 0.9)),
-    ]
+    change = np.abs(np.diff(curve))
+    quantiles = np.quantile(curve, np.linspace(0.1, 0.9, 9))
+    top_means = []
+    for fraction in (0.01, 0.05, 0.1, 0.2):
+        count = max(1, int(np.ceil(fraction * len(curve))))
+        top_means.append(float(np.partition(curve, len(curve) - count)[-count:].mean()))
+    return np.asarray([
+        np.log1p(len(curve)), float(curve.mean()), float(curve.std()),
+        float(curve.min()), float(curve.max()), *quantiles.tolist(), *top_means,
+        float(change.mean()) if len(change) else 0.0,
+        float(change.std()) if len(change) else 0.0,
+        float(change.max()) if len(change) else 0.0,
+    ], dtype=np.float32)
+
+
+def joint_video_features(baseline: np.ndarray, neuron: np.ndarray) -> np.ndarray:
+    neuron = resample_curve(neuron, len(baseline))
+    correlation = 0.0
+    if len(baseline) > 1 and baseline.std() > 0 and neuron.std() > 0:
+        correlation = float(np.corrcoef(baseline, neuron)[0, 1])
+    return np.concatenate([
+        video_features(baseline), video_features(neuron),
+        np.asarray([
+            correlation, float(np.mean(np.abs(baseline - neuron))),
+            float(np.max(baseline - neuron)), float(np.max(neuron - baseline)),
+        ], dtype=np.float32),
+    ])
 
 
 def logit(curve: np.ndarray) -> np.ndarray:
@@ -37,6 +58,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate conservative universal CLS-neuron fusion.")
     parser.add_argument("--baseline-train-manifest", required=True)
     parser.add_argument("--baseline-manifest", required=True)
+    parser.add_argument("--expert-train-manifest", required=True)
     parser.add_argument("--expert-manifest", required=True)
     parser.add_argument("--correction-model", required=True)
     parser.add_argument("--gt-path", required=True)
@@ -65,13 +87,19 @@ def main() -> None:
     model.to(device).eval()
 
     baseline_train = pd.read_csv(args.baseline_train_manifest)
+    expert_train = pd.read_csv(args.expert_train_manifest)[["key", "expert_score_path"]]
+    video_train = baseline_train.merge(expert_train, on="key", validate="one_to_one")
     video_model = make_pipeline(
         StandardScaler(),
         LogisticRegression(class_weight="balanced", max_iter=1000, random_state=3407),
     )
     video_model.fit(
-        np.asarray([video_features(np.load(str(row.baseline_score_path))) for row in baseline_train.itertuples(index=False)]),
-        baseline_train["binary_label"].to_numpy(),
+        np.asarray([
+            joint_video_features(
+                np.load(str(row.baseline_score_path)), np.load(str(row.expert_score_path))
+            ) for row in video_train.itertuples(index=False)
+        ]),
+        video_train["binary_label"].to_numpy(),
     )
     baseline = pd.read_csv(args.baseline_manifest)
     expert = pd.read_csv(args.expert_manifest)[["key", "expert_score_path"]]
@@ -91,7 +119,7 @@ def main() -> None:
             neuron_gate = 1.0 / (1.0 + np.exp(-2.0 * standardized))
             expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
             corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
-            decision = float(video_model.decision_function(np.asarray(video_features(base))[None])[0])
+            decision = float(video_model.decision_function(np.asarray(joint_video_features(base, neuron))[None])[0])
             normal_shift = min(0.0, decision)
             corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.normal_suppression_weight * normal_shift)))
             persistent = median_filter(corrected, args.persistence_width, mode="nearest")
@@ -123,7 +151,7 @@ def main() -> None:
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(2 * video-standardized neuron evidence)",
             "normal_suppression_weight": args.normal_suppression_weight,
-            "video_prior": "one-sided current-baseline training classifier",
+            "video_prior": "one-sided joint current-baseline and CLS-neuron training classifier",
             "persistence_width": args.persistence_width,
             "persistence_weight": args.persistence_weight,
         },

@@ -15,27 +15,3 @@ def resample_curve(curve: np.ndarray, length: int) -> np.ndarray:
         curve,
     ).astype(np.float32)
 
-
-def resample_matrix(values: np.ndarray, length: int) -> np.ndarray:
-    values = np.asarray(values, dtype=np.float32)
-    if values.ndim != 2 or not len(values):
-        raise ValueError("expected a non-empty [time, feature] matrix")
-    if len(values) == length:
-        return values
-    positions = np.linspace(0.0, len(values) - 1, length, dtype=np.float32)
-    lower = np.floor(positions).astype(np.int64)
-    upper = np.minimum(lower + 1, len(values) - 1)
-    alpha = (positions - lower).reshape(-1, 1)
-    return (values[lower] * (1.0 - alpha) + values[upper] * alpha).astype(np.float32)
-
-
-def normalize_selected_layers(values: np.ndarray, layers: int = 12) -> np.ndarray:
-    """Normalize selected neuron activations within each CLIP layer and snippet."""
-    values = np.asarray(values, dtype=np.float32)
-    if values.ndim != 2 or values.shape[1] % layers:
-        raise ValueError(f"selected neuron width must be divisible by {layers}: {values.shape}")
-    grouped = values.reshape(len(values), layers, -1)
-    mean = grouped.mean(axis=-1, keepdims=True)
-    std = grouped.std(axis=-1, keepdims=True)
-    return ((grouped - mean) / np.maximum(std, 1e-6)).reshape(values.shape).astype(np.float32)
-

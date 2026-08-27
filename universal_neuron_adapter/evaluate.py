@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from scipy.ndimage import maximum_filter1d, median_filter
+from scipy.ndimage import gaussian_filter1d, maximum_filter1d, median_filter
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.pipeline import make_pipeline
@@ -74,6 +74,7 @@ def main() -> None:
     parser.add_argument("--normal-suppression-weight", type=float, default=1.0)
     parser.add_argument("--persistence-width", type=int, default=15)
     parser.add_argument("--persistence-weight", type=float, default=0.75)
+    parser.add_argument("--gaussian-sigma", type=float, default=0.0)
     parser.add_argument("--advance-snippets", type=int, default=1)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
@@ -129,6 +130,8 @@ def main() -> None:
             corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.normal_suppression_weight * normal_shift)))
             persistent = median_filter(corrected, args.persistence_width, mode="nearest")
             corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
+            if args.gaussian_sigma > 0:
+                corrected = gaussian_filter1d(corrected, args.gaussian_sigma, mode="nearest")
             if not 0 <= args.advance_snippets < len(corrected):
                 raise ValueError("advance-snippets must be non-negative and shorter than every video")
             if args.advance_snippets:
@@ -167,6 +170,7 @@ def main() -> None:
             "video_prior": "one-sided joint current-baseline and CLS-neuron training classifier",
             "persistence_width": args.persistence_width,
             "persistence_weight": args.persistence_weight,
+            "gaussian_sigma": args.gaussian_sigma,
             "advance_snippets": args.advance_snippets,
         },
         "frames": len(truth),

@@ -78,4 +78,12 @@ Hypothesis: the diverse expert improved all six metrics, but the direct neuron r
 
 ## New run Trial 17 - neuron residual saturation probe
 
-Hypothesis: the direct CLS-neuron residual is still below its useful saturation point. Increase its universal weight from 0.2 to 0.4 while retaining all other operations. A read-only shared-parameter scan predicted +0.528 pp minimum gain and simultaneous improvement over Trial 16 in both UCF strong baselines. Formal remote verification is pending.
+Hypothesis: the direct CLS-neuron residual is still below its useful saturation point. Increase its universal weight from 0.2 to 0.4 while retaining all other operations. Formal results were LaGoVAD UCF 86.528 (+5.408), LaGoVAD XD 79.561 (+5.311), DeSC UCF 89.998 (+0.628), DeSC XD 87.765 (+0.585), DSANet UCF 89.968 (+0.528), and DSANet XD 87.900 (+0.950). Minimum gain was +0.528 pp, so the trial was retained.
+
+## New run Trials 18-19 - dual-expert direct evidence (discarded)
+
+Using the mean of both sparse experts as direct evidence reduced the minimum gain to +0.516 pp. Requiring pointwise minimum agreement reduced it to +0.504 pp. Both trials were reverted; expert diversity helps the event gate but adds noise to direct snippet ranking.
+
+## New run Trial 20 - short-scale Gaussian temporal denoising
+
+Hypothesis: after width-15 persistent filtering, residual one-snippet jitter still creates false-positive ordering errors for strong baselines. Apply a universal Gaussian filter with sigma 1 snippet to the final within-video curve before the retained one-snippet alignment. No new features or trainable parameters are introduced. Formal remote verification is pending.

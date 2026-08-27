@@ -39,6 +39,7 @@ for dataset in ucf xd; do
       --event-width 51 --event-weight 1.0 \
       --normal-suppression-weight 1.5 \
       --persistence-width 15 --persistence-weight 0.75 \
+      --gaussian-sigma 1.0 \
       --advance-snippets 1 --device cuda
   done
 done

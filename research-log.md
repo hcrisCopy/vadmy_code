@@ -148,4 +148,8 @@ Hypothesis: absolute normal z-deviation treats both tails as anomalous even when
 
 ## New run Trial 37 - correction-head removal and stronger direct neuron evidence
 
-Hypothesis: the original learned correction head is redundant after directional normality and full persistence. Scanning correction weights 0.0/0.1/0.3 gave minima +0.7126/+0.7125/+0.7121 pp. With correction removed, direct-neuron weights 0.5/0.6/0.8 gave UCF minima +0.7195/+0.7222/+0.7129; weight 0.6 retained XD gains +3.864/+0.892/+1.036. Use correction weight 0 and direct-neuron weight 0.6 for all six combinations; formal remote verification is pending.
+Hypothesis: the original learned correction head is redundant after directional normality and full persistence. Scanning correction weights 0.0/0.1/0.3 gave minima +0.7126/+0.7125/+0.7121 pp. With correction removed, direct-neuron weights 0.5/0.6/0.8 gave UCF minima +0.7195/+0.7222/+0.7129. Formal results at weight 0.6 were LaGoVAD UCF 86.490 (+5.370), LaGoVAD XD 78.114 (+3.864), DeSC UCF 90.155 (+0.785), DeSC XD 88.072 (+0.892), DSANet UCF 90.162 (+0.722), and DSANet XD 87.986 (+1.036). Minimum gain was +0.722 pp, so correction removal and direct weight 0.6 were retained.
+
+## New run Trial 38 - stronger directional normality consensus
+
+Hypothesis: the one-sided expert can carry more gate weight than the former absolute-deviation expert because the learned direction removes the irrelevant tail. A UCF scan over weights 2.5/3.0/4.0/5.0 peaked at 3.0, where DSANet gained +0.728 pp; larger values declined. XD at weight 3.0 retained gains +3.309/+0.788/+0.879. Apply weight 3.0 universally; formal remote verification is pending.

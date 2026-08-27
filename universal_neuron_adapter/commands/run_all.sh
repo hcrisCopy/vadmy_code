@@ -53,7 +53,7 @@ for dataset in ucf xd; do
       --out-dir "$target" --frames-per-snippet 16 \
       --correction-weight 0.0 --neuron-weight 0.6 \
       --event-width 41 --event-weight 1.0 \
-      --normality-gate-weight 2.0 \
+      --normality-gate-weight 3.0 \
       --normality-smoothing-blend 0.25 \
       --agreement-residual-weight 0.15 \
       --normal-suppression-weight 1.5 \

@@ -130,4 +130,8 @@ Hypothesis: a larger unconditional neuron residual helps UCF but hurts XD becaus
 
 ## New run Trial 32 - training-calibrated persistence scale
 
-Hypothesis: a fixed snippet window ignores the temporal scale visible in the shared neuron experts. For each dataset, apply the same baseline-independent rule: measure the longest positive three-expert consensus run in every training video, multiply its 75th percentile by 0.35, round to the nearest odd integer, and clip to 7–21. The rule yields 15 on UCF and 11 on XD without branching on dataset identity or baseline. A combined preflight preserved Trial 31 on UCF and raised XD DeSC/DSANet to +0.688/+0.991 pp; formal remote verification is pending.
+Hypothesis: a fixed snippet window ignores the temporal scale visible in the shared neuron experts. For each dataset, apply the same baseline-independent rule: measure the longest positive three-expert consensus run in every training video, multiply its 75th percentile by 0.35, round to the nearest odd integer, and clip to 7–21. The rule yields 15 on UCF and 11 on XD without branching on dataset identity or baseline. Formal results were LaGoVAD UCF 86.834 (+5.714), LaGoVAD XD 79.252 (+5.002), DeSC UCF 90.059 (+0.689), DeSC XD 87.868 (+0.688), DSANet UCF 90.139 (+0.699), and DSANet XD 87.941 (+0.991). Minimum gain was +0.688 pp, so the adaptive scale was retained.
+
+## New run Trials 33-34 - full adaptive persistence projection
+
+Hypothesis: once the persistence width is calibrated from training neuron dynamics, mixing 25% of the unfiltered curve retains isolated false positives. A universal scan found persistence weights 0.5 and 1.0 produced minimum gains of +0.621 and +0.700 pp, respectively. Trial 33 was infrastructure-invalid: GitHub returned HTTP 503 during the remote pull, and the remote shell continued with the retained 0.75 configuration. Trial 34 retries the unchanged weight-1.0 hypothesis; formal remote verification is pending.

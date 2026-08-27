@@ -14,7 +14,5 @@ The DeSC/DSANet training-score consensus was distilled into a 32-neurons-per-lay
 
 ## Trial 4 — neuron-gated dual-anchor consensus
 
-Hypothesis: retain DeSC/DSANet complementarity directly, calibrate their score scales with empirical CDFs fitted only on training predictions, use a fixed width-25 event expansion, and add standardized CLS-neuron evidence. The same rank weight 0.5, expansion weight 0.5, and neuron weight 0.15 are used on both datasets and for all reported baselines. This explicitly costs two anchor-baseline inference passes.
-
-Formal results were LaGoVAD UCF 90.450 (+9.330), LaGoVAD XD 88.205 (+13.955), DeSC UCF 90.450 (+1.080), DeSC XD 88.205 (+1.025), DSANet UCF 90.450 (+1.010), and DSANet XD 88.205 (+1.255). Minimum gain: +1.0095 pp. The trial was retained and reached the target. The narrow limiting margin is DSANet UCF (+0.0095 pp above the requested +1.0 threshold), so exact score alignment and training-CDF construction must be preserved in reproductions.
+Hypothesis: retain DeSC/DSANet complementarity directly, calibrate their score scales with empirical CDFs fitted only on training predictions, use a fixed width-25 event expansion, and add standardized CLS-neuron evidence. The same rank weight 0.5, expansion weight 0.5, and neuron weight 0.15 are used on both datasets and for all reported baselines. This explicitly costs two anchor-baseline inference passes. Formal verification is pending.
 

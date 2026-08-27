@@ -108,4 +108,12 @@ Normality capacity diagnostics found top-16 (+0.645) and top-64 (+0.626) below t
 
 ## New run Trial 25 - raw/persistent normality blend
 
-Hypothesis: raw normality evidence preserves short XD events, while sigma-1 evidence suppresses isolated UCF false positives. Blend 75% raw and 25% smoothed evidence before video standardization, using one fixed ratio for all datasets and baselines. A shared scan predicted +0.656 pp minimum gain. Formal remote verification is pending.
+Hypothesis: raw normality evidence preserves short XD events, while sigma-1 evidence suppresses isolated UCF false positives. Blend 75% raw and 25% smoothed evidence before video standardization, using one fixed ratio for all datasets and baselines. Formal results were LaGoVAD UCF 86.617 (+5.497), LaGoVAD XD 79.260 (+5.010), DeSC UCF 90.027 (+0.657), DeSC XD 87.836 (+0.656), DSANet UCF 90.100 (+0.660), and DSANet XD 87.901 (+0.951). Minimum gain was +0.656 pp, so the trial was retained.
+
+## New run Trials 26-27 - direct and category normality (discarded)
+
+Adding normality directly to corrected logits reduced the minimum gain to +0.629 pp. Category-conditional normality gating improved UCF DSANet but harmed XD and reduced the minimum to +0.609 pp; an agreement-gated category scan also stayed below the retained result. Both branches were reverted.
+
+## New run Trial 28 - normality-aware one-sided video suppression
+
+Hypothesis: the retained one-sided normal-video classifier lacks the independently useful global normality statistics. Add normality curve distribution, correlation, and disagreement features to the same logistic classifier trained from current-baseline training videos, and continue using its decision only to suppress likely normal test videos. No abnormal-video boost or cross-baseline input is introduced. Formal remote verification is pending.

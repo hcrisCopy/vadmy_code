@@ -35,15 +35,20 @@ def video_features(curve: np.ndarray) -> np.ndarray:
     ], dtype=np.float32)
 
 
-def joint_video_features(baseline: np.ndarray, neuron: np.ndarray) -> np.ndarray:
+def correlation(first: np.ndarray, second: np.ndarray) -> float:
+    if len(first) > 1 and first.std() > 0 and second.std() > 0:
+        return float(np.corrcoef(first, second)[0, 1])
+    return 0.0
+
+
+def joint_video_features(baseline: np.ndarray, neuron: np.ndarray, normality: np.ndarray) -> np.ndarray:
     neuron = resample_curve(neuron, len(baseline))
-    correlation = 0.0
-    if len(baseline) > 1 and baseline.std() > 0 and neuron.std() > 0:
-        correlation = float(np.corrcoef(baseline, neuron)[0, 1])
+    normality = resample_curve(normality, len(baseline))
     return np.concatenate([
-        video_features(baseline), video_features(neuron),
+        video_features(baseline), video_features(neuron), video_features(normality),
         np.asarray([
-            correlation, float(np.mean(np.abs(baseline - neuron))),
+            correlation(baseline, neuron), correlation(baseline, normality), correlation(neuron, normality),
+            float(np.mean(np.abs(baseline - neuron))), float(np.mean(np.abs(baseline - normality))),
             float(np.max(baseline - neuron)), float(np.max(neuron - baseline)),
         ], dtype=np.float32),
     ])
@@ -54,6 +59,14 @@ def logit(curve: np.ndarray) -> np.ndarray:
     return np.log(clipped / (1.0 - clipped))
 
 
+def blend_normality(curve: np.ndarray, blend: float) -> np.ndarray:
+    if not 0.0 <= blend <= 1.0:
+        raise ValueError("normality-smoothing-blend must be in [0, 1]")
+    if not blend:
+        return curve
+    return (1.0 - blend) * curve + blend * gaussian_filter1d(curve, 1.0, mode="nearest")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate conservative universal CLS-neuron fusion.")
     parser.add_argument("--baseline-train-manifest", required=True)
@@ -62,6 +75,7 @@ def main() -> None:
     parser.add_argument("--expert-manifest", required=True)
     parser.add_argument("--expert2-manifest", required=True)
     parser.add_argument("--expert3-manifest", required=True)
+    parser.add_argument("--expert3-train-manifest", required=True)
     parser.add_argument("--correction-model", required=True)
     parser.add_argument("--gt-path", required=True)
     parser.add_argument("--baseline", choices=["lagovad", "desc", "dsanet"], required=True)
@@ -94,7 +108,8 @@ def main() -> None:
 
     baseline_train = pd.read_csv(args.baseline_train_manifest)
     expert_train = pd.read_csv(args.expert_train_manifest)[["key", "expert_score_path"]]
-    video_train = baseline_train.merge(expert_train, on="key", validate="one_to_one")
+    expert3_train = pd.read_csv(args.expert3_train_manifest)[["key", "expert3_score_path"]]
+    video_train = baseline_train.merge(expert_train, on="key", validate="one_to_one").merge(expert3_train, on="key", validate="one_to_one")
     video_model = make_pipeline(
         StandardScaler(),
         LogisticRegression(class_weight="balanced", max_iter=1000, random_state=3407),
@@ -102,7 +117,9 @@ def main() -> None:
     video_model.fit(
         np.asarray([
             joint_video_features(
-                np.load(str(row.baseline_score_path)), np.load(str(row.expert_score_path))
+                np.load(str(row.baseline_score_path)),
+                np.load(str(row.expert_score_path)),
+                blend_normality(np.load(str(row.expert3_score_path)), args.normality_smoothing_blend),
             ) for row in video_train.itertuples(index=False)
         ]),
         video_train["binary_label"].to_numpy(),
@@ -127,16 +144,12 @@ def main() -> None:
             )[0].cpu().numpy().astype(np.float32)
             standardized = (neuron - neuron.mean()) / max(float(neuron.std()), 1e-6)
             standardized2 = (neuron2 - neuron2.mean()) / max(float(neuron2.std()), 1e-6)
-            if not 0.0 <= args.normality_smoothing_blend <= 1.0:
-                raise ValueError("normality-smoothing-blend must be in [0, 1]")
-            if args.normality_smoothing_blend:
-                smooth_neuron3 = gaussian_filter1d(neuron3, 1.0, mode="nearest")
-                neuron3 = (1.0 - args.normality_smoothing_blend) * neuron3 + args.normality_smoothing_blend * smooth_neuron3
+            neuron3 = blend_normality(neuron3, args.normality_smoothing_blend)
             standardized3 = (neuron3 - neuron3.mean()) / max(float(neuron3.std()), 1e-6)
             neuron_gate = 1.0 / (1.0 + np.exp(-(standardized + standardized2 + args.normality_gate_weight * standardized3)))
             expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
             corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
-            decision = float(video_model.decision_function(np.asarray(joint_video_features(base, neuron))[None])[0])
+            decision = float(video_model.decision_function(np.asarray(joint_video_features(base, neuron, neuron3))[None])[0])
             normal_shift = min(0.0, decision)
             corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.normal_suppression_weight * normal_shift)))
             persistent = median_filter(corrected, args.persistence_width, mode="nearest")
@@ -180,7 +193,7 @@ def main() -> None:
             "normality_gate_weight": args.normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,
             "normal_suppression_weight": args.normal_suppression_weight,
-            "video_prior": "one-sided joint current-baseline and CLS-neuron training classifier",
+            "video_prior": "one-sided joint current-baseline, MIL-neuron, and normality-neuron training classifier",
             "persistence_width": args.persistence_width,
             "persistence_weight": args.persistence_weight,
             "gaussian_sigma": args.gaussian_sigma,

@@ -134,4 +134,8 @@ Hypothesis: a fixed snippet window ignores the temporal scale visible in the sha
 
 ## New run Trials 33-34 - full adaptive persistence projection
 
-Hypothesis: once the persistence width is calibrated from training neuron dynamics, mixing 25% of the unfiltered curve retains isolated false positives. A universal scan found persistence weights 0.5 and 1.0 produced minimum gains of +0.621 and +0.700 pp, respectively. Trial 33 was infrastructure-invalid: GitHub returned HTTP 503 during the remote pull, and the remote shell continued with the retained 0.75 configuration. Trial 34 retries the unchanged weight-1.0 hypothesis; formal remote verification is pending.
+Hypothesis: once the persistence width is calibrated from training neuron dynamics, mixing 25% of the unfiltered curve retains isolated false positives. A universal scan found persistence weights 0.5 and 1.0 produced minimum gains of +0.621 and +0.700 pp, respectively. Trial 33 was infrastructure-invalid: GitHub returned HTTP 503 during the remote pull, and the remote shell continued with the retained 0.75 configuration. Trial 34 formally produced LaGoVAD UCF 86.832 (+5.712), LaGoVAD XD 79.266 (+5.016), DeSC UCF 90.070 (+0.700), DeSC XD 87.892 (+0.712), DSANet UCF 90.151 (+0.711), and DSANet XD 87.900 (+0.950). Minimum gain was +0.700 pp, so full adaptive persistence was retained.
+
+## New run Trial 35 - balanced high-high agreement strength
+
+Hypothesis: full persistence removes the XD sensitivity that previously limited the high-high residual. A universal scan of agreement weights 0.15 and 0.20 yielded minimum gains of +0.711405 and +0.711358 pp. Use the smaller 0.15 value, which balances DeSC UCF, DSANet UCF, and DeSC XD near +0.712 without modifying conflict or low-low snippets. Formal remote verification is pending.

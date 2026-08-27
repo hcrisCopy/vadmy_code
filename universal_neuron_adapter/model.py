@@ -17,8 +17,6 @@ class ScoreCorrectionHead(nn.Module):
             nn.GELU(),
             nn.Conv1d(width, 1, 1),
         )
-        nn.init.zeros_(self.body[-1].weight)
-        nn.init.zeros_(self.body[-1].bias)
 
     def forward(self, baseline_probability: torch.Tensor, expert_probability: torch.Tensor) -> torch.Tensor:
         baseline = torch.logit(baseline_probability.clamp(1e-5, 1.0 - 1e-5))

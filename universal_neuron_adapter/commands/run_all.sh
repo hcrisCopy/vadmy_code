@@ -14,20 +14,10 @@ for dataset in ucf xd; do
   for baseline in lagovad desc dsanet; do
     source_base="$SOURCE/$dataset/$baseline"
     target="$OUT/$dataset/$baseline/evaluation"
-    guided="$OUT/$dataset/$baseline/guided_correction"
-    python -m universal_neuron_adapter.train_guided_correction \
-      --baseline-manifest "$source_base/baseline_train/baseline_scores.csv" \
-      --expert-manifest "$SOURCE/$dataset/expert/train/expert_scores.csv" \
-      --train-keys "$SOURCE/$dataset/data/expert_train.csv" \
-      --val-keys "$SOURCE/$dataset/data/expert_val.csv" \
-      --baseline "$baseline" --dataset "$dataset" --out-dir "$guided" \
-      --width 32 --max-epoch 10 --batch-size 32 --lr 3e-4 \
-      --weight-decay 1e-4 --maximum-length 256 --num-workers 4 \
-      --seed 3407 --device cuda --resume
     python -m universal_neuron_adapter.evaluate \
       --baseline-manifest "$source_base/baseline_test/baseline_scores.csv" \
       --expert-manifest "$SOURCE/$dataset/expert/test/expert_scores.csv" \
-      --correction-model "$guided/model_best.pth" \
+      --correction-model "$source_base/correction/model_best.pth" \
       --gt-path "../vadmy_data/annotations/$dataset/gt.npy" \
       --baseline "$baseline" --dataset "$dataset" \
       --out-dir "$target" --frames-per-snippet 16 \

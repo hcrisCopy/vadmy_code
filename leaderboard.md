@@ -125,9 +125,3 @@ Only results exceeding the corresponding paper baseline are listed.
 | New-24 (`e2c6d0b`) | DeSC | XD-Violence | AP | 87.18 | 87.839 | +0.659 |
 | New-24 (`e2c6d0b`) | DSANet | UCF-Crime | AUC | 89.44 | 90.093 | +0.653 |
 | New-24 (`e2c6d0b`) | DSANet | XD-Violence | AP | 86.95 | 87.907 | +0.957 |
-| New-25 (`3d8d300`) | LaGoVAD | UCF-Crime | AUC | 81.12 | 86.617 | +5.497 |
-| New-25 (`3d8d300`) | LaGoVAD | XD-Violence | AP | 74.25 | 79.260 | +5.010 |
-| New-25 (`3d8d300`) | DeSC | UCF-Crime | AUC | 89.37 | 90.027 | +0.657 |
-| New-25 (`3d8d300`) | DeSC | XD-Violence | AP | 87.18 | 87.836 | +0.656 |
-| New-25 (`3d8d300`) | DSANet | UCF-Crime | AUC | 89.44 | 90.100 | +0.660 |
-| New-25 (`3d8d300`) | DSANet | XD-Violence | AP | 86.95 | 87.901 | +0.951 |

@@ -86,8 +86,4 @@ Using the mean of both sparse experts as direct evidence reduced the minimum gai
 
 ## New run Trial 20 - short-scale Gaussian temporal denoising
 
-Hypothesis: after width-15 persistent filtering, residual one-snippet jitter still creates false-positive ordering errors for strong baselines. Apply a universal Gaussian filter with sigma 1 snippet to the final within-video curve before the retained one-snippet alignment. Formal results were LaGoVAD UCF 86.535 (+5.415), LaGoVAD XD 79.586 (+5.336), DeSC UCF 90.003 (+0.633), DeSC XD 87.797 (+0.617), DSANet UCF 89.970 (+0.530), and DSANet XD 87.944 (+0.994). Minimum gain was +0.530 pp, so the trial was retained. A shared sigma scan showed that stronger smoothing harmed XD DeSC.
-
-## New run Trial 21 - fractional temporal alignment
-
-Hypothesis: CLS and baseline snippet responses may lag frame annotations by more than the retained 16-frame shift but less than 32 frames. Linearly interpolate the one- and two-snippet advanced curves to realize a universal 1.5-snippet (24-frame) alignment. Formal remote verification is pending.
+Hypothesis: after width-15 persistent filtering, residual one-snippet jitter still creates false-positive ordering errors for strong baselines. Apply a universal Gaussian filter with sigma 1 snippet to the final within-video curve before the retained one-snippet alignment. No new features or trainable parameters are introduced. Formal remote verification is pending.

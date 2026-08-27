@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from pathlib import Path
 
 import numpy as np
@@ -77,7 +76,6 @@ def main() -> None:
     parser.add_argument("--persistence-weight", type=float, default=0.75)
     parser.add_argument("--gaussian-sigma", type=float, default=0.0)
     parser.add_argument("--advance-snippets", type=int, default=1)
-    parser.add_argument("--fractional-advance", type=float, default=-1.0)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -134,21 +132,9 @@ def main() -> None:
             corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
             if args.gaussian_sigma > 0:
                 corrected = gaussian_filter1d(corrected, args.gaussian_sigma, mode="nearest")
-            if args.fractional_advance >= 0:
-                lower = int(math.floor(args.fractional_advance))
-                fraction = args.fractional_advance - lower
-                if lower + (1 if fraction > 0 else 0) >= len(corrected):
-                    raise ValueError("fractional-advance must be shorter than every video")
-                shifted_lower = np.concatenate([corrected[lower:], np.repeat(corrected[-1:], lower)])
-                if fraction > 0:
-                    upper = lower + 1
-                    shifted_upper = np.concatenate([corrected[upper:], np.repeat(corrected[-1:], upper)])
-                    corrected = (1.0 - fraction) * shifted_lower + fraction * shifted_upper
-                else:
-                    corrected = shifted_lower
-            elif not 0 <= args.advance_snippets < len(corrected):
+            if not 0 <= args.advance_snippets < len(corrected):
                 raise ValueError("advance-snippets must be non-negative and shorter than every video")
-            elif args.advance_snippets:
+            if args.advance_snippets:
                 corrected = np.concatenate([
                     corrected[args.advance_snippets:],
                     np.repeat(corrected[-1:], args.advance_snippets),
@@ -186,7 +172,6 @@ def main() -> None:
             "persistence_weight": args.persistence_weight,
             "gaussian_sigma": args.gaussian_sigma,
             "advance_snippets": args.advance_snippets,
-            "fractional_advance": args.fractional_advance,
         },
         "frames": len(truth),
     }

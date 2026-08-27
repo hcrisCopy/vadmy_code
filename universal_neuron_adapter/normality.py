@@ -19,8 +19,13 @@ def load_normality_model(path: str | Path) -> dict[str, np.ndarray]:
 
 def normality_evidence(hidden: np.ndarray, model: dict[str, np.ndarray]) -> np.ndarray:
     normalized = layer_normalize(hidden)
-    z_score = np.abs((normalized - model["normal_mean"]) / model["normal_scale"])
+    z_score = (normalized - model["normal_mean"]) / model["normal_scale"]
     selected = np.take_along_axis(z_score, model["indices"][None], axis=2)
+    if "directions" in model:
+        selected = np.where(model["directions"][None] == 0, selected, -selected)
+        selected = np.maximum(selected, 0.0)
+    else:
+        selected = np.abs(selected)
     weights = model["weights"][None]
     evidence = (selected * weights).sum(axis=(1, 2)) / np.maximum(weights.sum(), 1e-6)
     return evidence.astype(np.float32)

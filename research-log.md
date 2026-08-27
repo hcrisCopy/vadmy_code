@@ -138,4 +138,10 @@ Hypothesis: once the persistence width is calibrated from training neuron dynami
 
 ## New run Trial 35 - balanced high-high agreement strength
 
-Hypothesis: full persistence removes the XD sensitivity that previously limited the high-high residual. A universal scan of agreement weights 0.15 and 0.20 yielded minimum gains of +0.711405 and +0.711358 pp. Use the smaller 0.15 value, which balances DeSC UCF, DSANet UCF, and DeSC XD near +0.712 without modifying conflict or low-low snippets. Formal remote verification is pending.
+Hypothesis: full persistence removes the XD sensitivity that previously limited the high-high residual. A universal scan of agreement weights 0.15 and 0.20 yielded minimum gains of +0.711405 and +0.711358 pp. Formal results at 0.15 were LaGoVAD UCF 86.890 (+5.770), LaGoVAD XD 79.256 (+5.006), DeSC UCF 90.081 (+0.711), DeSC XD 87.892 (+0.712), DSANet UCF 90.153 (+0.713), and DSANet XD 87.905 (+0.955). Minimum gain was +0.711 pp, so weight 0.15 was retained.
+
+Post-Trial-35 diagnostics found Gaussian sigma 0.5 marginally improved the minimum to +0.7118, whereas sigma 1.5 fell to +0.606. Event widths 31 and 51 reached only +0.696 and +0.690. These results confirm short edge smoothing and width 41, but neither changes the main bottleneck.
+
+## New run Trial 36 - directional one-sided normality neurons
+
+Hypothesis: absolute normal z-deviation treats both tails as anomalous even when a neuron has a consistent abnormal direction. For every CLS coordinate, rank above-normal and below-normal top-k effects separately, retain the stronger direction, select 32 coordinates per layer, and aggregate only positive directed deviations. The expert remains baseline-independent and uses the same algorithm on both datasets. A six-way preflight with normality weight 2.0 and sigma 0.5 produced UCF gains +5.729/+0.712/+0.723 and XD gains +5.119/+0.860/+1.028 pp. Minimum gain was +0.712 pp; formal remote verification is pending.

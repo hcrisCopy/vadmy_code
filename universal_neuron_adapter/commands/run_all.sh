@@ -25,7 +25,7 @@ for dataset in ucf xd; do
   python -m universal_neuron_adapter.export_diverse_expert \
     --manifest "$SOURCE/$dataset/data/expert_train.csv" --expert-model "$diverse/expert_best.pth" \
     --out-dir "$diverse/train" --device cuda
-  normality="$ROOT/normality_expert_cache/$dataset/top32_v1"
+  normality="$ROOT/normality_expert_cache/$dataset/top32_signed_v1"
   python -m universal_neuron_adapter.fit_normality_expert \
     --manifest "$SOURCE/$dataset/data/expert_train.csv" --out-dir "$normality" \
     --active-per-layer 32 --maximum-length 256 --resume
@@ -53,12 +53,12 @@ for dataset in ucf xd; do
       --out-dir "$target" --frames-per-snippet 16 \
       --correction-weight 0.2 --neuron-weight 0.4 \
       --event-width 41 --event-weight 1.0 \
-      --normality-gate-weight 1.5 \
+      --normality-gate-weight 2.0 \
       --normality-smoothing-blend 0.25 \
       --agreement-residual-weight 0.15 \
       --normal-suppression-weight 1.5 \
       --persistence-weight 1.0 \
-      --gaussian-sigma 1.0 \
+      --gaussian-sigma 0.5 \
       --advance-snippets 1 --device cuda
   done
 done

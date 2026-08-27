@@ -6,56 +6,61 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import torch
+from scipy.ndimage import maximum_filter1d
 from sklearn.metrics import average_precision_score, roc_auc_score
 from tqdm import tqdm
 
 from universal_neuron_adapter.data import resample_curve
-from universal_neuron_adapter.model import ScoreCorrectionHead, calibrated_probability
+
+
+def empirical_cdf(reference: np.ndarray, values: np.ndarray) -> np.ndarray:
+    return np.searchsorted(reference, values, side="right").astype(np.float32) / float(len(reference) + 1)
+
+
+def logit(values: np.ndarray) -> np.ndarray:
+    clipped = np.clip(values, 1e-5, 1.0 - 1e-5)
+    return np.log(clipped / (1.0 - clipped))
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate conservative universal CLS-neuron fusion.")
+    parser = argparse.ArgumentParser(description="Evaluate single-baseline self-calibrated CLS-neuron fusion.")
+    parser.add_argument("--baseline-train-manifest", required=True)
     parser.add_argument("--baseline-manifest", required=True)
     parser.add_argument("--expert-manifest", required=True)
-    parser.add_argument("--correction-model", required=True)
     parser.add_argument("--gt-path", required=True)
     parser.add_argument("--baseline", choices=["lagovad", "desc", "dsanet"], required=True)
     parser.add_argument("--dataset", choices=["ucf", "xd"], required=True)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--frames-per-snippet", type=int, default=16)
-    parser.add_argument("--correction-weight", type=float, default=0.2)
-    parser.add_argument("--neuron-weight", type=float, default=0.1)
-    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--rank-weight", type=float, default=0.5)
+    parser.add_argument("--event-width", type=int, default=25)
+    parser.add_argument("--event-weight", type=float, default=0.5)
+    parser.add_argument("--neuron-weight", type=float, default=0.15)
     args = parser.parse_args()
 
     output = Path(args.out_dir)
     output.mkdir(parents=True, exist_ok=True)
-    checkpoint = torch.load(args.correction_model, map_location="cpu", weights_only=False)
-    if checkpoint.get("baseline") != args.baseline or checkpoint.get("dataset") != args.dataset:
-        raise ValueError("correction checkpoint baseline/dataset mismatch")
-    model = ScoreCorrectionHead(int(checkpoint["config"]["width"]))
-    model.load_state_dict(checkpoint["model_state_dict"])
-    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
-    model.to(device).eval()
-
+    train = pd.read_csv(args.baseline_train_manifest)
+    train_reference = np.sort(
+        np.concatenate([np.load(str(row.baseline_score_path)).astype(np.float32) for row in train.itertuples(index=False)])
+    )
     baseline = pd.read_csv(args.baseline_manifest)
     expert = pd.read_csv(args.expert_manifest)[["key", "expert_score_path"]]
     frame = baseline.merge(expert, on="key", validate="one_to_one")
     baseline_curves, corrected_curves, rows = [], [], []
-    with torch.no_grad():
-        for row in tqdm(frame.itertuples(index=False), total=len(frame), desc=f"evaluate {args.baseline}/{args.dataset}"):
-            base = np.load(str(row.baseline_score_path)).astype(np.float32)
-            neuron = resample_curve(np.load(str(row.expert_score_path)), len(base))
-            base_tensor = torch.from_numpy(base).unsqueeze(0).to(device)
-            neuron_tensor = torch.from_numpy(neuron).unsqueeze(0).to(device)
-            correction = model(base_tensor, neuron_tensor)
-            corrected = calibrated_probability(
-                base_tensor, neuron_tensor, correction, args.correction_weight, args.neuron_weight
-            )[0].cpu().numpy().astype(np.float32)
-            baseline_curves.append(base)
-            corrected_curves.append(corrected)
-            rows.append({"key": str(row.key), "snippets": len(base), "corrected_mean": float(corrected.mean())})
+    for row in tqdm(frame.itertuples(index=False), total=len(frame), desc=f"evaluate {args.baseline}/{args.dataset}"):
+        base = np.load(str(row.baseline_score_path)).astype(np.float32)
+        rank = empirical_cdf(train_reference, base)
+        calibrated = (1.0 - args.rank_weight) * base + args.rank_weight * rank
+        expanded = maximum_filter1d(calibrated, args.event_width, mode="nearest")
+        event_score = (1.0 - args.event_weight) * calibrated + args.event_weight * expanded
+        neuron = resample_curve(np.load(str(row.expert_score_path)), len(base))
+        neuron = (neuron - neuron.mean()) / max(float(neuron.std()), 1e-6)
+        corrected = 1.0 / (1.0 + np.exp(-(logit(event_score) + args.neuron_weight * neuron)))
+        corrected = corrected.astype(np.float32)
+        baseline_curves.append(base)
+        corrected_curves.append(corrected)
+        rows.append({"key": str(row.key), "snippets": len(base), "corrected_mean": float(corrected.mean())})
 
     truth = np.load(args.gt_path).astype(np.int64).reshape(-1)
     baseline_frames = np.repeat(np.concatenate(baseline_curves), args.frames_per_snippet)
@@ -73,7 +78,13 @@ def main() -> None:
             "auc": float(roc_auc_score(truth, corrected_frames)),
             "ap": float(average_precision_score(truth, corrected_frames)),
         },
-        "configuration": {"correction_weight": args.correction_weight, "neuron_weight": args.neuron_weight},
+        "configuration": {
+            "calibration_source": "current baseline training scores",
+            "rank_weight": args.rank_weight,
+            "event_width": args.event_width,
+            "event_weight": args.event_weight,
+            "neuron_weight": args.neuron_weight,
+        },
         "frames": len(truth),
     }
     (output / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
@@ -83,4 +94,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

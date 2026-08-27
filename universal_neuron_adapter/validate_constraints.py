@@ -22,6 +22,10 @@ def main() -> None:
         raise RuntimeError(f"cross-baseline inputs are forbidden: {found}")
     if command.count("--baseline-manifest") != 1:
         raise RuntimeError("the shared evaluation command must expose exactly one baseline input")
+    if command.count("--baseline-train-manifest") != 1:
+        raise RuntimeError("calibration must use exactly one training stream from the current baseline")
+    if '"$source_base/baseline_train/' not in command or '"$source_base/baseline_test/' not in command:
+        raise RuntimeError("training and test inputs must both come from the current baseline")
     if '--baseline "$baseline"' not in command:
         raise RuntimeError("the evaluation must receive only the current loop baseline")
     print("single-baseline constraint: pass", flush=True)

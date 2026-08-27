@@ -12,3 +12,7 @@ Hypothesis: retain only 20% of the learned correction and add 0.1 times video-wi
 
 This attempt combined DeSC and DSANet score streams and reached a nominal minimum paper-relative gain of +1.0095 pp. It is invalid for this project because a method evaluated for one baseline must not consume another baseline's predictions. The implementation and leaderboard rows were removed; the result is retained here only as a negative methodological record and is excluded from all future comparisons.
 
+## New run Trial 1 - single-baseline self-calibrated event expansion
+
+Hypothesis: strong baselines mainly miss the temporal extent of anomalous events. Calibrate each baseline only against its own training-score CDF, use a fixed width-25 temporal maximum filter, and add the existing standardized CLS-neuron evidence. Rank weight 0.5, event weight 0.5, and neuron weight 0.15 are identical for all six combinations. Formal remote verification is pending.
+

@@ -50,5 +50,13 @@ A zero-initialized residual head consumed the current baseline, shared expert, a
 
 ## New run Trial 10 - stronger one-sided normal suppression
 
-Hypothesis: the retained joint current-baseline/CLS video classifier is reliable only as a normal-video suppressor. Increase its universal logit shift from 1.0 to 1.5 while leaving suspected abnormal videos and all temporal operations unchanged. A read-only scan predicted a small improvement in the six-way minimum. Formal remote verification is pending.
+Hypothesis: the retained joint current-baseline/CLS video classifier is reliable only as a normal-video suppressor. Increase its universal logit shift from 1.0 to 1.5 while leaving suspected abnormal videos and all temporal operations unchanged. Formal results were LaGoVAD UCF 85.949 (+4.829), LaGoVAD XD 79.118 (+4.868), DeSC UCF 89.813 (+0.443), DeSC XD 87.713 (+0.533), DSANet UCF 89.923 (+0.483), and DSANet XD 87.573 (+0.623). Minimum gain was +0.443 pp, so the trial was retained.
+
+## New run Trial 11 - layer-normalized neuron agreement head (discarded)
+
+The selected coordinates were normalized within each CLIP layer and snippet before training the same current-baseline/CLS agreement head. Formal results were LaGoVAD UCF 86.887 (+5.767), LaGoVAD XD 78.758 (+4.508), DeSC UCF 90.029 (+0.659), DeSC XD 87.747 (+0.567), DSANet UCF 89.544 (+0.104), and DSANet XD 87.815 (+0.865). Minimum gain was +0.104 pp, so the trial was reverted. Layer normalization did not resolve the cross-view pseudo-label localization error.
+
+## New run Trial 12 - wider neuron-gated event support
+
+Hypothesis: anomaly events persist beyond the retained width-25 neighborhood. Expand the identical CLS-neuron-gated maximum support to width 51 while retaining event weight 1.0, normal suppression 1.5, and width-15 median persistence. A unified multi-scale scan peaked at width 51 and predicted all six results above their paper baselines. Formal remote verification is pending.
 

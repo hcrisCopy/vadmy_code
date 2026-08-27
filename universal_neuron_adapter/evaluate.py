@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from scipy.ndimage import maximum_filter1d
+from scipy.ndimage import maximum_filter1d, median_filter
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.pipeline import make_pipeline
@@ -49,6 +49,8 @@ def main() -> None:
     parser.add_argument("--event-width", type=int, default=25)
     parser.add_argument("--event-weight", type=float, default=1.0)
     parser.add_argument("--normal-suppression-weight", type=float, default=1.0)
+    parser.add_argument("--persistence-width", type=int, default=15)
+    parser.add_argument("--persistence-weight", type=float, default=0.75)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -92,6 +94,8 @@ def main() -> None:
             decision = float(video_model.decision_function(np.asarray(video_features(base))[None])[0])
             normal_shift = min(0.0, decision)
             corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.normal_suppression_weight * normal_shift)))
+            persistent = median_filter(corrected, args.persistence_width, mode="nearest")
+            corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
             baseline_curves.append(base)
             corrected_curves.append(corrected)
             rows.append({"key": str(row.key), "snippets": len(base), "corrected_mean": float(corrected.mean())})
@@ -120,6 +124,8 @@ def main() -> None:
             "event_gate": "sigmoid(2 * video-standardized neuron evidence)",
             "normal_suppression_weight": args.normal_suppression_weight,
             "video_prior": "one-sided current-baseline training classifier",
+            "persistence_width": args.persistence_width,
+            "persistence_weight": args.persistence_weight,
         },
         "frames": len(truth),
     }

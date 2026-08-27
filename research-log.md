@@ -30,5 +30,9 @@ High-confidence pseudo labels from each current baseline trained a new correctio
 
 ## New run Trial 5 - one-sided current-baseline normal suppression
 
-Hypothesis: fit the same five-feature video classifier on each current baseline's own training curves and use it only to suppress high-confidence normal test videos. Suspected abnormal videos receive no video-level boost, preventing their normal snippets from being raised. Formal remote verification is pending.
+Hypothesis: fit the same five-feature video classifier on each current baseline's own training curves and use it only to suppress high-confidence normal test videos. Suspected abnormal videos receive no video-level boost, preventing their normal snippets from being raised. Formal results were LaGoVAD UCF 83.208 (+2.088), LaGoVAD XD 77.271 (+3.021), DeSC UCF 89.754 (+0.384), DeSC XD 87.561 (+0.381), DSANet UCF 89.821 (+0.381), and DSANet XD 87.487 (+0.537). Minimum gain was +0.381 pp, so the trial was retained.
+
+## New run Trial 6 - persistent neuron-gated events
+
+Hypothesis: isolated corrected peaks are likely false alarms, whereas true events persist across neighboring snippets. Blend the retained score with a width-15 median filter at weight 0.75 after neuron-gated expansion and one-sided normal suppression. The same persistence parameters are fixed for all six combinations. Formal remote verification is pending.
 

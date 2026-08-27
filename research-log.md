@@ -70,4 +70,8 @@ Hypothesis: corrected responses lag the frame annotations by one 16-frame snippe
 
 ## New run Trial 15 - diverse sparse-neuron expert
 
-Hypothesis: one 32-neurons-per-layer expert has insufficient localization diversity. Train a second baseline-independent expert with 64 active CLS dimensions per layer and the same MIL objective, then average the video-standardized evidence of both experts only in the event-propagation gate. The expert is trained once per dataset and shared by all three baselines; no second baseline score is used. Formal remote verification is pending.
+Hypothesis: one 32-neurons-per-layer expert has insufficient localization diversity. Train a second baseline-independent expert with 64 active CLS dimensions per layer and the same MIL objective, then average the video-standardized evidence of both experts only in the event-propagation gate. The expert is trained once per dataset and shared by all three baselines; no second baseline score is used. Formal results were LaGoVAD UCF 85.978 (+4.858), LaGoVAD XD 79.431 (+5.181), DeSC UCF 89.873 (+0.503), DeSC XD 87.735 (+0.555), DSANet UCF 89.954 (+0.514), and DSANet XD 87.715 (+0.765). Minimum gain was +0.503 pp, so the trial was retained.
+
+## New run Trial 16 - stronger direct neuron correction
+
+Hypothesis: the diverse expert improved all six metrics, but the direct neuron residual remains underweighted relative to event propagation. Increase the universal direct neuron weight from 0.1 to 0.2 for every dataset and baseline. A read-only global scan predicted a minimum gain of +0.523 pp without any per-dataset or per-baseline choice. Formal remote verification is pending.

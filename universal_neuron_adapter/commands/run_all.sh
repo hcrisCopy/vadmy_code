@@ -35,7 +35,7 @@ for dataset in ucf xd; do
       --gt-path "../vadmy_data/annotations/$dataset/gt.npy" \
       --baseline "$baseline" --dataset "$dataset" \
       --out-dir "$target" --frames-per-snippet 16 \
-      --correction-weight 0.2 --neuron-weight 0.1 \
+      --correction-weight 0.2 --neuron-weight 0.2 \
       --event-width 51 --event-weight 1.0 \
       --normal-suppression-weight 1.5 \
       --persistence-width 15 --persistence-weight 0.75 \

@@ -11,17 +11,18 @@ printf '%s\n' "$RUN_KEY" > "$ROOT/current_run.txt"
 exec > >(tee -a "$OUT/run.log") 2>&1
 
 for dataset in ucf xd; do
-  python -m universal_neuron_adapter.consensus_evaluate \
-    --desc-train "$SOURCE/$dataset/desc/baseline_train/baseline_scores.csv" \
-    --dsanet-train "$SOURCE/$dataset/dsanet/baseline_train/baseline_scores.csv" \
-    --desc-test "$SOURCE/$dataset/desc/baseline_test/baseline_scores.csv" \
-    --dsanet-test "$SOURCE/$dataset/dsanet/baseline_test/baseline_scores.csv" \
-    --lagovad-test "$SOURCE/$dataset/lagovad/baseline_test/baseline_scores.csv" \
-    --expert-test "$SOURCE/$dataset/expert/test/expert_scores.csv" \
-    --gt-path "../vadmy_data/annotations/$dataset/gt.npy" \
-    --dataset "$dataset" --out-root "$OUT/$dataset" \
-    --rank-weight 0.5 --event-width 25 --event-weight 0.5 \
-    --neuron-weight 0.15 --frames-per-snippet 16
+  for baseline in lagovad desc dsanet; do
+    source_base="$SOURCE/$dataset/$baseline"
+    target="$OUT/$dataset/$baseline/evaluation"
+    python -m universal_neuron_adapter.evaluate \
+      --baseline-manifest "$source_base/baseline_test/baseline_scores.csv" \
+      --expert-manifest "$SOURCE/$dataset/expert/test/expert_scores.csv" \
+      --correction-model "$source_base/correction/model_best.pth" \
+      --gt-path "../vadmy_data/annotations/$dataset/gt.npy" \
+      --baseline "$baseline" --dataset "$dataset" \
+      --out-dir "$target" --frames-per-snippet 16 \
+      --correction-weight 0.2 --neuron-weight 0.1 --device cuda
+  done
 done
 
 python -m universal_neuron_adapter.aggregate_metric --results-root "$ROOT"

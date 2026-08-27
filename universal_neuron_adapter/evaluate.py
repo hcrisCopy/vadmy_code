@@ -49,6 +49,25 @@ def joint_video_features(baseline: np.ndarray, neuron: np.ndarray) -> np.ndarray
     ])
 
 
+def normality_video_features(baseline: np.ndarray, neuron: np.ndarray, normality: np.ndarray) -> np.ndarray:
+    neuron = resample_curve(neuron, len(baseline))
+    normality = resample_curve(normality, len(baseline))
+    base_normality_correlation = 0.0
+    neuron_normality_correlation = 0.0
+    if len(baseline) > 1 and baseline.std() > 0 and normality.std() > 0:
+        base_normality_correlation = float(np.corrcoef(baseline, normality)[0, 1])
+    if len(neuron) > 1 and neuron.std() > 0 and normality.std() > 0:
+        neuron_normality_correlation = float(np.corrcoef(neuron, normality)[0, 1])
+    return np.concatenate([
+        joint_video_features(baseline, neuron), video_features(normality),
+        np.asarray([
+            base_normality_correlation, neuron_normality_correlation,
+            float(np.mean(np.abs(baseline - normality))),
+            float(np.mean(np.abs(neuron - normality))),
+        ], dtype=np.float32),
+    ])
+
+
 def logit(curve: np.ndarray) -> np.ndarray:
     clipped = np.clip(curve, 1e-5, 1.0 - 1e-5)
     return np.log(clipped / (1.0 - clipped))
@@ -62,6 +81,7 @@ def main() -> None:
     parser.add_argument("--expert-manifest", required=True)
     parser.add_argument("--expert2-manifest", required=True)
     parser.add_argument("--expert3-manifest", required=True)
+    parser.add_argument("--expert3-train-manifest", required=True)
     parser.add_argument("--correction-model", required=True)
     parser.add_argument("--gt-path", required=True)
     parser.add_argument("--baseline", choices=["lagovad", "desc", "dsanet"], required=True)
@@ -94,7 +114,8 @@ def main() -> None:
 
     baseline_train = pd.read_csv(args.baseline_train_manifest)
     expert_train = pd.read_csv(args.expert_train_manifest)[["key", "expert_score_path"]]
-    video_train = baseline_train.merge(expert_train, on="key", validate="one_to_one")
+    expert3_train = pd.read_csv(args.expert3_train_manifest)[["key", "expert3_score_path"]]
+    video_train = baseline_train.merge(expert_train, on="key", validate="one_to_one").merge(expert3_train, on="key", validate="one_to_one")
     video_model = make_pipeline(
         StandardScaler(),
         LogisticRegression(class_weight="balanced", max_iter=1000, random_state=3407),
@@ -103,6 +124,20 @@ def main() -> None:
         np.asarray([
             joint_video_features(
                 np.load(str(row.baseline_score_path)), np.load(str(row.expert_score_path))
+            ) for row in video_train.itertuples(index=False)
+        ]),
+        video_train["binary_label"].to_numpy(),
+    )
+    normality_video_model = make_pipeline(
+        StandardScaler(),
+        LogisticRegression(class_weight="balanced", max_iter=1000, random_state=3407),
+    )
+    normality_video_model.fit(
+        np.asarray([
+            normality_video_features(
+                np.load(str(row.baseline_score_path)),
+                np.load(str(row.expert_score_path)),
+                blend_normality(np.load(str(row.expert3_score_path)), args.normality_smoothing_blend),
             ) for row in video_train.itertuples(index=False)
         ]),
         video_train["binary_label"].to_numpy(),
@@ -138,6 +173,9 @@ def main() -> None:
             corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
             decision = float(video_model.decision_function(np.asarray(joint_video_features(base, neuron))[None])[0])
             normal_shift = min(0.0, decision)
+            normality_decision = float(normality_video_model.decision_function(np.asarray(normality_video_features(base, neuron, neuron3))[None])[0])
+            if decision < 0.0 and normality_decision < 0.0:
+                normal_shift += 0.25 * normality_decision
             corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.normal_suppression_weight * normal_shift)))
             persistent = median_filter(corrected, args.persistence_width, mode="nearest")
             corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
@@ -180,7 +218,7 @@ def main() -> None:
             "normality_gate_weight": args.normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,
             "normal_suppression_weight": args.normal_suppression_weight,
-            "video_prior": "one-sided joint current-baseline and CLS-neuron training classifier",
+            "video_prior": "retained one-sided classifier plus 0.25-weight consensus normality suppression",
             "persistence_width": args.persistence_width,
             "persistence_weight": args.persistence_weight,
             "gaussian_sigma": args.gaussian_sigma,

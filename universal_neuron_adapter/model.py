@@ -30,6 +30,34 @@ class ScoreCorrectionHead(nn.Module):
         return baseline + self.body(features).squeeze(1)
 
 
+class NeuronMILRefiner(nn.Module):
+    """Zero-initialized residual head over one baseline and selected CLS neurons."""
+
+    def __init__(self, input_dim: int = 384, width: int = 64) -> None:
+        super().__init__()
+        self.body = nn.Sequential(
+            nn.Conv1d(input_dim + 2, width, 3, padding=1),
+            nn.GELU(),
+            nn.Conv1d(width, width, 3, padding=2, dilation=2),
+            nn.GELU(),
+            nn.Conv1d(width, 1, 1),
+        )
+        nn.init.zeros_(self.body[-1].weight)
+        nn.init.zeros_(self.body[-1].bias)
+
+    def forward(
+        self, neurons: torch.Tensor, baseline_probability: torch.Tensor, expert_probability: torch.Tensor
+    ) -> torch.Tensor:
+        baseline_logit = torch.logit(baseline_probability.clamp(1e-5, 1.0 - 1e-5))
+        expert_mean = expert_probability.mean(dim=1, keepdim=True)
+        expert_scale = expert_probability.std(dim=1, keepdim=True, unbiased=False).clamp_min(1e-6)
+        expert_evidence = (expert_probability - expert_mean) / expert_scale
+        features = torch.cat(
+            [neurons, baseline_logit.unsqueeze(-1), expert_evidence.unsqueeze(-1)], dim=-1
+        )
+        return baseline_logit + self.body(features.transpose(1, 2)).squeeze(1)
+
+
 def calibrated_probability(
     baseline_probability: torch.Tensor,
     expert_probability: torch.Tensor,

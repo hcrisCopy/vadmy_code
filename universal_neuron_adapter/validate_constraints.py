@@ -20,16 +20,20 @@ def main() -> None:
     found = [token for token in FORBIDDEN_TOKENS if token in lowered]
     if found:
         raise RuntimeError(f"cross-baseline inputs are forbidden: {found}")
-    if command.count("--baseline-manifest") != 1:
-        raise RuntimeError("the shared evaluation command must expose exactly one baseline input")
+    if command.count("--baseline-manifest") != 2:
+        raise RuntimeError("training and evaluation must each expose one current-baseline input")
     if command.count("--baseline-train-manifest") != 1:
         raise RuntimeError("normal calibration must use exactly one current-baseline training stream")
-    if command.count("--expert-train-manifest") != 1 or command.count("--expert-manifest") != 1:
-        raise RuntimeError("training and test must each use exactly one shared CLS-neuron stream")
+    if command.count("--expert-train-manifest") != 1 or command.count("--expert-manifest") != 2:
+        raise RuntimeError("training and evaluation must use only the shared CLS-neuron streams")
     if '"$source_base/baseline_train/' not in command or '"$source_base/baseline_test/' not in command:
         raise RuntimeError("training calibration and evaluation must use the current baseline only")
     if '--baseline "$baseline"' not in command:
         raise RuntimeError("the evaluation must receive only the current loop baseline")
+    if command.count('"$source_base/baseline_train/') != 2:
+        raise RuntimeError("both training consumers must use the current loop baseline")
+    if command.count("--selected-manifest") != 2:
+        raise RuntimeError("training and evaluation must use the shared selected CLS-neuron cache")
     print("single-baseline constraint: pass", flush=True)
 
 

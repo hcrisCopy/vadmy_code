@@ -38,5 +38,17 @@ Hypothesis: isolated corrected peaks are likely false alarms, whereas true event
 
 ## New run Trial 7 - joint baseline-neuron normal suppression
 
-Hypothesis: combine distribution, top-k, temporal-change, and agreement statistics from the current baseline and the CLS-neuron expert in the same linear video classifier. Use its output only for one-sided normal suppression; event propagation and persistence are unchanged. Formal remote verification is pending.
+Hypothesis: combine distribution, top-k, temporal-change, and agreement statistics from the current baseline and the CLS-neuron expert in the same linear video classifier. Use its output only for one-sided normal suppression; event propagation and persistence are unchanged. Formal results were LaGoVAD UCF 85.812 (+4.692), LaGoVAD XD 79.107 (+4.857), DeSC UCF 89.812 (+0.442), DeSC XD 87.715 (+0.535), DSANet UCF 89.959 (+0.519), and DSANet XD 87.569 (+0.619). Minimum gain was +0.442 pp, so the trial was retained.
+
+## New run Trial 8 - current-baseline/CLS agreement temporal head (discarded)
+
+A compact temporal head used agreement pseudo-labels between the current baseline and the CLS-neuron expert. Formal results were LaGoVAD UCF 86.760 (+5.640), LaGoVAD XD 75.862 (+1.612), DeSC UCF 90.211 (+0.841), DeSC XD 86.942 (-0.238), DSANet UCF 89.703 (+0.263), and DSANet XD 87.050 (+0.100). Minimum gain was -0.238 pp, so the trial was reverted. A read-only global weight and agreement-gate scan peaked below the retained result, showing that the pseudo-label target does not transfer reliably to strong baselines.
+
+## New run Trial 9 - video-label MIL neuron residual (discarded)
+
+A zero-initialized residual head consumed the current baseline, shared expert, and fixed 384 CLS coordinates, with video-label MIL, normal dense loss, ranking, smoothness, and a baseline anchor. Formal results were LaGoVAD UCF 87.083 (+5.963), LaGoVAD XD 77.216 (+2.966), DeSC UCF 89.828 (+0.458), DeSC XD 86.582 (-0.598), DSANet UCF 89.326 (-0.114), and DSANet XD 85.983 (-0.967). Minimum gain was -0.967 pp, so the trial was reverted. Low bag-level validation loss again failed to imply good frame localization.
+
+## New run Trial 10 - stronger one-sided normal suppression
+
+Hypothesis: the retained joint current-baseline/CLS video classifier is reliable only as a normal-video suppressor. Increase its universal logit shift from 1.0 to 1.5 while leaving suspected abnormal videos and all temporal operations unchanged. A read-only scan predicted a small improvement in the six-way minimum. Formal remote verification is pending.
 

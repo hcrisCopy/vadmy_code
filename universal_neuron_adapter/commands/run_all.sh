@@ -25,7 +25,7 @@ for dataset in ucf xd; do
       --out-dir "$target" --frames-per-snippet 16 \
       --correction-weight 0.2 --neuron-weight 0.1 \
       --event-width 25 --event-weight 1.0 \
-      --normal-suppression-weight 1.0 \
+      --normal-suppression-weight 1.5 \
       --persistence-width 15 --persistence-weight 0.75 --device cuda
   done
 done

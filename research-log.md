@@ -94,4 +94,8 @@ A universal 1.5-snippet interpolated advance reduced the minimum gain to +0.523 
 
 ## New run Trial 22 - baseline-independent normality neuron expert
 
-Hypothesis: both existing experts learn from abnormal-video top-k MIL and therefore share localization errors. Fit normal neuron moments using only normal training videos, select 32 CLS dimensions per layer whose top-k deviation separates abnormal training videos, and add their snippet-level deviation at weight 0.5 only to the universal event gate. The expert is trained once per dataset and shared by all baselines; it never consumes a baseline score or test annotation. Formal remote verification is pending.
+Hypothesis: both existing experts learn from abnormal-video top-k MIL and therefore share localization errors. Fit normal neuron moments using only normal training videos, select 32 CLS dimensions per layer whose top-k deviation separates abnormal training videos, and add their snippet-level deviation at weight 0.5 only to the universal event gate. Formal results were LaGoVAD UCF 86.585 (+5.465), LaGoVAD XD 79.553 (+5.303), DeSC UCF 90.031 (+0.661), DeSC XD 87.840 (+0.660), DSANet UCF 90.039 (+0.599), and DSANet XD 87.961 (+1.011). Minimum gain was +0.599 pp, so the trial was retained.
+
+## New run Trial 23 - stronger normality event gating
+
+Hypothesis: the baseline-independent normality expert improved the UCF strong baselines without destabilizing XD. Increase only its universal event-gate coefficient from 0.5 to 0.75 while preserving neuron selection and all other operations. Formal remote verification is pending.

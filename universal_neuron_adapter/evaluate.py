@@ -72,6 +72,7 @@ def main() -> None:
     parser.add_argument("--neuron-weight", type=float, default=0.1)
     parser.add_argument("--event-width", type=int, default=25)
     parser.add_argument("--event-weight", type=float, default=1.0)
+    parser.add_argument("--normality-gate-weight", type=float, default=0.5)
     parser.add_argument("--normal-suppression-weight", type=float, default=1.0)
     parser.add_argument("--persistence-width", type=int, default=15)
     parser.add_argument("--persistence-weight", type=float, default=0.75)
@@ -126,7 +127,7 @@ def main() -> None:
             standardized = (neuron - neuron.mean()) / max(float(neuron.std()), 1e-6)
             standardized2 = (neuron2 - neuron2.mean()) / max(float(neuron2.std()), 1e-6)
             standardized3 = (neuron3 - neuron3.mean()) / max(float(neuron3.std()), 1e-6)
-            neuron_gate = 1.0 / (1.0 + np.exp(-(standardized + standardized2 + 0.5 * standardized3)))
+            neuron_gate = 1.0 / (1.0 + np.exp(-(standardized + standardized2 + args.normality_gate_weight * standardized3)))
             expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
             corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
             decision = float(video_model.decision_function(np.asarray(joint_video_features(base, neuron))[None])[0])
@@ -169,7 +170,8 @@ def main() -> None:
             "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(2 * video-standardized neuron evidence)",
-            "event_gate_experts": "MIL experts plus 0.5-weight baseline-independent normality expert",
+            "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
+            "normality_gate_weight": args.normality_gate_weight,
             "normal_suppression_weight": args.normal_suppression_weight,
             "video_prior": "one-sided joint current-baseline and CLS-neuron training classifier",
             "persistence_width": args.persistence_width,

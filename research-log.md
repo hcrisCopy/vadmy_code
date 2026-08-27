@@ -38,13 +38,5 @@ Hypothesis: isolated corrected peaks are likely false alarms, whereas true event
 
 ## New run Trial 7 - joint baseline-neuron normal suppression
 
-Hypothesis: combine distribution, top-k, temporal-change, and agreement statistics from the current baseline and the CLS-neuron expert in the same linear video classifier. Use its output only for one-sided normal suppression; event propagation and persistence are unchanged. Formal results were LaGoVAD UCF 85.812 (+4.692), LaGoVAD XD 79.107 (+4.857), DeSC UCF 89.812 (+0.442), DeSC XD 87.715 (+0.535), DSANet UCF 89.959 (+0.519), and DSANet XD 87.569 (+0.619). Minimum gain was +0.442 pp, so the trial was retained.
-
-## New run Trial 8 - current-baseline/CLS agreement temporal head (discarded)
-
-A compact temporal head used agreement pseudo-labels between the current baseline and the CLS-neuron expert. Formal results were LaGoVAD UCF 86.760 (+5.640), LaGoVAD XD 75.862 (+1.612), DeSC UCF 90.211 (+0.841), DeSC XD 86.942 (-0.238), DSANet UCF 89.703 (+0.263), and DSANet XD 87.050 (+0.100). Minimum gain was -0.238 pp, so the trial was reverted. A read-only global weight and agreement-gate scan peaked below the retained result; the pseudo-label target does not transfer reliably to strong baselines, especially on XD.
-
-## New run Trial 9 - video-label MIL neuron residual
-
-Hypothesis: learn a zero-initialized residual from the current baseline, shared expert, and fixed 384 selected CLS dimensions using only video-label MIL, normal-video dense supervision, bag ranking, smoothness, and a conservative baseline anchor. Add half of the learned residual to the retained score. All loss weights and model parameters are fixed across the six combinations. Formal remote verification is pending.
+Hypothesis: combine distribution, top-k, temporal-change, and agreement statistics from the current baseline and the CLS-neuron expert in the same linear video classifier. Use its output only for one-sided normal suppression; event propagation and persistence are unchanged. Formal remote verification is pending.
 

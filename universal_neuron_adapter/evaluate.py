@@ -14,8 +14,8 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
-from universal_neuron_adapter.data import resample_curve, resample_matrix
-from universal_neuron_adapter.model import NeuronMILRefiner, ScoreCorrectionHead, calibrated_probability
+from universal_neuron_adapter.data import resample_curve
+from universal_neuron_adapter.model import ScoreCorrectionHead, calibrated_probability
 
 
 def video_features(curve: np.ndarray) -> np.ndarray:
@@ -61,8 +61,6 @@ def main() -> None:
     parser.add_argument("--expert-train-manifest", required=True)
     parser.add_argument("--expert-manifest", required=True)
     parser.add_argument("--correction-model", required=True)
-    parser.add_argument("--refiner-model", required=True)
-    parser.add_argument("--selected-manifest", required=True)
     parser.add_argument("--gt-path", required=True)
     parser.add_argument("--baseline", choices=["lagovad", "desc", "dsanet"], required=True)
     parser.add_argument("--dataset", choices=["ucf", "xd"], required=True)
@@ -75,7 +73,6 @@ def main() -> None:
     parser.add_argument("--normal-suppression-weight", type=float, default=1.0)
     parser.add_argument("--persistence-width", type=int, default=15)
     parser.add_argument("--persistence-weight", type=float, default=0.75)
-    parser.add_argument("--refiner-weight", type=float, default=0.5)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -88,17 +85,6 @@ def main() -> None:
     model.load_state_dict(checkpoint["model_state_dict"])
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     model.to(device).eval()
-
-    refiner_checkpoint = torch.load(args.refiner_model, map_location="cpu", weights_only=False)
-    if refiner_checkpoint.get("baseline") != args.baseline or refiner_checkpoint.get("dataset") != args.dataset:
-        raise ValueError("MIL refiner checkpoint baseline/dataset mismatch")
-    refiner = NeuronMILRefiner(
-        int(refiner_checkpoint["config"]["input_dim"]), int(refiner_checkpoint["config"]["width"])
-    )
-    refiner.load_state_dict(refiner_checkpoint["model_state_dict"])
-    refiner.to(device).eval()
-    refiner_mean = refiner_checkpoint["normalization_mean"].to(device)
-    refiner_std = refiner_checkpoint["normalization_std"].to(device)
 
     baseline_train = pd.read_csv(args.baseline_train_manifest)
     expert_train = pd.read_csv(args.expert_train_manifest)[["key", "expert_score_path"]]
@@ -117,9 +103,7 @@ def main() -> None:
     )
     baseline = pd.read_csv(args.baseline_manifest)
     expert = pd.read_csv(args.expert_manifest)[["key", "expert_score_path"]]
-    selected = pd.read_csv(args.selected_manifest)[["key", "selected_path"]]
     frame = baseline.merge(expert, on="key", validate="one_to_one")
-    frame = frame.merge(selected, on="key", validate="one_to_one")
     baseline_curves, corrected_curves, rows = [], [], []
     with torch.no_grad():
         for row in tqdm(frame.itertuples(index=False), total=len(frame), desc=f"evaluate {args.baseline}/{args.dataset}"):
@@ -140,13 +124,6 @@ def main() -> None:
             corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.normal_suppression_weight * normal_shift)))
             persistent = median_filter(corrected, args.persistence_width, mode="nearest")
             corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
-            selected_neurons = resample_matrix(np.load(str(row.selected_path)), len(base))
-            selected_tensor = torch.from_numpy(selected_neurons).unsqueeze(0).to(device)
-            refiner_logits = refiner(
-                (selected_tensor - refiner_mean) / refiner_std, base_tensor, neuron_tensor
-            )[0].cpu().numpy().astype(np.float32)
-            residual = refiner_logits - logit(base)
-            corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.refiner_weight * residual)))
             baseline_curves.append(base)
             corrected_curves.append(corrected)
             rows.append({"key": str(row.key), "snippets": len(base), "corrected_mean": float(corrected.mean())})
@@ -177,8 +154,6 @@ def main() -> None:
             "video_prior": "one-sided joint current-baseline and CLS-neuron training classifier",
             "persistence_width": args.persistence_width,
             "persistence_weight": args.persistence_weight,
-            "refiner_weight": args.refiner_weight,
-            "refiner_supervision": "video-label MIL with current single baseline and selected CLS neurons",
         },
         "frames": len(truth),
     }

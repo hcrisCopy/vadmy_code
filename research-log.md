@@ -66,9 +66,5 @@ One baseline-independent linear probe per anomaly category was trained over the 
 
 ## New run Trial 14 - one-snippet temporal alignment
 
-Hypothesis: corrected responses lag the frame annotations by one 16-frame snippet. Formal results were LaGoVAD UCF 85.997 (+4.877), LaGoVAD XD 79.299 (+5.049), DeSC UCF 89.862 (+0.492), DeSC XD 87.685 (+0.505), DSANet UCF 89.950 (+0.510), and DSANet XD 87.648 (+0.698). Minimum gain was +0.492 pp, so the one-snippet within-video advance was retained.
-
-## New run Trial 15 - diverse sparse-neuron expert
-
-Hypothesis: one 32-neurons-per-layer expert has insufficient localization diversity. Train a second baseline-independent expert with 64 active CLS dimensions per layer and the same MIL objective, then average the video-standardized evidence of both experts only in the event-propagation gate. The expert is trained once per dataset and shared by all three baselines; no second baseline score is used. Formal remote verification is pending.
+Hypothesis: corrected responses lag the frame annotations by one 16-frame snippet. Advance every video's final score curve by exactly one snippet, repeat the last value for boundary preservation, and never move values across videos. A unified scan from -20 to +20 snippets and fractional interpolation identified an integer one-snippet advance as the best shared alignment. Formal remote verification is pending.
 

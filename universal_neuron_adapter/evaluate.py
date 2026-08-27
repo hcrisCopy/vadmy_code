@@ -73,6 +73,7 @@ def main() -> None:
     parser.add_argument("--event-width", type=int, default=25)
     parser.add_argument("--event-weight", type=float, default=1.0)
     parser.add_argument("--normality-gate-weight", type=float, default=0.5)
+    parser.add_argument("--normality-smoothing-blend", type=float, default=0.0)
     parser.add_argument("--normal-suppression-weight", type=float, default=1.0)
     parser.add_argument("--persistence-width", type=int, default=15)
     parser.add_argument("--persistence-weight", type=float, default=0.75)
@@ -126,6 +127,11 @@ def main() -> None:
             )[0].cpu().numpy().astype(np.float32)
             standardized = (neuron - neuron.mean()) / max(float(neuron.std()), 1e-6)
             standardized2 = (neuron2 - neuron2.mean()) / max(float(neuron2.std()), 1e-6)
+            if not 0.0 <= args.normality_smoothing_blend <= 1.0:
+                raise ValueError("normality-smoothing-blend must be in [0, 1]")
+            if args.normality_smoothing_blend:
+                smooth_neuron3 = gaussian_filter1d(neuron3, 1.0, mode="nearest")
+                neuron3 = (1.0 - args.normality_smoothing_blend) * neuron3 + args.normality_smoothing_blend * smooth_neuron3
             standardized3 = (neuron3 - neuron3.mean()) / max(float(neuron3.std()), 1e-6)
             neuron_gate = 1.0 / (1.0 + np.exp(-(standardized + standardized2 + args.normality_gate_weight * standardized3)))
             expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
@@ -172,6 +178,7 @@ def main() -> None:
             "event_gate": "sigmoid(2 * video-standardized neuron evidence)",
             "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
             "normality_gate_weight": args.normality_gate_weight,
+            "normality_smoothing_blend": args.normality_smoothing_blend,
             "normal_suppression_weight": args.normal_suppression_weight,
             "video_prior": "one-sided joint current-baseline and CLS-neuron training classifier",
             "persistence_width": args.persistence_width,

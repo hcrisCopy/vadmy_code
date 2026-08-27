@@ -102,4 +102,10 @@ Hypothesis: the baseline-independent normality expert improved the UCF strong ba
 
 ## New run Trial 24 - saturated normality gate strength
 
-Hypothesis: the normality evidence remains useful above weight 0.75. A shared scan over 1.0, 1.25, 1.5, and 2.0 found the best minimum gain at 1.5; 2.0 already degraded XD DeSC. Set one universal weight of 1.5 for formal verification. Formal remote verification is pending.
+Hypothesis: the normality evidence remains useful above weight 0.75. A shared scan over 1.0, 1.25, 1.5, and 2.0 found the best minimum gain at 1.5; 2.0 already degraded XD DeSC. Formal results were LaGoVAD UCF 86.617 (+5.497), LaGoVAD XD 79.268 (+5.018), DeSC UCF 90.026 (+0.656), DeSC XD 87.839 (+0.659), DSANet UCF 90.093 (+0.653), and DSANet XD 87.907 (+0.957). Minimum gain was +0.653 pp, so the trial was retained.
+
+Normality capacity diagnostics found top-16 (+0.645) and top-64 (+0.626) below the retained top-32 setting. Pure normality smoothing also reduced the minimum because it harmed XD DeSC despite improving UCF DSANet.
+
+## New run Trial 25 - raw/persistent normality blend
+
+Hypothesis: raw normality evidence preserves short XD events, while sigma-1 evidence suppresses isolated UCF false positives. Blend 75% raw and 25% smoothed evidence before video standardization, using one fixed ratio for all datasets and baselines. A shared scan predicted +0.656 pp minimum gain. Formal remote verification is pending.

@@ -30,6 +30,17 @@ class ScoreCorrectionHead(nn.Module):
         return baseline + self.body(features).squeeze(1)
 
 
+class SemanticNeuronProbe(nn.Module):
+    """Class-specific linear probes whose weights map directly to CLS neurons."""
+
+    def __init__(self, input_dim: int, classes: int) -> None:
+        super().__init__()
+        self.probes = nn.Linear(input_dim, classes)
+
+    def forward(self, neurons: torch.Tensor) -> torch.Tensor:
+        return self.probes(neurons)
+
+
 def calibrated_probability(
     baseline_probability: torch.Tensor,
     expert_probability: torch.Tensor,

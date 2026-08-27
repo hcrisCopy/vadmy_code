@@ -14,8 +14,8 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
-from universal_neuron_adapter.data import resample_curve
-from universal_neuron_adapter.model import ScoreCorrectionHead, calibrated_probability
+from universal_neuron_adapter.data import normalize_selected_layers, resample_curve, resample_matrix
+from universal_neuron_adapter.model import ScoreCorrectionHead, SemanticNeuronProbe, calibrated_probability
 
 
 def video_features(curve: np.ndarray) -> np.ndarray:
@@ -61,6 +61,8 @@ def main() -> None:
     parser.add_argument("--expert-train-manifest", required=True)
     parser.add_argument("--expert-manifest", required=True)
     parser.add_argument("--correction-model", required=True)
+    parser.add_argument("--semantic-model", required=True)
+    parser.add_argument("--selected-manifest", required=True)
     parser.add_argument("--gt-path", required=True)
     parser.add_argument("--baseline", choices=["lagovad", "desc", "dsanet"], required=True)
     parser.add_argument("--dataset", choices=["ucf", "xd"], required=True)
@@ -73,6 +75,7 @@ def main() -> None:
     parser.add_argument("--normal-suppression-weight", type=float, default=1.0)
     parser.add_argument("--persistence-width", type=int, default=15)
     parser.add_argument("--persistence-weight", type=float, default=0.75)
+    parser.add_argument("--semantic-weight", type=float, default=0.1)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -85,6 +88,12 @@ def main() -> None:
     model.load_state_dict(checkpoint["model_state_dict"])
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     model.to(device).eval()
+    semantic_checkpoint = torch.load(args.semantic_model, map_location="cpu", weights_only=False)
+    if semantic_checkpoint.get("dataset") != args.dataset:
+        raise ValueError("semantic checkpoint dataset mismatch")
+    semantic = SemanticNeuronProbe(int(semantic_checkpoint["input_dim"]), len(semantic_checkpoint["classes"]))
+    semantic.load_state_dict(semantic_checkpoint["model_state_dict"])
+    semantic.to(device).eval()
 
     baseline_train = pd.read_csv(args.baseline_train_manifest)
     expert_train = pd.read_csv(args.expert_train_manifest)[["key", "expert_score_path"]]
@@ -103,7 +112,8 @@ def main() -> None:
     )
     baseline = pd.read_csv(args.baseline_manifest)
     expert = pd.read_csv(args.expert_manifest)[["key", "expert_score_path"]]
-    frame = baseline.merge(expert, on="key", validate="one_to_one")
+    selected = pd.read_csv(args.selected_manifest)[["key", "selected_path"]]
+    frame = baseline.merge(expert, on="key", validate="one_to_one").merge(selected, on="key", validate="one_to_one")
     baseline_curves, corrected_curves, rows = [], [], []
     with torch.no_grad():
         for row in tqdm(frame.itertuples(index=False), total=len(frame), desc=f"evaluate {args.baseline}/{args.dataset}"):
@@ -124,6 +134,11 @@ def main() -> None:
             corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.normal_suppression_weight * normal_shift)))
             persistent = median_filter(corrected, args.persistence_width, mode="nearest")
             corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
+            selected_neurons = normalize_selected_layers(resample_matrix(np.load(str(row.selected_path)), len(base)))
+            semantic_logits = semantic(torch.from_numpy(selected_neurons).unsqueeze(0).to(device))[0]
+            semantic_curve = torch.sigmoid(semantic_logits).amax(dim=-1).cpu().numpy().astype(np.float32)
+            semantic_evidence = (semantic_curve - semantic_curve.mean()) / max(float(semantic_curve.std()), 1e-6)
+            corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.semantic_weight * semantic_evidence)))
             baseline_curves.append(base)
             corrected_curves.append(corrected)
             rows.append({"key": str(row.key), "snippets": len(base), "corrected_mean": float(corrected.mean())})
@@ -154,6 +169,8 @@ def main() -> None:
             "video_prior": "one-sided joint current-baseline and CLS-neuron training classifier",
             "persistence_width": args.persistence_width,
             "persistence_weight": args.persistence_weight,
+            "semantic_weight": args.semantic_weight,
+            "semantic_probe_classes": semantic_checkpoint["classes"],
         },
         "frames": len(truth),
     }

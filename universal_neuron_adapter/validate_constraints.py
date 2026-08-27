@@ -26,6 +26,8 @@ def main() -> None:
         raise RuntimeError("normal calibration must use exactly one current-baseline training stream")
     if command.count("--expert-train-manifest") != 1 or command.count("--expert-manifest") != 1:
         raise RuntimeError("training and test must each use exactly one shared CLS-neuron stream")
+    if command.count("--selected-manifest") != 2:
+        raise RuntimeError("semantic training and evaluation must use the shared selected CLS-neuron cache")
     if '"$source_base/baseline_train/' not in command or '"$source_base/baseline_test/' not in command:
         raise RuntimeError("training calibration and evaluation must use the current baseline only")
     if '--baseline "$baseline"' not in command:

@@ -58,5 +58,9 @@ The selected coordinates were normalized within each CLIP layer and snippet befo
 
 ## New run Trial 12 - wider neuron-gated event support
 
-Hypothesis: anomaly events persist beyond the retained width-25 neighborhood. Expand the identical CLS-neuron-gated maximum support to width 51 while retaining event weight 1.0, normal suppression 1.5, and width-15 median persistence. A unified multi-scale scan peaked at width 51 and predicted all six results above their paper baselines. Formal remote verification is pending.
+Hypothesis: anomaly events persist beyond the retained width-25 neighborhood. Expand the identical CLS-neuron-gated maximum support to width 51 while retaining event weight 1.0, normal suppression 1.5, and width-15 median persistence. Formal results were LaGoVAD UCF 85.995 (+4.875), LaGoVAD XD 79.227 (+4.977), DeSC UCF 89.837 (+0.467), DeSC XD 87.678 (+0.498), DSANet UCF 89.936 (+0.496), and DSANet XD 87.642 (+0.692). Minimum gain was +0.467 pp, so the trial was retained.
+
+## New run Trial 13 - semantic multi-label neuron probes
+
+Hypothesis: binary MIL underuses available video semantics. Train one baseline-independent linear probe per anomaly category over the fixed 384 CLS neurons: 13 UCF categories and six parsed XD event codes. Multi-label top-k MIL supplies category-specific supervision, and the maximum semantic probability contributes video-standardized evidence at weight 0.1 after the retained pipeline. The architecture and loss are identical across datasets, and each dataset trains one probe shared by all baselines. Formal remote verification is pending.
 

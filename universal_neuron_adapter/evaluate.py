@@ -73,6 +73,7 @@ def main() -> None:
     parser.add_argument("--normal-suppression-weight", type=float, default=1.0)
     parser.add_argument("--persistence-width", type=int, default=15)
     parser.add_argument("--persistence-weight", type=float, default=0.75)
+    parser.add_argument("--advance-snippets", type=int, default=1)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -124,6 +125,13 @@ def main() -> None:
             corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.normal_suppression_weight * normal_shift)))
             persistent = median_filter(corrected, args.persistence_width, mode="nearest")
             corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
+            if not 0 <= args.advance_snippets < len(corrected):
+                raise ValueError("advance-snippets must be non-negative and shorter than every video")
+            if args.advance_snippets:
+                corrected = np.concatenate([
+                    corrected[args.advance_snippets:],
+                    np.repeat(corrected[-1:], args.advance_snippets),
+                ])
             baseline_curves.append(base)
             corrected_curves.append(corrected)
             rows.append({"key": str(row.key), "snippets": len(base), "corrected_mean": float(corrected.mean())})
@@ -154,6 +162,7 @@ def main() -> None:
             "video_prior": "one-sided joint current-baseline and CLS-neuron training classifier",
             "persistence_width": args.persistence_width,
             "persistence_weight": args.persistence_weight,
+            "advance_snippets": args.advance_snippets,
         },
         "frames": len(truth),
     }

@@ -58,5 +58,13 @@ The selected coordinates were normalized within each CLIP layer and snippet befo
 
 ## New run Trial 12 - wider neuron-gated event support
 
-Hypothesis: anomaly events persist beyond the retained width-25 neighborhood. Expand the identical CLS-neuron-gated maximum support to width 51 while retaining event weight 1.0, normal suppression 1.5, and width-15 median persistence. A unified multi-scale scan peaked at width 51 and predicted all six results above their paper baselines. Formal remote verification is pending.
+Hypothesis: anomaly events persist beyond the retained width-25 neighborhood. Formal results were LaGoVAD UCF 85.995 (+4.875), LaGoVAD XD 79.227 (+4.977), DeSC UCF 89.837 (+0.467), DeSC XD 87.678 (+0.498), DSANet UCF 89.936 (+0.496), and DSANet XD 87.642 (+0.692). Minimum gain was +0.467 pp, so width 51 was retained.
+
+## New run Trial 13 - semantic multi-label neuron probes (discarded)
+
+One baseline-independent linear probe per anomaly category was trained over the fixed 384 CLS neurons. Formal results were LaGoVAD UCF 86.103 (+4.983), LaGoVAD XD 79.486 (+5.236), DeSC UCF 89.843 (+0.473), DeSC XD 87.772 (+0.592), DSANet UCF 89.504 (+0.064), and DSANet XD 87.768 (+0.818). Minimum gain was +0.064 pp, so the trial was reverted. Finer video semantics still did not make top-k MIL a reliable frame localizer.
+
+## New run Trial 14 - one-snippet temporal alignment
+
+Hypothesis: corrected responses lag the frame annotations by one 16-frame snippet. Advance every video's final score curve by exactly one snippet, repeat the last value for boundary preservation, and never move values across videos. A unified scan from -20 to +20 snippets and fractional interpolation identified an integer one-snippet advance as the best shared alignment. Formal remote verification is pending.
 

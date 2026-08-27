@@ -98,4 +98,8 @@ Hypothesis: both existing experts learn from abnormal-video top-k MIL and theref
 
 ## New run Trial 23 - stronger normality event gating
 
-Hypothesis: the baseline-independent normality expert improved the UCF strong baselines without destabilizing XD. Increase only its universal event-gate coefficient from 0.5 to 0.75 while preserving neuron selection and all other operations. Formal remote verification is pending.
+Hypothesis: the baseline-independent normality expert improved the UCF strong baselines without destabilizing XD. Increase only its universal event-gate coefficient from 0.5 to 0.75 while preserving neuron selection and all other operations. Formal results were LaGoVAD UCF 86.605 (+5.485), LaGoVAD XD 79.509 (+5.259), DeSC UCF 90.038 (+0.668), DeSC XD 87.848 (+0.668), DSANet UCF 90.064 (+0.624), and DSANet XD 87.957 (+1.007). Minimum gain was +0.624 pp, so the trial was retained.
+
+## New run Trial 24 - saturated normality gate strength
+
+Hypothesis: the normality evidence remains useful above weight 0.75. A shared scan over 1.0, 1.25, 1.5, and 2.0 found the best minimum gain at 1.5; 2.0 already degraded XD DeSC. Set one universal weight of 1.5 for formal verification. Formal remote verification is pending.

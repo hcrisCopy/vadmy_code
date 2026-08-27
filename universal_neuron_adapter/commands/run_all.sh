@@ -45,7 +45,7 @@ for dataset in ucf xd; do
       --out-dir "$target" --frames-per-snippet 16 \
       --correction-weight 0.2 --neuron-weight 0.4 \
       --event-width 51 --event-weight 1.0 \
-      --normality-gate-weight 0.75 \
+      --normality-gate-weight 1.5 \
       --normal-suppression-weight 1.5 \
       --persistence-width 15 --persistence-weight 0.75 \
       --gaussian-sigma 1.0 \

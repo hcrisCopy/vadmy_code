@@ -116,4 +116,8 @@ Direct normality residual reduced the minimum to +0.629 pp. Category normality g
 
 ## New run Trial 29 - consensus normality video suppression
 
-Hypothesis: the normality-aware video classifier contains useful DSANet normal-video evidence but should not replace the retained classifier. Preserve the retained one-sided shift and add 0.25 times the normality-aware negative decision only when both classifiers agree the current video is normal. Formal remote verification is pending.
+Hypothesis: the normality-aware video classifier contains useful DSANet normal-video evidence but should not replace the retained classifier. Preserve the retained one-sided shift and add 0.25 times the normality-aware negative decision only when both classifiers agree the current video is normal. Formal results were LaGoVAD UCF 86.726 (+5.606), LaGoVAD XD 79.272 (+5.022), DeSC UCF 90.030 (+0.660), DeSC XD 87.836 (+0.656), DSANet UCF 90.110 (+0.670), and DSANet XD 87.905 (+0.955). Minimum gain was +0.656 pp, narrowly above Trial 25, so the trial was retained.
+
+## New run Trial 30 - rebalanced neuron-gated event support
+
+Hypothesis: after adding the strong normality gate, width 51 propagates peaks slightly too far on XD, while width 31 loses UCF support. A read-only universal scan found width 41 gave a +0.664 pp minimum gain versus +0.646 at width 31 and +0.656 for the retained width 51. Fix width 41 for all six combinations; formal remote verification is pending.

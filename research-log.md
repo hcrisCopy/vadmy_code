@@ -22,5 +22,9 @@ Hypothesis: retain the conservative learned correction and propagate a local pea
 
 ## New run Trial 3 - full neuron-gated propagation
 
-Hypothesis: when the CLS-neuron gate is active, use the full local event peak instead of the conservative 0.6 blend. The width-25 neighborhood and every other parameter remain unchanged across all six combinations. Formal remote verification is pending.
+Hypothesis: when the CLS-neuron gate is active, use the full local event peak instead of the conservative 0.6 blend. The width-25 neighborhood and every other parameter remain unchanged across all six combinations. Formal results were LaGoVAD UCF 83.586 (+2.466), LaGoVAD XD 77.409 (+3.159), DeSC UCF 89.703 (+0.333), DeSC XD 87.525 (+0.345), DSANet UCF 89.821 (+0.381), and DSANet XD 87.440 (+0.490). Minimum gain was +0.333 pp, so the trial was retained.
+
+## New run Trial 4 - current-baseline-guided dense neuron correction
+
+Hypothesis: video-level MIL leaves the CLS expert temporally underconstrained. Use only the current baseline's training curve to mark its top 10% snippets as positive and bottom 50% as negative, weight positive supervision by the CLS-neuron gate, and retain dense negative supervision on normal videos. The same lightweight head and all hyperparameters are used for every baseline and dataset. Formal remote verification is pending.
 

@@ -117,10 +117,13 @@ def main() -> None:
             neuron_tensor = torch.from_numpy(neuron).unsqueeze(0).to(device)
             correction = model(base_tensor, neuron_tensor)
             corrected = calibrated_probability(
-                base_tensor, neuron_tensor, correction, args.correction_weight, args.neuron_weight
+                base_tensor, neuron_tensor, correction, args.correction_weight, 0.0
             )[0].cpu().numpy().astype(np.float32)
             standardized = (neuron - neuron.mean()) / max(float(neuron.std()), 1e-6)
             standardized2 = (neuron2 - neuron2.mean()) / max(float(neuron2.std()), 1e-6)
+            consensus = np.minimum(standardized, standardized2)
+            consensus = (consensus - consensus.mean()) / max(float(consensus.std()), 1e-6)
+            corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.neuron_weight * consensus)))
             neuron_gate = 1.0 / (1.0 + np.exp(-(standardized + standardized2)))
             expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
             corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
@@ -159,6 +162,7 @@ def main() -> None:
         "configuration": {
             "correction_weight": args.correction_weight,
             "neuron_weight": args.neuron_weight,
+            "direct_neuron_evidence": "video-standardized minimum agreement of both sparse CLS experts",
             "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(2 * video-standardized neuron evidence)",

@@ -115,9 +115,10 @@ def main() -> None:
             neuron2 = resample_curve(np.load(str(row.expert2_score_path)), len(base))
             base_tensor = torch.from_numpy(base).unsqueeze(0).to(device)
             neuron_tensor = torch.from_numpy(neuron).unsqueeze(0).to(device)
+            direct_neuron_tensor = torch.from_numpy((neuron + neuron2) * 0.5).unsqueeze(0).to(device)
             correction = model(base_tensor, neuron_tensor)
             corrected = calibrated_probability(
-                base_tensor, neuron_tensor, correction, args.correction_weight, args.neuron_weight
+                base_tensor, direct_neuron_tensor, correction, args.correction_weight, args.neuron_weight
             )[0].cpu().numpy().astype(np.float32)
             standardized = (neuron - neuron.mean()) / max(float(neuron.std()), 1e-6)
             standardized2 = (neuron2 - neuron2.mean()) / max(float(neuron2.std()), 1e-6)
@@ -159,6 +160,7 @@ def main() -> None:
         "configuration": {
             "correction_weight": args.correction_weight,
             "neuron_weight": args.neuron_weight,
+            "direct_neuron_evidence": "mean of both baseline-independent sparse CLS experts",
             "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(2 * video-standardized neuron evidence)",

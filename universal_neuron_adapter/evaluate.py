@@ -14,8 +14,8 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
-from universal_neuron_adapter.data import resample_curve, resample_matrix
-from universal_neuron_adapter.model import ScoreCorrectionHead, TemporalNeuronHead, calibrated_probability
+from universal_neuron_adapter.data import resample_curve
+from universal_neuron_adapter.model import ScoreCorrectionHead, calibrated_probability
 
 
 def video_features(curve: np.ndarray) -> np.ndarray:
@@ -61,8 +61,6 @@ def main() -> None:
     parser.add_argument("--expert-train-manifest", required=True)
     parser.add_argument("--expert-manifest", required=True)
     parser.add_argument("--correction-model", required=True)
-    parser.add_argument("--cross-view-model", required=True)
-    parser.add_argument("--selected-manifest", required=True)
     parser.add_argument("--gt-path", required=True)
     parser.add_argument("--baseline", choices=["lagovad", "desc", "dsanet"], required=True)
     parser.add_argument("--dataset", choices=["ucf", "xd"], required=True)
@@ -75,7 +73,6 @@ def main() -> None:
     parser.add_argument("--normal-suppression-weight", type=float, default=1.0)
     parser.add_argument("--persistence-width", type=int, default=15)
     parser.add_argument("--persistence-weight", type=float, default=0.75)
-    parser.add_argument("--cross-view-weight", type=float, default=1.0)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -88,17 +85,6 @@ def main() -> None:
     model.load_state_dict(checkpoint["model_state_dict"])
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     model.to(device).eval()
-
-    cross_checkpoint = torch.load(args.cross_view_model, map_location="cpu", weights_only=False)
-    if cross_checkpoint.get("baseline") != args.baseline or cross_checkpoint.get("dataset") != args.dataset:
-        raise ValueError("cross-view checkpoint baseline/dataset mismatch")
-    cross_model = TemporalNeuronHead(
-        int(cross_checkpoint["config"]["input_dim"]), int(cross_checkpoint["config"]["width"])
-    )
-    cross_model.load_state_dict(cross_checkpoint["model_state_dict"])
-    cross_model.to(device).eval()
-    cross_mean = cross_checkpoint["normalization_mean"].to(device)
-    cross_std = cross_checkpoint["normalization_std"].to(device)
 
     baseline_train = pd.read_csv(args.baseline_train_manifest)
     expert_train = pd.read_csv(args.expert_train_manifest)[["key", "expert_score_path"]]
@@ -117,9 +103,7 @@ def main() -> None:
     )
     baseline = pd.read_csv(args.baseline_manifest)
     expert = pd.read_csv(args.expert_manifest)[["key", "expert_score_path"]]
-    selected = pd.read_csv(args.selected_manifest)[["key", "selected_path"]]
     frame = baseline.merge(expert, on="key", validate="one_to_one")
-    frame = frame.merge(selected, on="key", validate="one_to_one")
     baseline_curves, corrected_curves, rows = [], [], []
     with torch.no_grad():
         for row in tqdm(frame.itertuples(index=False), total=len(frame), desc=f"evaluate {args.baseline}/{args.dataset}"):
@@ -140,12 +124,6 @@ def main() -> None:
             corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.normal_suppression_weight * normal_shift)))
             persistent = median_filter(corrected, args.persistence_width, mode="nearest")
             corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
-            selected_neurons = resample_matrix(np.load(str(row.selected_path)), len(base))
-            selected_tensor = torch.from_numpy(selected_neurons).unsqueeze(0).to(device)
-            cross_probability = torch.sigmoid(cross_model((selected_tensor - cross_mean) / cross_std))[0]
-            cross_curve = cross_probability.cpu().numpy().astype(np.float32)
-            cross_evidence = (cross_curve - cross_curve.mean()) / max(float(cross_curve.std()), 1e-6)
-            corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.cross_view_weight * cross_evidence)))
             baseline_curves.append(base)
             corrected_curves.append(corrected)
             rows.append({"key": str(row.key), "snippets": len(base), "corrected_mean": float(corrected.mean())})
@@ -176,8 +154,6 @@ def main() -> None:
             "video_prior": "one-sided joint current-baseline and CLS-neuron training classifier",
             "persistence_width": args.persistence_width,
             "persistence_weight": args.persistence_weight,
-            "cross_view_weight": args.cross_view_weight,
-            "cross_view_teacher": "agreement of the current baseline and shared CLS-neuron expert",
         },
         "frames": len(truth),
     }

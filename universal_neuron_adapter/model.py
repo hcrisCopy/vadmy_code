@@ -30,23 +30,6 @@ class ScoreCorrectionHead(nn.Module):
         return baseline + self.body(features).squeeze(1)
 
 
-class TemporalNeuronHead(nn.Module):
-    """Small temporal head over a fixed, auditable list of CLS neuron coordinates."""
-
-    def __init__(self, input_dim: int = 384, width: int = 64) -> None:
-        super().__init__()
-        self.body = nn.Sequential(
-            nn.Conv1d(input_dim, width, 3, padding=1),
-            nn.GELU(),
-            nn.Conv1d(width, width, 3, padding=2, dilation=2),
-            nn.GELU(),
-            nn.Conv1d(width, 1, 1),
-        )
-
-    def forward(self, neurons: torch.Tensor) -> torch.Tensor:
-        return self.body(neurons.transpose(1, 2)).squeeze(1)
-
-
 def calibrated_probability(
     baseline_probability: torch.Tensor,
     expert_probability: torch.Tensor,

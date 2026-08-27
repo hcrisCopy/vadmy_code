@@ -152,4 +152,8 @@ Hypothesis: the original learned correction head is redundant after directional 
 
 ## New run Trial 38 - stronger directional normality consensus
 
-Hypothesis: the one-sided expert can carry more gate weight than the former absolute-deviation expert because the learned direction removes the irrelevant tail. A UCF scan over weights 2.5/3.0/4.0/5.0 peaked at 3.0, where DSANet gained +0.728 pp; larger values declined. XD at weight 3.0 retained gains +3.309/+0.788/+0.879. Apply weight 3.0 universally; formal remote verification is pending.
+Hypothesis: the one-sided expert can carry more gate weight than the former absolute-deviation expert because the learned direction removes the irrelevant tail. A UCF scan over weights 2.5/3.0/4.0/5.0 peaked at 3.0, where DSANet gained +0.728 pp; larger values declined. Formal results were LaGoVAD UCF 86.452 (+5.332), LaGoVAD XD 77.559 (+3.309), DeSC UCF 90.141 (+0.771), DeSC XD 87.968 (+0.788), DSANet UCF 90.168 (+0.728), and DSANet XD 87.829 (+0.879). Minimum gain was +0.728 pp, so weight 3.0 was retained.
+
+## New run Trial 39 - reduced one-sided normal-video suppression
+
+Hypothesis: directional normality already rejects many false events, so the retained video-level normal shift of 1.5 over-suppresses DSANet UCF. A universal scan gave minimum gains +0.741 at suppression weight 1.0 and +0.607 at 0.5. Use weight 1.0 for all six combinations; formal remote verification is pending.

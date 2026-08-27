@@ -56,7 +56,7 @@ for dataset in ucf xd; do
       --normality-gate-weight 3.0 \
       --normality-smoothing-blend 0.25 \
       --agreement-residual-weight 0.15 \
-      --normal-suppression-weight 1.5 \
+      --normal-suppression-weight 1.0 \
       --persistence-weight 1.0 \
       --gaussian-sigma 0.5 \
       --advance-snippets 1 --device cuda

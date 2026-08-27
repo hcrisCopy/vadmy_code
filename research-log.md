@@ -108,4 +108,8 @@ Normality capacity diagnostics found top-16 (+0.645) and top-64 (+0.626) below t
 
 ## New run Trial 25 - raw/persistent normality blend
 
-Hypothesis: raw normality evidence preserves short XD events, while sigma-1 evidence suppresses isolated UCF false positives. Blend 75% raw and 25% smoothed evidence before video standardization, using one fixed ratio for all datasets and baselines. A shared scan predicted +0.656 pp minimum gain. Formal remote verification is pending.
+Hypothesis: raw normality evidence preserves short XD events, while sigma-1 evidence suppresses isolated UCF false positives. Blend 75% raw and 25% smoothed evidence before video standardization, using one fixed ratio for all datasets and baselines. Formal results were LaGoVAD UCF 86.617 (+5.497), LaGoVAD XD 79.260 (+5.010), DeSC UCF 90.027 (+0.657), DeSC XD 87.836 (+0.656), DSANet UCF 90.100 (+0.660), and DSANet XD 87.901 (+0.951). Minimum gain was +0.656 pp, so the trial was retained.
+
+## New run Trial 26 - normality direct residual
+
+Hypothesis: unlike the discarded second MIL expert, the normality expert supplies an independent localization signal that improved all strong baselines through gating. Add its video-standardized evidence directly to the corrected logit at a conservative universal weight of 0.1 before event propagation. Formal remote verification is pending.

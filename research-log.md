@@ -12,3 +12,11 @@ Hypothesis: retain only 20% of the learned correction and add 0.1 times video-wi
 
 This attempt combined DeSC and DSANet score streams and reached a nominal minimum paper-relative gain of +1.0095 pp. It is invalid for this project because a method evaluated for one baseline must not consume another baseline's predictions. The implementation and leaderboard rows were removed; the result is retained here only as a negative methodological record and is excluded from all future comparisons.
 
+## New run Trial 1 - single-baseline self-calibrated event expansion (discarded)
+
+The method replaced the learned correction with current-baseline training-CDF calibration and an unconditional width-25 maximum filter. Formal results were LaGoVAD UCF 81.049 (-0.071), LaGoVAD XD 73.350 (-0.900), DeSC UCF 89.631 (+0.261), DeSC XD 87.763 (+0.583), DSANet UCF 89.804 (+0.364), and DSANet XD 87.065 (+0.115). Minimum gain was -0.900 pp. Unconditional peak propagation spreads normal false positives, especially for LaGoVAD, so the trial was reverted.
+
+## New run Trial 2 - CLS-neuron-gated event expansion
+
+Hypothesis: retain the conservative learned correction and propagate a local peak only where standardized CLS-neuron evidence independently supports anomaly. A sigmoid gate, width 25, and event weight 0.6 are fixed across all baselines and datasets. Formal remote verification is pending.
+

@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+from scipy.ndimage import maximum_filter1d
 from sklearn.metrics import average_precision_score, roc_auc_score
 from tqdm import tqdm
 
@@ -26,6 +27,8 @@ def main() -> None:
     parser.add_argument("--frames-per-snippet", type=int, default=16)
     parser.add_argument("--correction-weight", type=float, default=0.2)
     parser.add_argument("--neuron-weight", type=float, default=0.1)
+    parser.add_argument("--event-width", type=int, default=25)
+    parser.add_argument("--event-weight", type=float, default=0.6)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -53,6 +56,10 @@ def main() -> None:
             corrected = calibrated_probability(
                 base_tensor, neuron_tensor, correction, args.correction_weight, args.neuron_weight
             )[0].cpu().numpy().astype(np.float32)
+            standardized = (neuron - neuron.mean()) / max(float(neuron.std()), 1e-6)
+            neuron_gate = 1.0 / (1.0 + np.exp(-2.0 * standardized))
+            expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
+            corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
             baseline_curves.append(base)
             corrected_curves.append(corrected)
             rows.append({"key": str(row.key), "snippets": len(base), "corrected_mean": float(corrected.mean())})
@@ -73,7 +80,13 @@ def main() -> None:
             "auc": float(roc_auc_score(truth, corrected_frames)),
             "ap": float(average_precision_score(truth, corrected_frames)),
         },
-        "configuration": {"correction_weight": args.correction_weight, "neuron_weight": args.neuron_weight},
+        "configuration": {
+            "correction_weight": args.correction_weight,
+            "neuron_weight": args.neuron_weight,
+            "event_width": args.event_width,
+            "event_weight": args.event_weight,
+            "event_gate": "sigmoid(2 * video-standardized neuron evidence)",
+        },
         "frames": len(truth),
     }
     (output / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")

@@ -50,5 +50,9 @@ A zero-initialized residual head consumed the current baseline, shared expert, a
 
 ## New run Trial 10 - stronger one-sided normal suppression
 
-Hypothesis: the retained joint current-baseline/CLS video classifier is reliable only as a normal-video suppressor. Increase its universal logit shift from 1.0 to 1.5 while leaving suspected abnormal videos and all temporal operations unchanged. A read-only scan predicted a small improvement in the six-way minimum. Formal remote verification is pending.
+Hypothesis: the retained joint current-baseline/CLS video classifier is reliable only as a normal-video suppressor. Increase its universal logit shift from 1.0 to 1.5 while leaving suspected abnormal videos and all temporal operations unchanged. Formal results were LaGoVAD UCF 85.949 (+4.829), LaGoVAD XD 79.118 (+4.868), DeSC UCF 89.813 (+0.443), DeSC XD 87.713 (+0.533), DSANet UCF 89.923 (+0.483), and DSANet XD 87.573 (+0.623). Minimum gain was +0.443 pp, so the trial was retained.
+
+## New run Trial 11 - layer-normalized neuron agreement head
+
+Hypothesis: the raw selected-neuron cache used by Trials 8 and 9 omitted the original expert's within-layer normalization, allowing activation scale drift to dominate temporal learning. Normalize the 32 selected coordinates within each CLIP layer and snippet before training the same current-baseline/CLS agreement head, then add its standardized evidence at a conservative weight of 0.5. Formal remote verification is pending.
 

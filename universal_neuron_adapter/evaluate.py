@@ -81,6 +81,42 @@ def blend_normality(curve: np.ndarray, blend: float) -> np.ndarray:
     return (1.0 - blend) * curve + blend * gaussian_filter1d(curve, 1.0, mode="nearest")
 
 
+def longest_positive_run(values: np.ndarray) -> int:
+    mask = np.asarray(values) > 0.0
+    padded = np.concatenate([np.zeros(1, dtype=bool), mask, np.zeros(1, dtype=bool)])
+    changes = np.flatnonzero(padded[1:] != padded[:-1])
+    lengths = changes[1::2] - changes[::2]
+    return int(lengths.max()) if len(lengths) else 1
+
+
+def estimate_persistence_width(
+    expert_manifest: str,
+    expert2_manifest: str,
+    expert3_manifest: str,
+    normality_blend: float,
+) -> int:
+    expert = pd.read_csv(expert_manifest)[["key", "expert_score_path"]]
+    expert2 = pd.read_csv(expert2_manifest)[["key", "expert2_score_path"]]
+    expert3 = pd.read_csv(expert3_manifest)[["key", "expert3_score_path"]]
+    frame = expert.merge(expert2, on="key", validate="one_to_one").merge(
+        expert3, on="key", validate="one_to_one"
+    )
+    run_lengths = []
+    for row in frame.itertuples(index=False):
+        neuron = np.load(str(row.expert_score_path))
+        neuron2 = resample_curve(np.load(str(row.expert2_score_path)), len(neuron))
+        neuron3 = blend_normality(
+            resample_curve(np.load(str(row.expert3_score_path)), len(neuron)), normality_blend
+        )
+        standardized = (neuron - neuron.mean()) / max(float(neuron.std()), 1e-6)
+        standardized2 = (neuron2 - neuron2.mean()) / max(float(neuron2.std()), 1e-6)
+        standardized3 = (neuron3 - neuron3.mean()) / max(float(neuron3.std()), 1e-6)
+        run_lengths.append(longest_positive_run(standardized + standardized2 + 1.5 * standardized3))
+    raw_width = 0.35 * float(np.quantile(run_lengths, 0.75))
+    odd_width = 2 * round((raw_width - 1.0) / 2.0) + 1
+    return int(np.clip(odd_width, 7, 21))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate conservative universal CLS-neuron fusion.")
     parser.add_argument("--baseline-train-manifest", required=True)
@@ -88,6 +124,7 @@ def main() -> None:
     parser.add_argument("--expert-train-manifest", required=True)
     parser.add_argument("--expert-manifest", required=True)
     parser.add_argument("--expert2-manifest", required=True)
+    parser.add_argument("--expert2-train-manifest", required=True)
     parser.add_argument("--expert3-manifest", required=True)
     parser.add_argument("--expert3-train-manifest", required=True)
     parser.add_argument("--correction-model", required=True)
@@ -104,12 +141,18 @@ def main() -> None:
     parser.add_argument("--normality-smoothing-blend", type=float, default=0.0)
     parser.add_argument("--agreement-residual-weight", type=float, default=0.0)
     parser.add_argument("--normal-suppression-weight", type=float, default=1.0)
-    parser.add_argument("--persistence-width", type=int, default=15)
     parser.add_argument("--persistence-weight", type=float, default=0.75)
     parser.add_argument("--gaussian-sigma", type=float, default=0.0)
     parser.add_argument("--advance-snippets", type=int, default=1)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
+
+    persistence_width = estimate_persistence_width(
+        args.expert_train_manifest,
+        args.expert2_train_manifest,
+        args.expert3_train_manifest,
+        args.normality_smoothing_blend,
+    )
 
     output = Path(args.out_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -189,7 +232,7 @@ def main() -> None:
             if decision < 0.0 and normality_decision < 0.0:
                 normal_shift += 0.25 * normality_decision
             corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.normal_suppression_weight * normal_shift)))
-            persistent = median_filter(corrected, args.persistence_width, mode="nearest")
+            persistent = median_filter(corrected, persistence_width, mode="nearest")
             corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
             if args.gaussian_sigma > 0:
                 corrected = gaussian_filter1d(corrected, args.gaussian_sigma, mode="nearest")
@@ -232,7 +275,8 @@ def main() -> None:
             "agreement_residual_weight": args.agreement_residual_weight,
             "normal_suppression_weight": args.normal_suppression_weight,
             "video_prior": "retained one-sided classifier plus 0.25-weight consensus normality suppression",
-            "persistence_width": args.persistence_width,
+            "persistence_width": persistence_width,
+            "persistence_width_rule": "0.35 * training gate-run q75, nearest odd, clipped to [7, 21]",
             "persistence_weight": args.persistence_weight,
             "gaussian_sigma": args.gaussian_sigma,
             "advance_snippets": args.advance_snippets,

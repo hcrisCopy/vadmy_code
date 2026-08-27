@@ -22,6 +22,9 @@ for dataset in ucf xd; do
   python -m universal_neuron_adapter.export_diverse_expert \
     --manifest "$SOURCE/$dataset/data/test.csv" --expert-model "$diverse/expert_best.pth" \
     --out-dir "$diverse/test" --device cuda
+  python -m universal_neuron_adapter.export_diverse_expert \
+    --manifest "$SOURCE/$dataset/data/expert_train.csv" --expert-model "$diverse/expert_best.pth" \
+    --out-dir "$diverse/train" --device cuda
   normality="$ROOT/normality_expert_cache/$dataset/top32_v1"
   python -m universal_neuron_adapter.fit_normality_expert \
     --manifest "$SOURCE/$dataset/data/expert_train.csv" --out-dir "$normality" \
@@ -41,6 +44,7 @@ for dataset in ucf xd; do
       --expert-train-manifest "$SOURCE/$dataset/expert/train/expert_scores.csv" \
       --expert-manifest "$SOURCE/$dataset/expert/test/expert_scores.csv" \
       --expert2-manifest "$diverse/test/expert2_scores.csv" \
+      --expert2-train-manifest "$diverse/train/expert2_scores.csv" \
       --expert3-manifest "$normality/test/expert3_scores.csv" \
       --expert3-train-manifest "$normality/train/expert3_scores.csv" \
       --correction-model "$source_base/correction/model_best.pth" \
@@ -53,7 +57,7 @@ for dataset in ucf xd; do
       --normality-smoothing-blend 0.25 \
       --agreement-residual-weight 0.1 \
       --normal-suppression-weight 1.5 \
-      --persistence-width 15 --persistence-weight 0.75 \
+      --persistence-weight 0.75 \
       --gaussian-sigma 1.0 \
       --advance-snippets 1 --device cuda
   done

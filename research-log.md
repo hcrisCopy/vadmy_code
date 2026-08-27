@@ -126,4 +126,8 @@ Post-Trial-30 diagnostics rejected learned three-expert snippet fusion (+0.620 m
 
 ## New run Trial 31 - high-high baseline-neuron agreement residual
 
-Hypothesis: a larger unconditional neuron residual helps UCF but hurts XD because it also changes baseline-neuron conflicts. Add a 0.1 logit residual only where the current single baseline and the first CLS-neuron expert are both above their within-video means, using their minimum standardized evidence. No low-low or conflicting snippet is changed by this new branch. A read-only six-way preflight reached a +0.665 pp minimum gain; formal remote verification is pending.
+Hypothesis: a larger unconditional neuron residual helps UCF but hurts XD because it also changes baseline-neuron conflicts. Add a 0.1 logit residual only where the current single baseline and the first CLS-neuron expert are both above their within-video means, using their minimum standardized evidence. No low-low or conflicting snippet is changed by this new branch. Formal results were LaGoVAD UCF 86.834 (+5.714), LaGoVAD XD 79.258 (+5.008), DeSC UCF 90.059 (+0.689), DeSC XD 87.845 (+0.665), DSANet UCF 90.139 (+0.699), and DSANet XD 87.906 (+0.956). Minimum gain was +0.665 pp, so the trial was retained.
+
+## New run Trial 32 - training-calibrated persistence scale
+
+Hypothesis: a fixed snippet window ignores the temporal scale visible in the shared neuron experts. For each dataset, apply the same baseline-independent rule: measure the longest positive three-expert consensus run in every training video, multiply its 75th percentile by 0.35, round to the nearest odd integer, and clip to 7–21. The rule yields 15 on UCF and 11 on XD without branching on dataset identity or baseline. A combined preflight preserved Trial 31 on UCF and raised XD DeSC/DSANet to +0.688/+0.991 pp; formal remote verification is pending.

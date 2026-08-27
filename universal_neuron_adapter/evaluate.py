@@ -81,13 +81,6 @@ def blend_normality(curve: np.ndarray, blend: float) -> np.ndarray:
     return (1.0 - blend) * curve + blend * gaussian_filter1d(curve, 1.0, mode="nearest")
 
 
-def fuse_standardized(primary: np.ndarray, auxiliary: np.ndarray, weight: float) -> np.ndarray:
-    auxiliary = resample_curve(auxiliary, len(primary))
-    primary = (primary - primary.mean()) / max(float(primary.std()), 1e-6)
-    auxiliary = (auxiliary - auxiliary.mean()) / max(float(auxiliary.std()), 1e-6)
-    return (primary + weight * auxiliary).astype(np.float32)
-
-
 def longest_positive_run(values: np.ndarray) -> int:
     mask = np.asarray(values) > 0.0
     padded = np.concatenate([np.zeros(1, dtype=bool), mask, np.zeros(1, dtype=bool)])
@@ -134,8 +127,6 @@ def main() -> None:
     parser.add_argument("--expert2-train-manifest", required=True)
     parser.add_argument("--expert3-manifest", required=True)
     parser.add_argument("--expert3-train-manifest", required=True)
-    parser.add_argument("--student-manifest", required=True)
-    parser.add_argument("--student-train-manifest", required=True)
     parser.add_argument("--correction-model", required=True)
     parser.add_argument("--gt-path", required=True)
     parser.add_argument("--baseline", choices=["lagovad", "desc", "dsanet"], required=True)
@@ -163,17 +154,6 @@ def main() -> None:
         args.expert3_train_manifest,
         args.normality_smoothing_blend,
     )
-    duration_factor = float(np.clip((persistence_width - 11.0) / 4.0, 0.0, 1.0))
-    correction_weight = 3.0 * duration_factor
-    neuron_weight = 0.3 - 0.1 * duration_factor
-    normality_gate_weight = 1.0 + 2.0 * duration_factor
-    agreement_residual_weight = 0.5 - 0.3 * duration_factor
-    triple_agreement_weight = 0.6 + 1.7 * duration_factor
-    normal_suppression_weight = 2.0 - duration_factor
-    context_diverse_weight = 8.0 * duration_factor
-    context_normality_weight = duration_factor
-    final_dilation_width = 1 + 2 * round(8.0 * duration_factor)
-    final_dilation_weight = 0.75 * duration_factor
 
     output = Path(args.out_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -188,10 +168,7 @@ def main() -> None:
     baseline_train = pd.read_csv(args.baseline_train_manifest)
     expert_train = pd.read_csv(args.expert_train_manifest)[["key", "expert_score_path"]]
     expert3_train = pd.read_csv(args.expert3_train_manifest)[["key", "expert3_score_path"]]
-    student_train = pd.read_csv(args.student_train_manifest)[["key", "student_score_path"]]
-    video_train = baseline_train.merge(expert_train, on="key", validate="one_to_one").merge(
-        expert3_train, on="key", validate="one_to_one"
-    ).merge(student_train, on="key", validate="one_to_one")
+    video_train = baseline_train.merge(expert_train, on="key", validate="one_to_one").merge(expert3_train, on="key", validate="one_to_one")
     video_model = make_pipeline(
         StandardScaler(),
         LogisticRegression(class_weight="balanced", max_iter=1000, random_state=3407),
@@ -213,14 +190,7 @@ def main() -> None:
             normality_video_features(
                 np.load(str(row.baseline_score_path)),
                 np.load(str(row.expert_score_path)),
-                blend_normality(
-                    fuse_standardized(
-                        np.load(str(row.expert3_score_path)),
-                        np.load(str(row.student_score_path)),
-                        context_normality_weight,
-                    ),
-                    args.normality_smoothing_blend,
-                ),
+                blend_normality(np.load(str(row.expert3_score_path)), args.normality_smoothing_blend),
             ) for row in video_train.itertuples(index=False)
         ]),
         video_train["binary_label"].to_numpy(),
@@ -229,15 +199,7 @@ def main() -> None:
     expert = pd.read_csv(args.expert_manifest)[["key", "expert_score_path"]]
     expert2 = pd.read_csv(args.expert2_manifest)[["key", "expert2_score_path"]]
     expert3 = pd.read_csv(args.expert3_manifest)[["key", "expert3_score_path"]]
-    student = pd.read_csv(args.student_manifest)[["key", "student_score_path"]]
-    expected_train_keys = set(pd.read_csv(args.expert_train_manifest)["key"].astype(str))
-    if set(student_train["key"].astype(str)) != expected_train_keys:
-        raise ValueError("student training manifest keys must match the shared CLS-neuron training stream")
-    frame = baseline.merge(expert, on="key", validate="one_to_one").merge(
-        expert2, on="key", validate="one_to_one"
-    ).merge(expert3, on="key", validate="one_to_one").merge(
-        student, on="key", validate="one_to_one"
-    )
+    frame = baseline.merge(expert, on="key", validate="one_to_one").merge(expert2, on="key", validate="one_to_one").merge(expert3, on="key", validate="one_to_one")
     baseline_curves, corrected_curves, rows = [], [], []
     with torch.no_grad():
         for row in tqdm(frame.itertuples(index=False), total=len(frame), desc=f"evaluate {args.baseline}/{args.dataset}"):
@@ -245,43 +207,36 @@ def main() -> None:
             neuron = resample_curve(np.load(str(row.expert_score_path)), len(base))
             neuron2 = resample_curve(np.load(str(row.expert2_score_path)), len(base))
             neuron3 = resample_curve(np.load(str(row.expert3_score_path)), len(base))
-            student_curve = resample_curve(np.load(str(row.student_score_path)), len(base))
             base_tensor = torch.from_numpy(base).unsqueeze(0).to(device)
             neuron_tensor = torch.from_numpy(neuron).unsqueeze(0).to(device)
             correction = model(base_tensor, neuron_tensor)
             corrected = calibrated_probability(
-                base_tensor, neuron_tensor, correction, correction_weight, neuron_weight
+                base_tensor, neuron_tensor, correction, args.correction_weight, args.neuron_weight
             )[0].cpu().numpy().astype(np.float32)
             standardized = (neuron - neuron.mean()) / max(float(neuron.std()), 1e-6)
-            standardized2 = fuse_standardized(neuron2, student_curve, context_diverse_weight)
-            standardized2 = (standardized2 - standardized2.mean()) / max(float(standardized2.std()), 1e-6)
-            neuron3_context = fuse_standardized(neuron3, student_curve, context_normality_weight)
-            standardized3 = neuron3_context
+            standardized2 = (neuron2 - neuron2.mean()) / max(float(neuron2.std()), 1e-6)
             if not 0.0 <= args.normality_smoothing_blend <= 1.0:
                 raise ValueError("normality-smoothing-blend must be in [0, 1]")
             if args.normality_smoothing_blend:
-                smooth_neuron3 = gaussian_filter1d(standardized3, 1.0, mode="nearest")
-                standardized3 = (1.0 - args.normality_smoothing_blend) * standardized3 + args.normality_smoothing_blend * smooth_neuron3
-            standardized3 = (standardized3 - standardized3.mean()) / max(float(standardized3.std()), 1e-6)
+                smooth_neuron3 = gaussian_filter1d(neuron3, 1.0, mode="nearest")
+                neuron3 = (1.0 - args.normality_smoothing_blend) * neuron3 + args.normality_smoothing_blend * smooth_neuron3
+            standardized3 = (neuron3 - neuron3.mean()) / max(float(neuron3.std()), 1e-6)
             standardized_base = (base - base.mean()) / max(float(base.std()), 1e-6)
             high_high = np.minimum(np.maximum(standardized_base, 0.0), np.maximum(standardized, 0.0))
-            corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + agreement_residual_weight * high_high)))
+            corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.agreement_residual_weight * high_high)))
             triple_high = np.minimum(high_high, np.maximum(standardized3, 0.0))
-            corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + triple_agreement_weight * triple_high)))
-            neuron_gate = 1.0 / (1.0 + np.exp(-(standardized + standardized2 + normality_gate_weight * standardized3)))
+            corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.triple_agreement_weight * triple_high)))
+            neuron_gate = 1.0 / (1.0 + np.exp(-(standardized + standardized2 + args.normality_gate_weight * standardized3)))
             expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
             corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
             decision = float(video_model.decision_function(np.asarray(joint_video_features(base, neuron))[None])[0])
             normal_shift = min(0.0, decision)
-            normality_decision = float(normality_video_model.decision_function(np.asarray(normality_video_features(base, neuron, blend_normality(neuron3_context, args.normality_smoothing_blend)))[None])[0])
+            normality_decision = float(normality_video_model.decision_function(np.asarray(normality_video_features(base, neuron, neuron3))[None])[0])
             if decision < 0.0 and normality_decision < 0.0:
                 normal_shift += 0.25 * normality_decision
-            corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + normal_suppression_weight * normal_shift)))
+            corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.normal_suppression_weight * normal_shift)))
             persistent = median_filter(corrected, persistence_width, mode="nearest")
             corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
-            if final_dilation_width > 1 and final_dilation_weight > 0.0:
-                dilated = maximum_filter1d(corrected, final_dilation_width, mode="nearest")
-                corrected = corrected + final_dilation_weight * (dilated - corrected)
             if args.gaussian_sigma > 0:
                 corrected = gaussian_filter1d(corrected, args.gaussian_sigma, mode="nearest")
             if not 0 <= args.advance_snippets < len(corrected):
@@ -312,26 +267,20 @@ def main() -> None:
             "ap": float(average_precision_score(truth, corrected_frames)),
         },
         "configuration": {
-            "correction_weight": correction_weight,
-            "neuron_weight": neuron_weight,
+            "correction_weight": args.correction_weight,
+            "neuron_weight": args.neuron_weight,
             "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(2 * video-standardized neuron evidence)",
             "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
-            "normality_gate_weight": normality_gate_weight,
+            "normality_gate_weight": args.normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,
-            "agreement_residual_weight": agreement_residual_weight,
-            "triple_agreement_weight": triple_agreement_weight,
-            "normal_suppression_weight": normal_suppression_weight,
+            "agreement_residual_weight": args.agreement_residual_weight,
+            "triple_agreement_weight": args.triple_agreement_weight,
+            "normal_suppression_weight": args.normal_suppression_weight,
             "video_prior": "retained one-sided classifier plus 0.25-weight consensus normality suppression",
             "persistence_width": persistence_width,
             "persistence_width_rule": "0.35 * training gate-run q75, nearest odd, clipped to [7, 21]",
-            "duration_factor": duration_factor,
-            "duration_adaptation": "clip((training persistence width - 11) / 4, 0, 1)",
-            "context_diverse_weight": context_diverse_weight,
-            "context_normality_weight": context_normality_weight,
-            "final_dilation_width": final_dilation_width,
-            "final_dilation_weight": final_dilation_weight,
             "persistence_weight": args.persistence_weight,
             "gaussian_sigma": args.gaussian_sigma,
             "advance_snippets": args.advance_snippets,

@@ -29,13 +29,6 @@ for dataset in ucf xd; do
   python -m universal_neuron_adapter.export_normality_expert \
     --manifest "$SOURCE/$dataset/data/test.csv" --expert-model "$normality/normality_expert.npz" \
     --out-dir "$normality/test"
-  category_normality="$ROOT/category_normality_cache/$dataset/top16_v1"
-  python -m universal_neuron_adapter.fit_category_normality_expert \
-    --manifest "$SOURCE/$dataset/data/expert_train.csv" --out-dir "$category_normality" \
-    --active-per-layer 16 --maximum-length 256 --resume
-  python -m universal_neuron_adapter.export_category_normality_expert \
-    --manifest "$SOURCE/$dataset/data/test.csv" --expert-model "$category_normality/category_normality_expert.npz" \
-    --out-dir "$category_normality/test"
   for baseline in lagovad desc dsanet; do
     source_base="$SOURCE/$dataset/$baseline"
     target="$OUT/$dataset/$baseline/evaluation"
@@ -46,7 +39,6 @@ for dataset in ucf xd; do
       --expert-manifest "$SOURCE/$dataset/expert/test/expert_scores.csv" \
       --expert2-manifest "$diverse/test/expert2_scores.csv" \
       --expert3-manifest "$normality/test/expert3_scores.csv" \
-      --expert4-manifest "$category_normality/test/expert4_scores.csv" \
       --correction-model "$source_base/correction/model_best.pth" \
       --gt-path "../vadmy_data/annotations/$dataset/gt.npy" \
       --baseline "$baseline" --dataset "$dataset" \
@@ -55,7 +47,6 @@ for dataset in ucf xd; do
       --event-width 51 --event-weight 1.0 \
       --normality-gate-weight 1.5 \
       --normality-smoothing-blend 0.25 \
-      --category-normality-gate-weight 0.5 \
       --normal-suppression-weight 1.5 \
       --persistence-width 15 --persistence-weight 0.75 \
       --gaussian-sigma 1.0 \

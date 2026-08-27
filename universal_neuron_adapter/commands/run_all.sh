@@ -29,9 +29,6 @@ for dataset in ucf xd; do
   python -m universal_neuron_adapter.export_normality_expert \
     --manifest "$SOURCE/$dataset/data/test.csv" --expert-model "$normality/normality_expert.npz" \
     --out-dir "$normality/test"
-  python -m universal_neuron_adapter.export_normality_expert \
-    --manifest "$SOURCE/$dataset/data/expert_train.csv" --expert-model "$normality/normality_expert.npz" \
-    --out-dir "$normality/train"
   for baseline in lagovad desc dsanet; do
     source_base="$SOURCE/$dataset/$baseline"
     target="$OUT/$dataset/$baseline/evaluation"
@@ -42,7 +39,6 @@ for dataset in ucf xd; do
       --expert-manifest "$SOURCE/$dataset/expert/test/expert_scores.csv" \
       --expert2-manifest "$diverse/test/expert2_scores.csv" \
       --expert3-manifest "$normality/test/expert3_scores.csv" \
-      --expert3-train-manifest "$normality/train/expert3_scores.csv" \
       --correction-model "$source_base/correction/model_best.pth" \
       --gt-path "../vadmy_data/annotations/$dataset/gt.npy" \
       --baseline "$baseline" --dataset "$dataset" \

@@ -8,15 +8,34 @@ import numpy as np
 import pandas as pd
 import torch
 from scipy.ndimage import maximum_filter1d
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
 from universal_neuron_adapter.data import resample_curve
 from universal_neuron_adapter.model import ScoreCorrectionHead, calibrated_probability
 
 
+def video_features(curve: np.ndarray) -> list[float]:
+    curve = np.asarray(curve, dtype=np.float32)
+    count = max(1, int(np.ceil(0.1 * len(curve))))
+    top = np.partition(curve, len(curve) - count)[-count:]
+    return [
+        float(curve.mean()), float(curve.max()), float(top.mean()),
+        float(curve.std()), float(np.quantile(curve, 0.9)),
+    ]
+
+
+def logit(curve: np.ndarray) -> np.ndarray:
+    clipped = np.clip(curve, 1e-5, 1.0 - 1e-5)
+    return np.log(clipped / (1.0 - clipped))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate conservative universal CLS-neuron fusion.")
+    parser.add_argument("--baseline-train-manifest", required=True)
     parser.add_argument("--baseline-manifest", required=True)
     parser.add_argument("--expert-manifest", required=True)
     parser.add_argument("--correction-model", required=True)
@@ -29,6 +48,7 @@ def main() -> None:
     parser.add_argument("--neuron-weight", type=float, default=0.1)
     parser.add_argument("--event-width", type=int, default=25)
     parser.add_argument("--event-weight", type=float, default=1.0)
+    parser.add_argument("--normal-suppression-weight", type=float, default=1.0)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -42,6 +62,15 @@ def main() -> None:
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     model.to(device).eval()
 
+    baseline_train = pd.read_csv(args.baseline_train_manifest)
+    video_model = make_pipeline(
+        StandardScaler(),
+        LogisticRegression(class_weight="balanced", max_iter=1000, random_state=3407),
+    )
+    video_model.fit(
+        np.asarray([video_features(np.load(str(row.baseline_score_path))) for row in baseline_train.itertuples(index=False)]),
+        baseline_train["binary_label"].to_numpy(),
+    )
     baseline = pd.read_csv(args.baseline_manifest)
     expert = pd.read_csv(args.expert_manifest)[["key", "expert_score_path"]]
     frame = baseline.merge(expert, on="key", validate="one_to_one")
@@ -60,6 +89,9 @@ def main() -> None:
             neuron_gate = 1.0 / (1.0 + np.exp(-2.0 * standardized))
             expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
             corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
+            decision = float(video_model.decision_function(np.asarray(video_features(base))[None])[0])
+            normal_shift = min(0.0, decision)
+            corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.normal_suppression_weight * normal_shift)))
             baseline_curves.append(base)
             corrected_curves.append(corrected)
             rows.append({"key": str(row.key), "snippets": len(base), "corrected_mean": float(corrected.mean())})
@@ -86,6 +118,8 @@ def main() -> None:
             "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(2 * video-standardized neuron evidence)",
+            "normal_suppression_weight": args.normal_suppression_weight,
+            "video_prior": "one-sided current-baseline training classifier",
         },
         "frames": len(truth),
     }

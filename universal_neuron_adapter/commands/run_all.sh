@@ -15,6 +15,7 @@ for dataset in ucf xd; do
     source_base="$SOURCE/$dataset/$baseline"
     target="$OUT/$dataset/$baseline/evaluation"
     python -m universal_neuron_adapter.evaluate \
+      --baseline-train-manifest "$source_base/baseline_train/baseline_scores.csv" \
       --baseline-manifest "$source_base/baseline_test/baseline_scores.csv" \
       --expert-manifest "$SOURCE/$dataset/expert/test/expert_scores.csv" \
       --correction-model "$source_base/correction/model_best.pth" \
@@ -22,7 +23,8 @@ for dataset in ucf xd; do
       --baseline "$baseline" --dataset "$dataset" \
       --out-dir "$target" --frames-per-snippet 16 \
       --correction-weight 0.2 --neuron-weight 0.1 \
-      --event-width 25 --event-weight 1.0 --device cuda
+      --event-width 25 --event-weight 1.0 \
+      --normal-suppression-weight 1.0 --device cuda
   done
 done
 

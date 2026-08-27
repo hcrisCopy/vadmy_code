@@ -156,4 +156,10 @@ Hypothesis: the one-sided expert can carry more gate weight than the former abso
 
 ## New run Trial 39 - reduced one-sided normal-video suppression
 
-Hypothesis: directional normality already rejects many false events, so the retained video-level normal shift of 1.5 over-suppresses DSANet UCF. A universal scan gave minimum gains +0.741 at suppression weight 1.0 and +0.607 at 0.5. Use weight 1.0 for all six combinations; formal remote verification is pending.
+Hypothesis: directional normality already rejects many false events, so the retained video-level normal shift of 1.5 over-suppresses DSANet UCF. A universal scan gave minimum gains +0.741 at suppression weight 1.0 and +0.607 at 0.5. Formal results at weight 1.0 were LaGoVAD UCF 86.241 (+5.121), LaGoVAD XD 77.301 (+3.051), DeSC UCF 90.135 (+0.765), DeSC XD 87.962 (+0.782), DSANet UCF 90.181 (+0.741), and DSANet XD 87.770 (+0.820). Minimum gain was +0.741 pp, so suppression weight 1.0 was retained.
+
+Post-Trial-39 diagnostics rejected event weights 0.8/1.2 (+0.671/+0.105 minimum), normality-video auxiliary coefficients 0/0.5 (UCF minima +0.732/+0.740), direct signed-normality residuals (best UCF +0.735), and direct diverse-expert residuals (best UCF +0.736).
+
+## New run Trial 40 - triple high-confidence neuron agreement
+
+Hypothesis: a residual should be added only when the current baseline, first MIL neuron expert, and directional normality expert all exceed their within-video means. Use the minimum of the three positive standardized evidences, leaving every conflict and low-evidence snippet unchanged. A universal scan found weight 0.8 balanced UCF at +0.7748 minimum and XD at +0.7787; weight 1.2 overfit UCF and reduced XD to +0.702. Formal remote verification is pending.

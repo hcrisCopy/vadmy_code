@@ -140,6 +140,7 @@ def main() -> None:
     parser.add_argument("--normality-gate-weight", type=float, default=0.5)
     parser.add_argument("--normality-smoothing-blend", type=float, default=0.0)
     parser.add_argument("--agreement-residual-weight", type=float, default=0.0)
+    parser.add_argument("--triple-agreement-weight", type=float, default=0.0)
     parser.add_argument("--normal-suppression-weight", type=float, default=1.0)
     parser.add_argument("--persistence-weight", type=float, default=0.75)
     parser.add_argument("--gaussian-sigma", type=float, default=0.0)
@@ -223,6 +224,8 @@ def main() -> None:
             standardized_base = (base - base.mean()) / max(float(base.std()), 1e-6)
             high_high = np.minimum(np.maximum(standardized_base, 0.0), np.maximum(standardized, 0.0))
             corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.agreement_residual_weight * high_high)))
+            triple_high = np.minimum(high_high, np.maximum(standardized3, 0.0))
+            corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + args.triple_agreement_weight * triple_high)))
             neuron_gate = 1.0 / (1.0 + np.exp(-(standardized + standardized2 + args.normality_gate_weight * standardized3)))
             expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
             corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
@@ -273,6 +276,7 @@ def main() -> None:
             "normality_gate_weight": args.normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,
             "agreement_residual_weight": args.agreement_residual_weight,
+            "triple_agreement_weight": args.triple_agreement_weight,
             "normal_suppression_weight": args.normal_suppression_weight,
             "video_prior": "retained one-sided classifier plus 0.25-weight consensus normality suppression",
             "persistence_width": persistence_width,

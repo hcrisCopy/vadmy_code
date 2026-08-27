@@ -62,6 +62,7 @@ def main() -> None:
     parser.add_argument("--expert-manifest", required=True)
     parser.add_argument("--expert2-manifest", required=True)
     parser.add_argument("--expert3-manifest", required=True)
+    parser.add_argument("--expert4-manifest", required=True)
     parser.add_argument("--correction-model", required=True)
     parser.add_argument("--gt-path", required=True)
     parser.add_argument("--baseline", choices=["lagovad", "desc", "dsanet"], required=True)
@@ -74,6 +75,7 @@ def main() -> None:
     parser.add_argument("--event-weight", type=float, default=1.0)
     parser.add_argument("--normality-gate-weight", type=float, default=0.5)
     parser.add_argument("--normality-smoothing-blend", type=float, default=0.0)
+    parser.add_argument("--category-normality-gate-weight", type=float, default=0.5)
     parser.add_argument("--normal-suppression-weight", type=float, default=1.0)
     parser.add_argument("--persistence-width", type=int, default=15)
     parser.add_argument("--persistence-weight", type=float, default=0.75)
@@ -111,7 +113,8 @@ def main() -> None:
     expert = pd.read_csv(args.expert_manifest)[["key", "expert_score_path"]]
     expert2 = pd.read_csv(args.expert2_manifest)[["key", "expert2_score_path"]]
     expert3 = pd.read_csv(args.expert3_manifest)[["key", "expert3_score_path"]]
-    frame = baseline.merge(expert, on="key", validate="one_to_one").merge(expert2, on="key", validate="one_to_one").merge(expert3, on="key", validate="one_to_one")
+    expert4 = pd.read_csv(args.expert4_manifest)[["key", "expert4_score_path"]]
+    frame = baseline.merge(expert, on="key", validate="one_to_one").merge(expert2, on="key", validate="one_to_one").merge(expert3, on="key", validate="one_to_one").merge(expert4, on="key", validate="one_to_one")
     baseline_curves, corrected_curves, rows = [], [], []
     with torch.no_grad():
         for row in tqdm(frame.itertuples(index=False), total=len(frame), desc=f"evaluate {args.baseline}/{args.dataset}"):
@@ -119,6 +122,7 @@ def main() -> None:
             neuron = resample_curve(np.load(str(row.expert_score_path)), len(base))
             neuron2 = resample_curve(np.load(str(row.expert2_score_path)), len(base))
             neuron3 = resample_curve(np.load(str(row.expert3_score_path)), len(base))
+            neuron4 = resample_curve(np.load(str(row.expert4_score_path)), len(base))
             base_tensor = torch.from_numpy(base).unsqueeze(0).to(device)
             neuron_tensor = torch.from_numpy(neuron).unsqueeze(0).to(device)
             correction = model(base_tensor, neuron_tensor)
@@ -133,7 +137,8 @@ def main() -> None:
                 smooth_neuron3 = gaussian_filter1d(neuron3, 1.0, mode="nearest")
                 neuron3 = (1.0 - args.normality_smoothing_blend) * neuron3 + args.normality_smoothing_blend * smooth_neuron3
             standardized3 = (neuron3 - neuron3.mean()) / max(float(neuron3.std()), 1e-6)
-            neuron_gate = 1.0 / (1.0 + np.exp(-(standardized + standardized2 + args.normality_gate_weight * standardized3)))
+            standardized4 = (neuron4 - neuron4.mean()) / max(float(neuron4.std()), 1e-6)
+            neuron_gate = 1.0 / (1.0 + np.exp(-(standardized + standardized2 + args.normality_gate_weight * standardized3 + args.category_normality_gate_weight * standardized4)))
             expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
             corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
             decision = float(video_model.decision_function(np.asarray(joint_video_features(base, neuron))[None])[0])
@@ -176,9 +181,10 @@ def main() -> None:
             "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(2 * video-standardized neuron evidence)",
-            "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
+            "event_gate_experts": "MIL, global-normality, and category-normality CLS experts",
             "normality_gate_weight": args.normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,
+            "category_normality_gate_weight": args.category_normality_gate_weight,
             "normal_suppression_weight": args.normal_suppression_weight,
             "video_prior": "one-sided joint current-baseline and CLS-neuron training classifier",
             "persistence_width": args.persistence_width,

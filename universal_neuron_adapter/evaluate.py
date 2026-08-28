@@ -51,22 +51,30 @@ def joint_video_features(baseline: np.ndarray, neuron: np.ndarray) -> np.ndarray
     ])
 
 
-def normality_video_features(baseline: np.ndarray, neuron: np.ndarray, normality: np.ndarray) -> np.ndarray:
+def normality_video_features(
+    baseline: np.ndarray,
+    neuron: np.ndarray,
+    auxiliary: np.ndarray,
+    normality: np.ndarray,
+) -> np.ndarray:
     neuron = resample_curve(neuron, len(baseline))
+    auxiliary = resample_curve(auxiliary, len(baseline))
     normality = resample_curve(normality, len(baseline))
-    base_normality_correlation = 0.0
-    neuron_normality_correlation = 0.0
-    if len(baseline) > 1 and baseline.std() > 0 and normality.std() > 0:
-        base_normality_correlation = float(np.corrcoef(baseline, normality)[0, 1])
-    if len(neuron) > 1 and neuron.std() > 0 and normality.std() > 0:
-        neuron_normality_correlation = float(np.corrcoef(neuron, normality)[0, 1])
+    streams = (baseline, neuron, auxiliary, normality)
+    correlations, disagreements = [], []
+    for left_index in range(len(streams)):
+        for right_index in range(left_index + 1, len(streams)):
+            left, right = streams[left_index], streams[right_index]
+            correlation = 0.0
+            if len(left) > 1 and left.std() > 0 and right.std() > 0:
+                correlation = float(np.corrcoef(left, right)[0, 1])
+            correlations.append(correlation)
+            disagreements.append(float(np.mean(np.abs(left - right))))
     return np.concatenate([
-        joint_video_features(baseline, neuron), video_features(normality),
-        np.asarray([
-            base_normality_correlation, neuron_normality_correlation,
-            float(np.mean(np.abs(baseline - normality))),
-            float(np.mean(np.abs(neuron - normality))),
-        ], dtype=np.float32),
+        joint_video_features(baseline, neuron),
+        video_features(auxiliary),
+        video_features(normality),
+        np.asarray([*correlations, *disagreements], dtype=np.float32),
     ])
 
 
@@ -199,11 +207,14 @@ def main() -> None:
 
     baseline_train = pd.read_csv(args.baseline_train_manifest)
     expert_train = pd.read_csv(args.expert_train_manifest)[["key", "expert_score_path"]]
+    expert2_train = pd.read_csv(args.expert2_train_manifest)[["key", "expert2_score_path"]]
     expert3_train = pd.read_csv(args.expert3_train_manifest)[["key", "expert3_score_path"]]
     student_train = pd.read_csv(args.student_train_manifest)[["key", "student_score_path"]]
     video_train = baseline_train.merge(expert_train, on="key", validate="one_to_one").merge(
-        expert3_train, on="key", validate="one_to_one"
-    ).merge(student_train, on="key", validate="one_to_one")
+        expert2_train, on="key", validate="one_to_one"
+    ).merge(expert3_train, on="key", validate="one_to_one").merge(
+        student_train, on="key", validate="one_to_one"
+    )
     video_model = make_pipeline(
         StandardScaler(),
         LogisticRegression(class_weight="balanced", max_iter=1000, random_state=3407),
@@ -225,6 +236,7 @@ def main() -> None:
             normality_video_features(
                 np.load(str(row.baseline_score_path)),
                 np.load(str(row.expert_score_path)),
+                np.load(str(row.expert2_score_path)),
                 blend_normality(
                     fuse_standardized(
                         np.load(str(row.expert3_score_path)),
@@ -290,7 +302,7 @@ def main() -> None:
                 corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
             decision = float(video_model.decision_function(np.asarray(joint_video_features(base, neuron))[None])[0])
             normal_shift = min(0.0, decision)
-            normality_decision = float(normality_video_model.decision_function(np.asarray(normality_video_features(base, neuron, blend_normality(neuron3_context, args.normality_smoothing_blend)))[None])[0])
+            normality_decision = float(normality_video_model.decision_function(np.asarray(normality_video_features(base, neuron, neuron2, blend_normality(neuron3_context, args.normality_smoothing_blend)))[None])[0])
             if decision < 0.0 and normality_decision < 0.0:
                 normal_shift += 0.25 * normality_decision
             if not args.disable_video_suppression:
@@ -342,7 +354,7 @@ def main() -> None:
             "agreement_residual_weight": agreement_residual_weight,
             "triple_agreement_weight": triple_agreement_weight,
             "normal_suppression_weight": normal_suppression_weight,
-            "video_prior": "retained one-sided classifier plus 0.25-weight consensus normality suppression",
+            "video_prior": "training-only one-sided classifier with all three CLS-neuron views and pairwise consensus",
             "persistence_width": persistence_width,
             "persistence_width_rule": "0.35 * training gate-run q75, nearest odd, clipped to [7, 21]",
             "duration_factor": duration_factor,

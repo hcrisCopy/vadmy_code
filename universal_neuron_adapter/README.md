@@ -4,7 +4,7 @@ This package implements one score-space adapter shared by LaGoVAD, DeSC, and DSA
 
 ## Method
 
-The adapter combines a conservative learned score correction with three sparse CLS-neuron views. Agreement gates permit local event expansion only where baseline and neuron evidence support an anomaly. A one-sided video prior suppresses likely normal videos. The temporal width is inferred from training-video evidence and controls persistence smoothing and dilation through one shared continuous rule. The formula and coefficients are identical for all six baseline/dataset settings.
+The adapter combines a conservative learned score correction with three modular CLS-neuron views. The primary sparse expert models discriminative activation, the deterministic temporal-information expert selects non-redundant change neurons with a fixed-size log-determinant objective, and the directional normality expert models signed departure from normal activation. Agreement gates permit local event expansion only where baseline and neuron evidence support an anomaly. A one-sided video prior suppresses likely normal videos. The formula and coefficients are identical for all six baseline/dataset settings.
 
 ## Data-integrity policy
 

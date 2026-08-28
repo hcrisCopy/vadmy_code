@@ -18,7 +18,9 @@ for seed in "${SEEDS[@]}"; do
     python -m universal_neuron_adapter.train_expert --train-manifest "$data/expert_train.csv" --val-manifest "$data/expert_val.csv" \
       --out-dir "$primary" --active-per-layer 32 --temporal-width 64 --max-epoch 20 --batch-size 8 \
       --lr 0.0003 --weight-decay 0.0001 --sparsity-weight 0.001 --maximum-length 256 --num-workers 4 --seed "$seed" --device cuda --resume
-    python -m universal_neuron_adapter.export_expert --manifest "$data/expert_train.csv" --expert-model "$primary/expert_best.pth" --out-dir "$primary/train" --device cuda
+    # The correction head selects checkpoints on the held-out training-only
+    # validation split, so its score cache must cover both disjoint key sets.
+    python -m universal_neuron_adapter.export_expert --manifest "$data/train_all.csv" --expert-model "$primary/expert_best.pth" --out-dir "$primary/train" --device cuda
     python -m universal_neuron_adapter.export_expert --manifest "$data/test.csv" --expert-model "$primary/expert_best.pth" --out-dir "$primary/test" --device cuda
     python -m universal_neuron_adapter.train_diverse_expert --train-manifest "$data/expert_train.csv" --val-manifest "$data/expert_val.csv" \
       --out-dir "$diverse" --active-per-layer 64 --temporal-width 64 --max-epoch 20 --batch-size 8 \

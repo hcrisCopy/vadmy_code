@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -126,6 +127,7 @@ def estimate_persistence_width(
 
 
 def main() -> None:
+    evaluation_start = time.perf_counter()
     parser = argparse.ArgumentParser(description="Evaluate conservative universal CLS-neuron fusion.")
     parser.add_argument("--baseline-train-manifest", required=True)
     parser.add_argument("--baseline-manifest", required=True)
@@ -192,6 +194,8 @@ def main() -> None:
     model.load_state_dict(checkpoint["model_state_dict"])
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     model.to(device).eval()
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
 
     baseline_train = pd.read_csv(args.baseline_train_manifest)
     expert_train = pd.read_csv(args.expert_train_manifest)[["key", "expert_score_path"]]
@@ -316,6 +320,7 @@ def main() -> None:
         raise RuntimeError(
             f"strict frame alignment failed: gt={len(truth)} baseline={len(baseline_frames)} corrected={len(corrected_frames)}"
         )
+    elapsed_seconds = time.perf_counter() - evaluation_start
     metrics = {
         "baseline": {
             "auc": float(roc_auc_score(truth, baseline_frames)),
@@ -360,6 +365,16 @@ def main() -> None:
             ],
         },
         "frames": len(truth),
+        "performance": {
+            "elapsed_seconds": elapsed_seconds,
+            "frames_per_second": float(len(truth) / max(elapsed_seconds, 1e-9)),
+            "peak_cuda_memory_mb": (
+                float(torch.cuda.max_memory_allocated(device) / (1024 ** 2))
+                if device.type == "cuda"
+                else 0.0
+            ),
+            "scope": "cached-score adapter evaluation including manifest and curve loading",
+        },
     }
     (output / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     pd.DataFrame(rows).to_csv(output / "per_video.csv", index=False)

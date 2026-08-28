@@ -44,8 +44,10 @@ def prepare_output(output: Path, clean: bool) -> bool:
         output / "detected_neurons.pdf",
         output / "detected_neuron_heatmap.png",
         output / "detected_neuron_heatmap.pdf",
-        output / "detected_neuron_block_heatmap.png",
-        output / "detected_neuron_block_heatmap.pdf",
+        output / "ucf_top_neuron_heatmap.png",
+        output / "ucf_top_neuron_heatmap.pdf",
+        output / "xd_top_neuron_heatmap.png",
+        output / "xd_top_neuron_heatmap.pdf",
     )
     if clean and output.exists():
         shutil.rmtree(output)
@@ -364,108 +366,114 @@ def render_neuron_heatmap(
     (output / "detected_neuron_heatmap_caption.txt").write_text(caption, encoding="utf-8")
 
 
-def binned_selection_density(frame: pd.DataFrame, active_per_layer: int) -> tuple[np.ndarray, list[dict]]:
-    bins, width = 32, 24
-    matrix = np.zeros((12, bins), dtype=np.float64)
+def ranked_neuron_matrix(
+    frame: pd.DataFrame,
+    detector: str,
+    active_per_layer: int,
+) -> tuple[np.ndarray, list[dict]]:
+    matrix = np.zeros((12, active_per_layer), dtype=np.float64)
     rows = []
     for layer in range(1, 13):
-        dimensions = frame.loc[frame["layer"] == layer, "dimension"].to_numpy(dtype=np.int64)
-        counts = np.bincount(dimensions // width, minlength=bins)
-        matrix[layer - 1] = 100.0 * counts / float(active_per_layer)
-        for index, count in enumerate(counts):
+        selected = frame[frame["layer"] == layer].copy()
+        if detector == "Directional normality":
+            selected["raw_importance"] = selected["weight"].astype(float)
+        else:
+            selected["raw_importance"] = (
+                selected["gate"].astype(float) * selected["absolute_weight"].astype(float)
+            )
+        selected = selected.sort_values("raw_importance", ascending=False).head(active_per_layer)
+        if len(selected) != active_per_layer:
+            raise ValueError(
+                f"{detector} layer {layer} has {len(selected)} neurons, expected {active_per_layer}"
+            )
+        values = selected["raw_importance"].to_numpy(dtype=np.float64)
+        normalized = values / max(float(values.max()), 1e-12)
+        matrix[layer - 1] = normalized
+        for rank, (item, value) in enumerate(zip(selected.itertuples(index=False), normalized), start=1):
             rows.append(
                 {
+                    "detector": detector,
                     "layer": layer,
-                    "dimension_start": index * width,
-                    "dimension_end": (index + 1) * width - 1,
-                    "selected_count": int(count),
-                    "selected_fraction_percent": float(100.0 * count / active_per_layer),
+                    "rank": rank,
+                    "dimension": int(item.dimension),
+                    "raw_importance": float(item.raw_importance),
+                    "within_layer_normalized_importance": float(value),
                 }
             )
     return matrix, rows
 
 
-def render_neuron_block_heatmap(
+def render_top_neuron_heatmaps(
     output: Path,
     primary: pd.DataFrame,
     diverse: pd.DataFrame,
     normality: pd.DataFrame,
 ) -> None:
     names = ("Primary sparse", "Diverse sparse", "Directional normality")
-    active = (32, 64, 32)
+    active_counts = (32, 64, 32)
     frames = (primary, diverse, normality)
-    matrices: dict[str, np.ndarray] = {}
     source_rows = []
     for dataset in DATASETS:
-        blocks = []
-        for name, count, frame in zip(names, active, frames):
-            matrix, rows = binned_selection_density(frame[frame["dataset"] == dataset], count)
-            blocks.append(matrix)
-            for row in rows:
-                source_rows.append({"dataset": dataset, "detector": name, **row})
-        matrices[dataset] = np.concatenate(blocks, axis=0)
+        matrices = []
+        dataset_rows = []
+        for name, count, frame in zip(names, active_counts, frames):
+            matrix, rows = ranked_neuron_matrix(
+                frame[frame["dataset"] == dataset], name, count
+            )
+            matrices.append(matrix)
+            dataset_rows.extend({"dataset": dataset, **row} for row in rows)
+        source_rows.extend(dataset_rows)
 
-    maximum = max(float(matrix.max()) for matrix in matrices.values())
-    figure, axes = plt.subplots(1, 2, figsize=(11.4, 7.2), sharey=True, constrained_layout=True)
-    mesh = None
-    for column, dataset in enumerate(DATASETS):
-        axis = axes[column]
-        mesh = axis.pcolormesh(
-            np.arange(33),
-            np.arange(37),
-            matrices[dataset],
-            cmap="viridis",
-            vmin=0.0,
-            vmax=maximum,
-            edgecolors="white",
-            linewidth=0.32,
-            shading="flat",
-            rasterized=False,
-        )
-        axis.set_xlim(0, 32)
-        axis.set_ylim(36, 0)
-        axis.set_title(
-            f"{'a' if column == 0 else 'b'}  {DATASET_LABELS[dataset]}",
-            loc="left",
-            fontweight="bold",
-        )
-        tick_bins = np.arange(0, 32, 4)
-        axis.set_xticks(tick_bins + 0.5, labels=[f"{value * 24}–{value * 24 + 23}" for value in tick_bins])
-        axis.tick_params(axis="x", labelrotation=35)
-        axis.set_xlabel("CLS dimension range (24 dimensions per block)")
-        axis.set_yticks(np.arange(36) + 0.5, labels=[str(layer) for _ in names for layer in range(1, 13)])
-        axis.set_ylabel("CLIP visual layer" if column == 0 else "")
-        for boundary in (12, 24):
-            axis.axhline(boundary, color="white", linewidth=2.5)
-        if column == 0:
-            for center, name in zip((6, 18, 30), names):
-                axis.text(
-                    -0.17,
-                    1.0 - center / 36.0,
-                    name,
-                    transform=axis.transAxes,
-                    ha="right",
-                    va="center",
-                    fontsize=8.5,
-                    fontweight="bold",
-                )
-    if mesh is None:
-        raise RuntimeError("no detector density was rendered")
-    colorbar = figure.colorbar(mesh, ax=axes, pad=0.02, aspect=32)
-    colorbar.set_label("Selected neurons in dimension block (%)")
-    figure.savefig(output / "detected_neuron_block_heatmap.png", dpi=400, bbox_inches="tight")
-    figure.savefig(output / "detected_neuron_block_heatmap.pdf", bbox_inches="tight")
-    plt.close(figure)
+        figure, axes = plt.subplots(3, 1, figsize=(10.2, 7.4), constrained_layout=True)
+        mesh = None
+        for panel, (axis, name, count, matrix) in enumerate(
+            zip(axes, names, active_counts, matrices)
+        ):
+            mesh = axis.pcolormesh(
+                np.arange(count + 1),
+                np.arange(13),
+                matrix,
+                cmap="viridis",
+                vmin=0.0,
+                vmax=1.0,
+                edgecolors="white",
+                linewidth=0.42,
+                shading="flat",
+                rasterized=False,
+            )
+            axis.set_xlim(0, count)
+            axis.set_ylim(12, 0)
+            axis.set_yticks(np.arange(12) + 0.5, labels=np.arange(1, 13))
+            axis.set_ylabel("CLIP visual layer")
+            if count == 32:
+                ticks = np.asarray([1, 8, 16, 24, 32])
+            else:
+                ticks = np.asarray([1, 16, 32, 48, 64])
+            axis.set_xticks(ticks - 0.5, labels=ticks)
+            axis.set_xlabel("Selected-neuron rank within each layer")
+            axis.set_title(
+                f"{chr(ord('a') + panel)}  {name} detector (Top-{count} per layer)",
+                loc="left",
+                fontweight="bold",
+            )
+        if mesh is None:
+            raise RuntimeError(f"no heatmap was rendered for {dataset}")
+        colorbar = figure.colorbar(mesh, ax=axes, pad=0.018, aspect=34)
+        colorbar.set_label("Within-layer normalized importance")
+        figure.suptitle(DATASET_LABELS[dataset], fontsize=12, fontweight="bold")
+        figure.savefig(output / f"{dataset}_top_neuron_heatmap.png", dpi=400, bbox_inches="tight")
+        figure.savefig(output / f"{dataset}_top_neuron_heatmap.pdf", bbox_inches="tight")
+        plt.close(figure)
 
-    pd.DataFrame(source_rows).to_csv(output / "detected_neuron_block_heatmap.csv", index=False)
+    pd.DataFrame(source_rows).to_csv(output / "top_neuron_heatmap_values.csv", index=False)
     caption = (
-        "The three CLS-neuron detectors discover distinct but distributed neuron groups across CLIP layers. "
-        "Each colour block aggregates 24 consecutive CLS dimensions; colour intensity is the percentage of "
-        "neurons selected from that layer within the block. Primary sparse, diverse sparse, and directional "
-        "normality detectors select 32, 64, and 32 neurons per layer, respectively, using the same procedure "
-        "on UCF-Crime and XD-Violence."
+        "All three CLS-neuron detectors retain strong, structured neuron responses across the 12 CLIP layers. "
+        "Each row contains only the neurons selected in that layer, ordered from most to least important; "
+        "colour is normalized by the strongest selected neuron in the same layer. Primary sparse, diverse "
+        "sparse, and directional normality detectors show Top-32, Top-64, and Top-32 neurons per layer. "
+        "Normalization is for within-layer visualization and does not support absolute comparisons between detectors."
     )
-    (output / "detected_neuron_block_heatmap_caption.txt").write_text(caption, encoding="utf-8")
+    (output / "top_neuron_heatmap_caption.txt").write_text(caption, encoding="utf-8")
 
 
 def main() -> None:
@@ -519,7 +527,7 @@ def main() -> None:
     figure.savefig(output / "detected_neurons.pdf", bbox_inches="tight")
     plt.close(figure)
     render_neuron_heatmap(output, primary_table, normality_table, primary_weights)
-    render_neuron_block_heatmap(output, primary_table, diverse_table, normality_table)
+    render_top_neuron_heatmaps(output, primary_table, diverse_table, normality_table)
 
     primary_table.to_csv(output / "detected_neuron_atlas.csv", index=False)
     diverse_table.to_csv(output / "diverse_neuron_atlas.csv", index=False)

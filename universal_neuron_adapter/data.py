@@ -21,9 +21,9 @@ def base_key(path_or_key: str) -> str:
     return CHUNK_SUFFIX.sub("", value)
 
 
-def is_normal_label(label: str) -> bool:
+def is_normal_label(dataset: str, label: str) -> bool:
     value = str(label).strip().lower().replace("_", "").replace("-", "")
-    return value in {"normal", "normalvideos"}
+    return value in ({"normal", "normalvideos"} if dataset == "ucf" else {"a", "normal", "normalvideos"})
 
 
 def read_hidden_manifest(path: str) -> dict[str, str]:
@@ -102,7 +102,7 @@ def prepare_manifests(
             if len(labels) != 1:
                 raise ValueError(f"{key}: inconsistent labels {sorted(labels)}")
             label = next(iter(labels))
-            rows.append({"key": str(key), "label": label, "binary_label": int(not is_normal_label(label)), "clip_paths": "|".join(group["path"].astype(str)), "hidden_path": hidden_map[str(key)]})
+            rows.append({"key": str(key), "label": label, "binary_label": int(not is_normal_label(dataset, label)), "clip_paths": "|".join(group["path"].astype(str)), "hidden_path": hidden_map[str(key)]})
         return rows
 
     train_rows = build(train_csv, train_hidden)

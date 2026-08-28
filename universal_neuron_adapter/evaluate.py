@@ -185,7 +185,7 @@ def main() -> None:
     normality_gate_weight = 1.0 + 2.0 * duration_factor
     agreement_residual_weight = 0.5 - 0.3 * duration_factor
     triple_agreement_weight = 0.6 + 1.7 * duration_factor
-    neuron_consensus_weight = 0.3
+    neuron_consensus_weight = 1.0
     normal_suppression_weight = 2.0 - duration_factor
     context_diverse_weight = 8.0 * duration_factor
     context_normality_weight = duration_factor
@@ -291,12 +291,18 @@ def main() -> None:
                 smooth_neuron3 = gaussian_filter1d(standardized3, 1.0, mode="nearest")
                 standardized3 = (1.0 - args.normality_smoothing_blend) * standardized3 + args.normality_smoothing_blend * smooth_neuron3
             standardized3 = (standardized3 - standardized3.mean()) / max(float(standardized3.std()), 1e-6)
+            decision = float(video_model.decision_function(np.asarray(joint_video_features(base, neuron))[None])[0])
+            normality_decision = float(normality_video_model.decision_function(np.asarray(normality_video_features(base, neuron, neuron2, blend_normality(neuron3_context, args.normality_smoothing_blend)))[None])[0])
+            video_anomaly_gate = float(expit(min(decision, normality_decision)))
             standardized_base = (base - base.mean()) / max(float(base.std()), 1e-6)
             neuron_consensus = np.minimum(
                 np.maximum(standardized, 0.0), np.maximum(standardized3, 0.0)
             )
             if not args.disable_agreement:
-                corrected = expit(logit(corrected) + neuron_consensus_weight * neuron_consensus)
+                corrected = expit(
+                    logit(corrected)
+                    + neuron_consensus_weight * video_anomaly_gate * neuron_consensus
+                )
             high_high = np.minimum(np.maximum(standardized_base, 0.0), np.maximum(standardized, 0.0))
             if not args.disable_agreement:
                 corrected = expit(logit(corrected) + agreement_residual_weight * high_high)
@@ -306,9 +312,7 @@ def main() -> None:
             if not args.disable_event_gate:
                 expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
                 corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
-            decision = float(video_model.decision_function(np.asarray(joint_video_features(base, neuron))[None])[0])
             normal_shift = min(0.0, decision)
-            normality_decision = float(normality_video_model.decision_function(np.asarray(normality_video_features(base, neuron, neuron2, blend_normality(neuron3_context, args.normality_smoothing_blend)))[None])[0])
             if decision < 0.0 and normality_decision < 0.0:
                 normal_shift += 0.25 * normality_decision
             if not args.disable_video_suppression:
@@ -366,6 +370,7 @@ def main() -> None:
             "normality_smoothing_blend": args.normality_smoothing_blend,
             "agreement_residual_weight": agreement_residual_weight,
             "neuron_consensus_weight": neuron_consensus_weight,
+            "neuron_consensus_context": "sigmoid of the smaller training-only video-prior logit",
             "triple_agreement_weight": triple_agreement_weight,
             "normal_suppression_weight": normal_suppression_weight,
             "video_prior": "training-only one-sided classifier with all three CLS-neuron views and pairwise consensus",

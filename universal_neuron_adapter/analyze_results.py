@@ -82,7 +82,7 @@ def main() -> None:
     rows, bootstrap = [], {}
     for dataset, gt in (("ucf", Path(args.ucf_gt)), ("xd", Path(args.xd_gt))):
         for baseline in ("lagovad", "desc", "dsanet"):
-            evaluation = root / dataset / baseline / "evaluation"
+            evaluation = root / dataset / baseline
             if not (evaluation / "per_video.csv").exists():
                 continue
             videos = load_videos(evaluation, gt, args.frames_per_snippet)

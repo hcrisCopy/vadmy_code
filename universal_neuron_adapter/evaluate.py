@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import torch
 from scipy.ndimage import gaussian_filter1d, maximum_filter1d, median_filter
+from scipy.special import expit
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.pipeline import make_pipeline
@@ -276,10 +277,10 @@ def main() -> None:
             standardized_base = (base - base.mean()) / max(float(base.std()), 1e-6)
             high_high = np.minimum(np.maximum(standardized_base, 0.0), np.maximum(standardized, 0.0))
             if not args.disable_agreement:
-                corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + agreement_residual_weight * high_high)))
+                corrected = expit(logit(corrected) + agreement_residual_weight * high_high)
                 triple_high = np.minimum(high_high, np.maximum(standardized3, 0.0))
-                corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + triple_agreement_weight * triple_high)))
-            neuron_gate = 1.0 / (1.0 + np.exp(-(standardized + standardized2 + normality_gate_weight * standardized3)))
+                corrected = expit(logit(corrected) + triple_agreement_weight * triple_high)
+            neuron_gate = expit(standardized + standardized2 + normality_gate_weight * standardized3)
             if not args.disable_event_gate:
                 expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
                 corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
@@ -289,7 +290,7 @@ def main() -> None:
             if decision < 0.0 and normality_decision < 0.0:
                 normal_shift += 0.25 * normality_decision
             if not args.disable_video_suppression:
-                corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + normal_suppression_weight * normal_shift)))
+                corrected = expit(logit(corrected) + normal_suppression_weight * normal_shift)
             if not args.disable_temporal:
                 persistent = median_filter(corrected, persistence_width, mode="nearest")
                 corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
@@ -329,7 +330,7 @@ def main() -> None:
             "neuron_weight": neuron_weight,
             "event_width": args.event_width,
             "event_weight": args.event_weight,
-            "event_gate": "sigmoid(2 * video-standardized neuron evidence)",
+            "event_gate": "sigmoid(sum of video-standardized CLS-neuron evidence)",
             "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
             "normality_gate_weight": normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,

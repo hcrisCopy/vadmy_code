@@ -51,4 +51,4 @@ The robustness runner perturbs event width (33/41/49) and score advance (0/1/2) 
 
 All results, logs, checkpoints, cached curves, figures, and reports are written below `../vadmy_data/universal_neuron_adapter`.
 
-The neuron-visualization command renders a paper-ready PNG/PDF, its source CSV tables, and seed/data-provenance metadata under `../vadmy_data/universal_neuron_adapter/figures/detected_neurons`. Panel (c) uses training videos only; panel (d) is an explicitly labeled post-hoc neuron-removal control.
+The neuron-visualization command renders a paper-ready interpretability figure and an exact 12-layer by 768-dimension neuron heatmap in PNG/PDF, together with source CSV tables, a self-contained caption, and seed/data-provenance metadata under `../vadmy_data/universal_neuron_adapter/figures/detected_neurons`. Panel (c) of the interpretability figure uses training videos only; panel (d) is an explicitly labeled post-hoc neuron-removal control.

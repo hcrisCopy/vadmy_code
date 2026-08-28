@@ -37,7 +37,12 @@ def require_relative(path: Path, name: str) -> None:
 
 def prepare_output(output: Path, clean: bool) -> bool:
     require_relative(output, "--out-dir")
-    expected = (output / "detected_neurons.png", output / "detected_neurons.pdf")
+    expected = (
+        output / "detected_neurons.png",
+        output / "detected_neurons.pdf",
+        output / "detected_neuron_heatmap.png",
+        output / "detected_neuron_heatmap.pdf",
+    )
     if clean and output.exists():
         shutil.rmtree(output)
     if all(path.exists() for path in expected):
@@ -218,6 +223,135 @@ def plot_causal_control(axis: plt.Axes, controls: pd.DataFrame) -> None:
     )
 
 
+def primary_matrix(frame: pd.DataFrame, layer_weights: np.ndarray) -> np.ndarray:
+    matrix = np.zeros((12, 768), dtype=np.float64)
+    for row in frame.itertuples(index=False):
+        matrix[int(row.layer) - 1, int(row.dimension)] = (
+            float(row.gate) * float(row.absolute_weight) * float(layer_weights[int(row.layer) - 1])
+        )
+    maximum = max(float(matrix.max()), 1e-12)
+    return matrix / maximum
+
+
+def directional_matrix(frame: pd.DataFrame) -> np.ndarray:
+    matrix = np.zeros((12, 768), dtype=np.float64)
+    for row in frame.itertuples(index=False):
+        sign = 1.0 if row.direction == "high" else -1.0
+        matrix[int(row.layer) - 1, int(row.dimension)] = sign * float(row.weight)
+    maximum = max(float(np.abs(matrix).max()), 1e-12)
+    return matrix / maximum
+
+
+def render_neuron_heatmap(
+    output: Path,
+    primary: pd.DataFrame,
+    normality: pd.DataFrame,
+    layer_weights: dict[str, np.ndarray],
+) -> None:
+    primary_cmap = plt.get_cmap("viridis").copy()
+    primary_cmap.set_bad("white")
+    directional_cmap = plt.get_cmap("RdBu_r").copy()
+    directional_cmap.set_bad("white")
+    figure, axes = plt.subplots(2, 2, figsize=(11.5, 5.8), constrained_layout=True)
+    primary_arrays, directional_arrays = {}, {}
+    meshes = []
+    for column, dataset in enumerate(DATASETS):
+        learned = primary_matrix(primary[primary["dataset"] == dataset], layer_weights[dataset])
+        directed_frame = normality[normality["dataset"] == dataset]
+        directed = directional_matrix(directed_frame)
+        primary_arrays[dataset] = learned
+        directional_arrays[dataset] = directed
+
+        learned_mesh = axes[0, column].pcolormesh(
+            np.arange(769),
+            np.arange(13),
+            np.ma.masked_equal(learned, 0.0),
+            cmap=primary_cmap,
+            vmin=0.0,
+            vmax=1.0,
+            shading="flat",
+            rasterized=False,
+        )
+        directed_mesh = axes[1, column].pcolormesh(
+            np.arange(769),
+            np.arange(13),
+            np.ma.masked_equal(directed, 0.0),
+            cmap=directional_cmap,
+            vmin=-1.0,
+            vmax=1.0,
+            shading="flat",
+            rasterized=False,
+        )
+        meshes.append((learned_mesh, directed_mesh))
+        for direction, marker in (("high", "^"), ("low", "v")):
+            subset = directed_frame[directed_frame["direction"] == direction]
+            axes[1, column].scatter(
+                subset["dimension"] + 0.5,
+                subset["layer"] - 0.5,
+                marker=marker,
+                s=3.2,
+                facecolors="none",
+                edgecolors="#202020",
+                linewidths=0.25,
+                rasterized=False,
+            )
+        axes[0, column].set_title(
+            f"{'a' if column == 0 else 'b'}  Learned sparse expert / {DATASET_LABELS[dataset]}",
+            loc="left",
+            fontweight="bold",
+        )
+        axes[1, column].set_title(
+            f"{'c' if column == 0 else 'd'}  Directional expert / {DATASET_LABELS[dataset]}",
+            loc="left",
+            fontweight="bold",
+        )
+
+    for row in range(2):
+        for column in range(2):
+            axis = axes[row, column]
+            axis.set_xlim(0, 768)
+            axis.set_ylim(12, 0)
+            axis.set_xticks([0, 128, 256, 384, 512, 640, 768])
+            axis.set_yticks(np.arange(12) + 0.5, labels=np.arange(1, 13))
+            axis.set_xlabel("CLS hidden dimension")
+            axis.set_ylabel("CLIP visual layer" if column == 0 else "")
+            axis.grid(axis="y", color="#D9D9D9", linewidth=0.35)
+            axis.text(
+                0.995,
+                0.03,
+                "32 selected / layer",
+                transform=axis.transAxes,
+                ha="right",
+                va="bottom",
+                fontsize=7.5,
+                color="#333333",
+            )
+    first_colorbar = figure.colorbar(meshes[0][0], ax=axes[0, :], pad=0.015, aspect=30)
+    first_colorbar.set_label("Normalized neuron importance")
+    second_colorbar = figure.colorbar(meshes[0][1], ax=axes[1, :], pad=0.015, aspect=30)
+    second_colorbar.set_label("Signed effect: below normal  ←  0  →  above normal")
+    figure.savefig(output / "detected_neuron_heatmap.png", dpi=400, bbox_inches="tight")
+    figure.savefig(output / "detected_neuron_heatmap.pdf", bbox_inches="tight")
+    plt.close(figure)
+
+    for dataset, matrix in primary_arrays.items():
+        pd.DataFrame(matrix, index=np.arange(1, 13)).rename_axis("layer").to_csv(
+            output / f"{dataset}_learned_neuron_heatmap.csv"
+        )
+    for dataset, matrix in directional_arrays.items():
+        pd.DataFrame(matrix, index=np.arange(1, 13)).rename_axis("layer").to_csv(
+            output / f"{dataset}_directional_neuron_heatmap.csv"
+        )
+    caption = (
+        "Detected CLS neurons form sparse, distributed patterns across all 12 CLIP visual layers. "
+        "Panels (a-b) show normalized importance for the learned sparse expert; white cells are not selected. "
+        "Panels (c-d) show the directional expert, where upward triangles/red indicate above-normal activation "
+        "and downward triangles/blue indicate below-normal activation. Each panel contains 32 selected CLS "
+        "dimensions per layer, learned independently from official training data."
+    )
+    (output / "detected_neuron_heatmap_caption.txt").write_text(caption, encoding="utf-8")
+
+
 def main() -> None:
     args = parse_args()
     source_root = Path(args.source_root)
@@ -263,6 +397,7 @@ def main() -> None:
     figure.savefig(output / "detected_neurons.png", dpi=300, bbox_inches="tight")
     figure.savefig(output / "detected_neurons.pdf", bbox_inches="tight")
     plt.close(figure)
+    render_neuron_heatmap(output, primary_table, normality_table, primary_weights)
 
     primary_table.to_csv(output / "detected_neuron_atlas.csv", index=False)
     normality_table.to_csv(output / "directional_neuron_atlas.csv", index=False)

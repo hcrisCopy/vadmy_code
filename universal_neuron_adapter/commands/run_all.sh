@@ -11,20 +11,19 @@ printf '%s\n' "$RUN_KEY" > "$ROOT/current_run.txt"
 exec > >(tee -a "$OUT/run.log") 2>&1
 
 for dataset in ucf xd; do
-  # The sparse expert depends only on the dataset and fixed neuron configuration,
-  # so keep its resumable checkpoint outside commit-keyed evaluation directories.
-  diverse="$ROOT/diverse_expert_cache/$dataset/active64_seed3407"
-  python -m universal_neuron_adapter.train_diverse_expert \
+  complement="$ROOT/complementary_expert_cache/$dataset/top32_seed234_v1"
+  python -m universal_neuron_adapter.train_complementary_expert \
     --train-manifest "$SOURCE/$dataset/data/expert_train.csv" --val-manifest "$SOURCE/$dataset/data/expert_val.csv" \
-    --out-dir "$diverse" --active-per-layer 64 --temporal-width 64 --max-epoch 20 \
+    --primary-model "$SOURCE/$dataset/expert/expert_best.pth" \
+    --out-dir "$complement" --active-per-layer 32 --temporal-width 64 --max-epoch 20 \
     --batch-size 8 --lr 0.0003 --weight-decay 0.0001 --sparsity-weight 0.001 \
-    --maximum-length 256 --num-workers 4 --seed 3407 --device cuda --resume
-  python -m universal_neuron_adapter.export_diverse_expert \
-    --manifest "$SOURCE/$dataset/data/test.csv" --expert-model "$diverse/expert_best.pth" \
-    --out-dir "$diverse/test" --device cuda
-  python -m universal_neuron_adapter.export_diverse_expert \
-    --manifest "$SOURCE/$dataset/data/expert_train.csv" --expert-model "$diverse/expert_best.pth" \
-    --out-dir "$diverse/train" --device cuda
+    --maximum-length 256 --num-workers 4 --seed 234 --device cuda --resume
+  python -m universal_neuron_adapter.export_complementary_expert \
+    --manifest "$SOURCE/$dataset/data/test.csv" --expert-model "$complement/expert_best.pth" \
+    --out-dir "$complement/test" --device cuda
+  python -m universal_neuron_adapter.export_complementary_expert \
+    --manifest "$SOURCE/$dataset/data/expert_train.csv" --expert-model "$complement/expert_best.pth" \
+    --out-dir "$complement/train" --device cuda
   normality="$ROOT/normality_expert_cache/$dataset/top32_signed_v1"
   python -m universal_neuron_adapter.fit_normality_expert \
     --manifest "$SOURCE/$dataset/data/expert_train.csv" --out-dir "$normality" \
@@ -59,8 +58,8 @@ for dataset in ucf xd; do
       --baseline-manifest "$source_base/baseline_test/baseline_scores.csv" \
       --expert-train-manifest "$SOURCE/$dataset/expert/train/expert_scores.csv" \
       --expert-manifest "$SOURCE/$dataset/expert/test/expert_scores.csv" \
-      --expert2-manifest "$diverse/test/expert2_scores.csv" \
-      --expert2-train-manifest "$diverse/train/expert2_scores.csv" \
+      --expert2-manifest "$complement/test/expert2_scores.csv" \
+      --expert2-train-manifest "$complement/train/expert2_scores.csv" \
       --expert3-manifest "$normality/test/expert3_scores.csv" \
       --expert3-train-manifest "$normality/train/expert3_scores.csv" \
       --student-manifest "$context/test/student_scores.csv" \

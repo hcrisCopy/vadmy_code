@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from scipy.ndimage import gaussian_filter1d, maximum_filter1d, median_filter, minimum_filter1d
+from scipy.ndimage import gaussian_filter1d, maximum_filter1d, median_filter
 from scipy.special import expit
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
@@ -180,7 +180,6 @@ def main() -> None:
         args.normality_smoothing_blend,
     )
     duration_factor = float(np.clip((persistence_width - 11.0) / 4.0, 0.0, 1.0))
-    closing_width = max(3, 2 * round((persistence_width / 3.0 - 1.0) / 2.0) + 1)
     correction_weight = 3.0 * duration_factor
     neuron_weight = 0.3 - 0.1 * duration_factor
     normality_gate_weight = 1.0 + 2.0 * duration_factor
@@ -332,12 +331,6 @@ def main() -> None:
                         + 0.5 * duration_factor * long_persistent
                     )
                 corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
-                closed = minimum_filter1d(
-                    maximum_filter1d(corrected, closing_width, mode="nearest"),
-                    closing_width,
-                    mode="nearest",
-                )
-                corrected = 0.5 * corrected + 0.5 * closed
                 if final_dilation_width > 1 and final_dilation_weight > 0.0:
                     dilated = maximum_filter1d(corrected, final_dilation_width, mode="nearest")
                     corrected = corrected + final_dilation_weight * (dilated - corrected)
@@ -395,8 +388,6 @@ def main() -> None:
             "final_dilation_weight": final_dilation_weight,
             "persistence_weight": args.persistence_weight,
             "persistence_scales": [persistence_width, 2 * persistence_width - 1],
-            "closing_width": closing_width,
-            "closing_weight": 0.5,
             "gaussian_sigma": args.gaussian_sigma,
             "advance_snippets": args.advance_snippets,
             "disabled_components": [

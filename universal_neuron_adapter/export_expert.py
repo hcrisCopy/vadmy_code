@@ -48,7 +48,8 @@ def main() -> None:
             hidden = torch.from_numpy(load_hidden_array(str(row.hidden_path))).unsqueeze(0).to(device)
             for layer, dimensions in enumerate(controlled):
                 if len(dimensions):
-                    hidden[:, :, layer, dimensions] = 0.0
+                    neutral = hidden[:, :, layer, :].mean(dim=-1, keepdim=True)
+                    hidden[:, :, layer, dimensions] = neutral
             length = torch.tensor([hidden.shape[1]], device=device)
             score = torch.sigmoid(model(hidden, length))[0, : int(length.item())].cpu().numpy().astype(np.float32)
             target = score_dir / f"{row.key}.npy"

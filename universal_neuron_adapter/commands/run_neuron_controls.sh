@@ -12,7 +12,6 @@ for dataset in ucf xd; do
     if [[ "$control" == "random_matched" ]]; then seeds=(234 3407 2026 17 73); fi
     for seed in "${seeds[@]}"; do
       expert="$ROOT/$control/seed_$seed/$dataset/expert"
-      python -m universal_neuron_adapter.export_expert --manifest "$SOURCE/$dataset/data/expert_train.csv" --expert-model "$expert_model" --out-dir "$expert/train" --device cuda --control "$control" --control-seed "$seed"
       python -m universal_neuron_adapter.export_expert --manifest "$SOURCE/$dataset/data/test.csv" --expert-model "$expert_model" --out-dir "$expert/test" --device cuda --control "$control" --control-seed "$seed"
       diverse="../vadmy_data/universal_neuron_adapter/diverse_expert_cache/$dataset/active64_seed3407"
       normality="../vadmy_data/universal_neuron_adapter/normality_expert_cache/$dataset/top32_signed_v1"
@@ -20,7 +19,7 @@ for dataset in ucf xd; do
       for baseline in lagovad desc dsanet; do
         source_base="$SOURCE/$dataset/$baseline"
         python -m universal_neuron_adapter.evaluate --baseline-train-manifest "$source_base/baseline_train/baseline_scores.csv" --baseline-manifest "$source_base/baseline_test/baseline_scores.csv" \
-          --expert-train-manifest "$expert/train/expert_scores.csv" --expert-manifest "$expert/test/expert_scores.csv" \
+          --expert-train-manifest "$SOURCE/$dataset/expert/train/expert_scores.csv" --expert-manifest "$expert/test/expert_scores.csv" \
           --expert2-manifest "$diverse/test/expert2_scores.csv" --expert2-train-manifest "$diverse/train/expert2_scores.csv" \
           --expert3-manifest "$normality/test/expert3_scores.csv" --expert3-train-manifest "$normality/train/expert3_scores.csv" \
           --student-manifest "$context/test/student_scores.csv" --student-train-manifest "$context/train/student_scores.csv" \
@@ -31,4 +30,6 @@ for dataset in ucf xd; do
     done
   done
 done
+FULL_ROOT="$(cat ../vadmy_data/universal_neuron_adapter/current_supplementary_run.txt)/ablations/full"
+python -m universal_neuron_adapter.analyze_neuron_controls --root "$ROOT" --full-root "$FULL_ROOT" --random-seeds 234 3407 2026 17 73
 printf '%s\n' "$ROOT" > ../vadmy_data/universal_neuron_adapter/current_neuron_controls.txt

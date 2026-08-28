@@ -304,7 +304,7 @@ def main() -> None:
             normal_shift = min(0.0, decision)
             normality_decision = float(normality_video_model.decision_function(np.asarray(normality_video_features(base, neuron, neuron2, blend_normality(neuron3_context, args.normality_smoothing_blend)))[None])[0])
             if decision < 0.0 and normality_decision < 0.0:
-                normal_shift += normality_decision
+                normal_shift += 0.25 * normality_decision
             if not args.disable_video_suppression:
                 corrected = expit(logit(corrected) + normal_suppression_weight * normal_shift)
             if not args.disable_temporal:

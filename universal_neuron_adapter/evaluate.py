@@ -185,6 +185,7 @@ def main() -> None:
     normality_gate_weight = 1.0 + 2.0 * duration_factor
     agreement_residual_weight = 0.5 - 0.3 * duration_factor
     triple_agreement_weight = 0.6 + 1.7 * duration_factor
+    neuron_consensus_weight = 0.3
     normal_suppression_weight = 2.0 - duration_factor
     context_diverse_weight = 8.0 * duration_factor
     context_normality_weight = duration_factor
@@ -291,6 +292,11 @@ def main() -> None:
                 standardized3 = (1.0 - args.normality_smoothing_blend) * standardized3 + args.normality_smoothing_blend * smooth_neuron3
             standardized3 = (standardized3 - standardized3.mean()) / max(float(standardized3.std()), 1e-6)
             standardized_base = (base - base.mean()) / max(float(base.std()), 1e-6)
+            neuron_consensus = np.minimum(
+                np.maximum(standardized, 0.0), np.maximum(standardized3, 0.0)
+            )
+            if not args.disable_agreement:
+                corrected = expit(logit(corrected) + neuron_consensus_weight * neuron_consensus)
             high_high = np.minimum(np.maximum(standardized_base, 0.0), np.maximum(standardized, 0.0))
             if not args.disable_agreement:
                 corrected = expit(logit(corrected) + agreement_residual_weight * high_high)
@@ -352,6 +358,7 @@ def main() -> None:
             "normality_gate_weight": normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,
             "agreement_residual_weight": agreement_residual_weight,
+            "neuron_consensus_weight": neuron_consensus_weight,
             "triple_agreement_weight": triple_agreement_weight,
             "normal_suppression_weight": normal_suppression_weight,
             "video_prior": "training-only one-sided classifier with all three CLS-neuron views and pairwise consensus",

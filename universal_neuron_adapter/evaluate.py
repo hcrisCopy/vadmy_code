@@ -299,13 +299,14 @@ def main() -> None:
                 np.maximum(standardized, 0.0), np.maximum(standardized3, 0.0)
             )
             if not args.disable_agreement:
+                baseline_miss_gate = 2.0 * (1.0 - expit(standardized_base))
                 residual_scale = (
                     (1.0 - duration_factor) * 0.3
                     + duration_factor * video_anomaly_gate * neuron_consensus_weight
                 )
                 corrected = expit(
                     logit(corrected)
-                    + residual_scale * neuron_consensus
+                    + residual_scale * baseline_miss_gate * neuron_consensus
                 )
             high_high = np.minimum(np.maximum(standardized_base, 0.0), np.maximum(standardized, 0.0))
             if not args.disable_agreement:
@@ -374,7 +375,7 @@ def main() -> None:
             "normality_smoothing_blend": args.normality_smoothing_blend,
             "agreement_residual_weight": agreement_residual_weight,
             "neuron_consensus_weight": neuron_consensus_weight,
-            "neuron_consensus_context": "duration interpolation from fixed 0.3 to gated unit residual",
+            "neuron_consensus_context": "single-baseline miss gate times primary-directional intersection",
             "triple_agreement_weight": triple_agreement_weight,
             "normal_suppression_weight": normal_suppression_weight,
             "video_prior": "training-only one-sided classifier with all three CLS-neuron views and pairwise consensus",

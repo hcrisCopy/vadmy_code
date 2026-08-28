@@ -315,6 +315,13 @@ def main() -> None:
                 corrected = expit(logit(corrected) + normal_suppression_weight * normal_shift)
             if not args.disable_temporal:
                 persistent = median_filter(corrected, persistence_width, mode="nearest")
+                if duration_factor > 0.0:
+                    long_width = 2 * persistence_width - 1
+                    long_persistent = median_filter(corrected, long_width, mode="nearest")
+                    persistent = (
+                        (1.0 - 0.5 * duration_factor) * persistent
+                        + 0.5 * duration_factor * long_persistent
+                    )
                 corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
                 if final_dilation_width > 1 and final_dilation_weight > 0.0:
                     dilated = maximum_filter1d(corrected, final_dilation_width, mode="nearest")
@@ -371,6 +378,7 @@ def main() -> None:
             "final_dilation_width": final_dilation_width,
             "final_dilation_weight": final_dilation_weight,
             "persistence_weight": args.persistence_weight,
+            "persistence_scales": [persistence_width, 2 * persistence_width - 1],
             "gaussian_sigma": args.gaussian_sigma,
             "advance_snippets": args.advance_snippets,
             "disabled_components": [

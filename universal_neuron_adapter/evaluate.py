@@ -181,7 +181,7 @@ def main() -> None:
     )
     duration_factor = float(np.clip((persistence_width - 11.0) / 4.0, 0.0, 1.0))
     correction_weight = 3.0 * duration_factor
-    neuron_weight = 0.3 - 0.1 * duration_factor
+    neuron_weight = 0.3 + 0.3 * duration_factor
     normality_gate_weight = 1.0 + 2.0 * duration_factor
     agreement_residual_weight = 0.5 - 0.3 * duration_factor
     triple_agreement_weight = 0.6 + 1.7 * duration_factor

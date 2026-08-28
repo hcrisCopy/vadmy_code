@@ -52,6 +52,10 @@ def main() -> None:
         raise RuntimeError("training calibration and evaluation must use the current baseline only")
     if '--baseline "$baseline"' not in evaluation:
         raise RuntimeError("the evaluation must receive only the current loop baseline")
+    if "train_diverse_expert" in command or "active64_seed3407" in command:
+        raise RuntimeError("the redundant seed-and-capacity auxiliary expert is forbidden")
+    if "train_complementary_expert" not in command or "--seed 234" not in command:
+        raise RuntimeError("the residual expert must share the primary seed 234")
     print("single-baseline constraint: pass", flush=True)
 
 

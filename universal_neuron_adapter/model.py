@@ -23,10 +23,22 @@ def topk_bag(probability: torch.Tensor, lengths: torch.Tensor, divisor: int = 16
 class SparseNeuronExpert(nn.Module):
     """Layer-wise sparse expert; each active input is one CLS hidden dimension."""
 
-    def __init__(self, active_per_layer: int = 64, temporal_width: int = 64) -> None:
+    def __init__(
+        self,
+        active_per_layer: int = 64,
+        temporal_width: int = 64,
+        forbidden_indices: list[list[int]] | None = None,
+    ) -> None:
         super().__init__()
         self.active_per_layer = int(active_per_layer)
         self.temporal_width = int(temporal_width)
+        forbidden_mask = torch.zeros(12, 768, dtype=torch.bool)
+        if forbidden_indices is not None:
+            indices = torch.as_tensor(forbidden_indices, dtype=torch.long)
+            if indices.ndim != 2 or indices.shape[0] != 12:
+                raise ValueError("forbidden_indices must have shape [12,K]")
+            forbidden_mask.scatter_(1, indices, True)
+        self.register_buffer("forbidden_mask", forbidden_mask, persistent=False)
         self.gate_logits = nn.Parameter(torch.zeros(12, 768))
         self.neuron_weights = nn.Parameter(torch.empty(12, 768))
         nn.init.normal_(self.neuron_weights, std=0.02)
@@ -34,7 +46,8 @@ class SparseNeuronExpert(nn.Module):
         self.temporal = nn.Sequential(nn.Conv1d(12, temporal_width, 3, padding=1), nn.GELU(), nn.Conv1d(temporal_width, temporal_width, 3, padding=2, dilation=2), nn.GELU(), nn.Conv1d(temporal_width, 1, 1))
 
     def gates(self) -> torch.Tensor:
-        soft = torch.sigmoid(self.gate_logits)
+        allowed = (~self.forbidden_mask).to(self.gate_logits.dtype)
+        soft = torch.sigmoid(self.gate_logits) * allowed
         indices = soft.topk(self.active_per_layer, dim=-1).indices
         hard = torch.zeros_like(soft).scatter_(-1, indices, 1.0)
         return hard + soft - soft.detach() if self.training else hard
@@ -47,11 +60,14 @@ class SparseNeuronExpert(nn.Module):
         return logits * valid_mask(lengths, logits.shape[1], logits.dtype)
 
     def sparsity_loss(self) -> torch.Tensor:
-        gates = torch.sigmoid(self.gate_logits)
-        return (gates * (1.0 - gates)).mean()
+        allowed = (~self.forbidden_mask).to(self.gate_logits.dtype)
+        gates = torch.sigmoid(self.gate_logits) * allowed
+        return (gates * (1.0 - gates)).sum() / allowed.sum().clamp_min(1.0)
 
     def selection(self) -> dict[str, object]:
-        gates = torch.sigmoid(self.gate_logits.detach())
+        gates = torch.sigmoid(self.gate_logits.detach()) * (~self.forbidden_mask).to(
+            self.gate_logits.dtype
+        )
         weights = self.neuron_weights.detach().abs()
         rows = []
         for layer in range(12):

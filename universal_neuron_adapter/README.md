@@ -4,7 +4,7 @@ This package implements one score-space adapter shared by LaGoVAD, DeSC, and DSA
 
 ## Method
 
-The adapter combines a conservative learned score correction with three sparse CLS-neuron views. Agreement gates permit local event expansion only where baseline and neuron evidence support an anomaly. A one-sided video prior suppresses likely normal videos. The temporal width is inferred from training-video evidence and controls persistence smoothing and dilation through one shared continuous rule. The formula and coefficients are identical for all six baseline/dataset settings.
+The adapter combines a conservative learned score correction with three sparse CLS-neuron views. The second learned view is a residual-complement detector, not a wider detector produced by changing the random seed. It uses the same seed 234 as the primary detector, cannot reselect any primary CLS coordinate, and minimizes the MIL error of their probability union. Primary-covered anomaly evidence therefore has little residual gradient, while missed training evidence trains the complement. Agreement gates permit local event expansion only where baseline and neuron evidence support an anomaly. A one-sided video prior suppresses likely normal videos. The temporal width is inferred from training-video evidence and controls persistence smoothing and dilation through one shared continuous rule. The formula and coefficients are identical for all six baseline/dataset settings.
 
 ## Data-integrity policy
 

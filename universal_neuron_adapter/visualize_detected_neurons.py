@@ -248,7 +248,7 @@ def main() -> None:
     plot_layer_weights(axes[0, 1], primary_weights, normality_mass)
     plot_training_response(axes[1, 0], responses)
     plot_causal_control(axes[1, 1], controls)
-    sns.despine(figure=figure)
+    sns.despine(fig=figure)
     figure.suptitle(
         "Detected CLIP CLS neurons are sparse, interpretable, and causally important",
         fontsize=12,

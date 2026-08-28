@@ -25,6 +25,9 @@ for dataset in ucf xd; do
   python -m universal_neuron_adapter.export_diverse_expert \
     --manifest "$SOURCE/$dataset/data/expert_train.csv" --expert-model "$diverse/expert_best.pth" \
     --out-dir "$diverse/train" --device cuda
+  python -m universal_neuron_adapter.export_diverse_expert \
+    --manifest "$SOURCE/$dataset/data/train_all.csv" --expert-model "$diverse/expert_best.pth" \
+    --out-dir "$diverse/train_all" --device cuda
   normality="$ROOT/normality_expert_cache/$dataset/top32_signed_v1"
   python -m universal_neuron_adapter.fit_normality_expert \
     --manifest "$SOURCE/$dataset/data/expert_train.csv" --out-dir "$normality" \
@@ -35,6 +38,9 @@ for dataset in ucf xd; do
   python -m universal_neuron_adapter.export_normality_expert \
     --manifest "$SOURCE/$dataset/data/expert_train.csv" --expert-model "$normality/normality_expert.npz" \
     --out-dir "$normality/train"
+  python -m universal_neuron_adapter.export_normality_expert \
+    --manifest "$SOURCE/$dataset/data/train_all.csv" --expert-model "$normality/normality_expert.npz" \
+    --out-dir "$normality/train_all"
   context="$ROOT/context_student_cache/$dataset/top32_multiscale_seed3407"
   python -m universal_neuron_adapter.fit_context_student \
     --manifest "$SOURCE/$dataset/data/expert_train.csv" \
@@ -53,6 +59,17 @@ for dataset in ucf xd; do
     --normality-model "$normality/normality_expert.npz" --out-dir "$context/train"
   for baseline in lagovad desc dsanet; do
     source_base="$SOURCE/$dataset/$baseline"
+    correction="$ROOT/correction_consensus_cache/$dataset/$baseline/three_stream_seed234_v1"
+    python -m universal_neuron_adapter.train_correction \
+      --baseline-manifest "$source_base/baseline_train/baseline_scores.csv" \
+      --expert-manifest "$SOURCE/$dataset/expert/train/expert_scores.csv" \
+      --expert2-manifest "$diverse/train_all/expert2_scores.csv" \
+      --expert3-manifest "$normality/train_all/expert3_scores.csv" \
+      --train-keys "$SOURCE/$dataset/data/expert_train.csv" \
+      --val-keys "$SOURCE/$dataset/data/expert_val.csv" \
+      --out-dir "$correction" --baseline "$baseline" --dataset "$dataset" \
+      --width 32 --max-epoch 15 --batch-size 32 --lr 0.0003 --weight-decay 0.0001 \
+      --maximum-length 256 --num-workers 4 --seed 234 --device cuda --resume
     target="$OUT/$dataset/$baseline/evaluation"
     python -m universal_neuron_adapter.evaluate \
       --baseline-train-manifest "$source_base/baseline_train/baseline_scores.csv" \
@@ -65,7 +82,7 @@ for dataset in ucf xd; do
       --expert3-train-manifest "$normality/train/expert3_scores.csv" \
       --student-manifest "$context/test/student_scores.csv" \
       --student-train-manifest "$context/train/student_scores.csv" \
-      --correction-model "$source_base/correction/model_best.pth" \
+      --correction-model "$correction/model_best.pth" \
       --gt-path "../vadmy_data/annotations/$dataset/gt.npy" \
       --baseline "$baseline" --dataset "$dataset" \
       --out-dir "$target" --frames-per-snippet 16 \

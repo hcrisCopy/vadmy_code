@@ -188,11 +188,25 @@ def collate_hidden(items: list[dict[str, object]]) -> dict[str, object]:
 
 
 class ScorePairDataset(torch.utils.data.Dataset):
-    def __init__(self, baseline_manifest: str, expert_manifest: str, key_manifest: str, maximum_length: int = 256) -> None:
+    def __init__(
+        self,
+        baseline_manifest: str,
+        expert_manifest: str,
+        key_manifest: str,
+        maximum_length: int = 256,
+        expert2_manifest: str | None = None,
+        expert3_manifest: str | None = None,
+    ) -> None:
         baseline = pd.read_csv(baseline_manifest)
         expert = pd.read_csv(expert_manifest)[["key", "expert_score_path"]]
         keys = set(pd.read_csv(key_manifest)["key"].astype(str))
         self.frame = baseline.merge(expert, on="key", validate="one_to_one")
+        if expert2_manifest is not None:
+            expert2 = pd.read_csv(expert2_manifest)[["key", "expert2_score_path"]]
+            self.frame = self.frame.merge(expert2, on="key", validate="one_to_one")
+        if expert3_manifest is not None:
+            expert3 = pd.read_csv(expert3_manifest)[["key", "expert3_score_path"]]
+            self.frame = self.frame.merge(expert3, on="key", validate="one_to_one")
         self.frame = self.frame[self.frame["key"].astype(str).isin(keys)].reset_index(drop=True)
         self.maximum_length = int(maximum_length)
 
@@ -203,21 +217,37 @@ class ScorePairDataset(torch.utils.data.Dataset):
         row = self.frame.iloc[index]
         baseline = np.load(str(row.baseline_score_path)).astype(np.float32)
         expert = resample_curve(np.load(str(row.expert_score_path)), len(baseline))
+        item = {"key": str(row.key), "baseline": baseline, "expert": expert, "label": int(row.binary_label)}
+        if hasattr(row, "expert2_score_path"):
+            item["expert2"] = resample_curve(np.load(str(row.expert2_score_path)), len(baseline))
+        if hasattr(row, "expert3_score_path"):
+            item["expert3"] = resample_curve(np.load(str(row.expert3_score_path)), len(baseline))
         if len(baseline) > self.maximum_length:
             indices = np.linspace(0, len(baseline) - 1, self.maximum_length).round().astype(np.int64)
-            baseline, expert = baseline[indices], expert[indices]
-        return {"key": str(row.key), "baseline": torch.from_numpy(baseline), "expert": torch.from_numpy(expert), "label": int(row.binary_label)}
+            for name in ("baseline", "expert", "expert2", "expert3"):
+                if name in item:
+                    item[name] = item[name][indices]
+        for name in ("baseline", "expert", "expert2", "expert3"):
+            if name in item:
+                item[name] = torch.from_numpy(item[name])
+        return item
 
 
 def collate_scores(items: list[dict[str, object]]) -> dict[str, object]:
     lengths = torch.tensor([len(item["baseline"]) for item in items], dtype=torch.long)
     baseline = torch.full((len(items), int(lengths.max())), 0.5)
     expert = torch.full_like(baseline, 0.5)
+    optional = {
+        name: torch.full_like(baseline, 0.5)
+        for name in ("expert2", "expert3") if name in items[0]
+    }
     for index, item in enumerate(items):
         length = len(item["baseline"])
         baseline[index, :length] = item["baseline"]
         expert[index, :length] = item["expert"]
-    return {"keys": [item["key"] for item in items], "baseline": baseline, "expert": expert, "lengths": lengths, "labels": torch.tensor([item["label"] for item in items], dtype=torch.float32)}
+        for name, values in optional.items():
+            values[index, :length] = item[name]
+    return {"keys": [item["key"] for item in items], "baseline": baseline, "expert": expert, **optional, "lengths": lengths, "labels": torch.tensor([item["label"] for item in items], dtype=torch.float32)}
 
 
 def main() -> None:

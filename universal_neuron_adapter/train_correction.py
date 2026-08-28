@@ -44,7 +44,8 @@ def validate(model, loader, device):
     with torch.no_grad():
         for batch in loader:
             base, expert, lengths = batch["baseline"].to(device), batch["expert"].to(device), batch["lengths"].to(device)
-            corrected.extend(topk_bag(torch.sigmoid(model(base, expert)), lengths).cpu().tolist())
+            expert2, expert3 = batch["expert2"].to(device), batch["expert3"].to(device)
+            corrected.extend(topk_bag(torch.sigmoid(model(base, expert, expert2, expert3)), lengths).cpu().tolist())
             baseline.extend(topk_bag(base, lengths).cpu().tolist())
             targets.extend(batch["labels"].tolist())
     return {"corrected_video_auc": roc_auc_score(targets, corrected), "corrected_video_ap": average_precision_score(targets, corrected), "baseline_video_auc": roc_auc_score(targets, baseline), "baseline_video_ap": average_precision_score(targets, baseline)}
@@ -52,7 +53,7 @@ def validate(model, loader, device):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train a conservative single-baseline score correction head.")
-    for name in ("baseline-manifest", "expert-manifest", "train-keys", "val-keys", "out-dir"):
+    for name in ("baseline-manifest", "expert-manifest", "expert2-manifest", "expert3-manifest", "train-keys", "val-keys", "out-dir"):
         parser.add_argument(f"--{name}", required=True)
     parser.add_argument("--baseline", choices=["dsanet", "desc", "lagovad"], required=True)
     parser.add_argument("--dataset", choices=["ucf", "xd"], required=True)
@@ -72,25 +73,36 @@ def main() -> None:
     seed_everything(args.seed)
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     def loader(keys, shuffle):
-        return DataLoader(ScorePairDataset(args.baseline_manifest, args.expert_manifest, keys, args.maximum_length), batch_size=args.batch_size, shuffle=shuffle, drop_last=shuffle, num_workers=args.num_workers, collate_fn=collate_scores)
+        dataset = ScorePairDataset(
+            args.baseline_manifest,
+            args.expert_manifest,
+            keys,
+            args.maximum_length,
+            args.expert2_manifest,
+            args.expert3_manifest,
+        )
+        return DataLoader(dataset, batch_size=args.batch_size, shuffle=shuffle, drop_last=shuffle, num_workers=args.num_workers, collate_fn=collate_scores)
     train, val = loader(args.train_keys, True), loader(args.val_keys, False)
-    model = ScoreCorrectionHead(args.width).to(device)
+    model = ScoreCorrectionHead(args.width, num_neuron_streams=3).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.max_epoch)
     last, best_path = output / "checkpoint_last.pth", output / "model_best.pth"
     start, best = 0, -float("inf")
     if args.resume and last.exists():
         checkpoint = torch.load(last, map_location="cpu", weights_only=False)
+        if int(checkpoint["config"].get("num_neuron_streams", 1)) != 3:
+            raise ValueError("checkpoint is not a three-stream correction head")
         model.load_state_dict(checkpoint["model_state_dict"]); optimizer.load_state_dict(checkpoint["optimizer_state_dict"]); scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
         start, best = int(checkpoint["epoch"]) + 1, float(checkpoint["best_metric"])
     for epoch in range(start, args.max_epoch):
         model.train(); running = 0.0
         for batch in tqdm(train, desc=f"correction {args.baseline}/{args.dataset} {epoch + 1}/{args.max_epoch}"):
             base, expert, lengths, labels = batch["baseline"].to(device), batch["expert"].to(device), batch["lengths"].to(device), batch["labels"].to(device)
-            loss = loss_terms(model(base, expert), base, labels, lengths)
+            expert2, expert3 = batch["expert2"].to(device), batch["expert3"].to(device)
+            loss = loss_terms(model(base, expert, expert2, expert3), base, labels, lengths)
             optimizer.zero_grad(set_to_none=True); loss.backward(); optimizer.step(); running += float(loss.detach())
         scheduler.step(); metrics = validate(model, val, device); selection = 0.5 * (metrics["corrected_video_auc"] + metrics["corrected_video_ap"])
-        payload = {"epoch": epoch, "best_metric": max(best, selection), "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "scheduler_state_dict": scheduler.state_dict(), "config": {"width": args.width}, "baseline": args.baseline, "dataset": args.dataset, "metrics": metrics}
+        payload = {"epoch": epoch, "best_metric": max(best, selection), "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "scheduler_state_dict": scheduler.state_dict(), "config": {"width": args.width, "num_neuron_streams": 3}, "baseline": args.baseline, "dataset": args.dataset, "metrics": metrics}
         torch.save(payload, last)
         if selection > best: best = selection; torch.save(payload, best_path)
         with (output / "history.jsonl").open("a", encoding="utf-8") as handle: handle.write(json.dumps({"epoch": epoch + 1, "loss": running / max(1, len(train)), **metrics}) + "\n")

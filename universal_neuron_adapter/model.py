@@ -77,18 +77,59 @@ def expert_mil_loss(logits: torch.Tensor, labels: torch.Tensor, lengths: torch.T
 class ScoreCorrectionHead(nn.Module):
     """Score head used by the first-round CLS-neuron expert."""
 
-    def __init__(self, width: int = 32) -> None:
+    def __init__(self, width: int = 32, num_neuron_streams: int = 1) -> None:
         super().__init__()
+        if num_neuron_streams not in (1, 3):
+            raise ValueError("num_neuron_streams must be 1 or 3")
+        self.num_neuron_streams = int(num_neuron_streams)
+        input_channels = 6 if self.num_neuron_streams == 1 else 10
         self.body = nn.Sequential(
-            nn.Conv1d(6, width, 3, padding=1),
+            nn.Conv1d(input_channels, width, 3, padding=1),
             nn.GELU(),
             nn.Conv1d(width, width, 3, padding=2, dilation=2),
             nn.GELU(),
             nn.Conv1d(width, 1, 1),
         )
 
-    def forward(self, baseline_probability: torch.Tensor, expert_probability: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        baseline_probability: torch.Tensor,
+        expert_probability: torch.Tensor,
+        auxiliary_probability: torch.Tensor | None = None,
+        normality_probability: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         baseline = torch.logit(baseline_probability.clamp(1e-5, 1.0 - 1e-5))
+        if self.num_neuron_streams == 3:
+            if auxiliary_probability is None or normality_probability is None:
+                raise ValueError("three-stream correction requires auxiliary and normality evidence")
+            streams = torch.stack(
+                [expert_probability, auxiliary_probability, normality_probability], dim=1
+            )
+            mean = streams.mean(dim=-1, keepdim=True)
+            scale = streams.std(dim=-1, keepdim=True, unbiased=False).clamp_min(1e-6)
+            standardized = (streams - mean) / scale
+            consensus_mean = standardized.mean(dim=1)
+            consensus_min = standardized.min(dim=1).values
+            consensus_max = standardized.max(dim=1).values
+            consensus_std = standardized.std(dim=1, unbiased=False)
+            base_change = F.pad(baseline[:, 1:] - baseline[:, :-1], (1, 0))
+            consensus_change = F.pad(consensus_mean[:, 1:] - consensus_mean[:, :-1], (1, 0))
+            features = torch.stack(
+                [
+                    baseline,
+                    standardized[:, 0],
+                    standardized[:, 1],
+                    standardized[:, 2],
+                    consensus_mean,
+                    consensus_min,
+                    consensus_max,
+                    consensus_std,
+                    base_change,
+                    consensus_change,
+                ],
+                dim=1,
+            )
+            return baseline + self.body(features).squeeze(1)
         expert = torch.logit(expert_probability.clamp(1e-5, 1.0 - 1e-5))
         base_change = F.pad(baseline[:, 1:] - baseline[:, :-1], (1, 0))
         expert_change = F.pad(expert[:, 1:] - expert[:, :-1], (1, 0))

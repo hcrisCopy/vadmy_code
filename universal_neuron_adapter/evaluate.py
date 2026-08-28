@@ -198,7 +198,10 @@ def main() -> None:
     checkpoint = torch.load(args.correction_model, map_location="cpu", weights_only=False)
     if checkpoint.get("baseline") != args.baseline or checkpoint.get("dataset") != args.dataset:
         raise ValueError("correction checkpoint baseline/dataset mismatch")
-    model = ScoreCorrectionHead(int(checkpoint["config"]["width"]))
+    model = ScoreCorrectionHead(
+        int(checkpoint["config"]["width"]),
+        int(checkpoint["config"].get("num_neuron_streams", 1)),
+    )
     model.load_state_dict(checkpoint["model_state_dict"])
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     model.to(device).eval()
@@ -275,7 +278,12 @@ def main() -> None:
             if args.disable_correction:
                 corrected = base.copy()
             else:
-                correction = model(base_tensor, neuron_tensor)
+                correction = model(
+                    base_tensor,
+                    neuron_tensor,
+                    torch.from_numpy(neuron2).unsqueeze(0).to(device),
+                    torch.from_numpy(neuron3).unsqueeze(0).to(device),
+                )
                 corrected = calibrated_probability(
                     base_tensor, neuron_tensor, correction, correction_weight, neuron_weight
                 )[0].cpu().numpy().astype(np.float32)

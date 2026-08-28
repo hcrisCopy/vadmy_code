@@ -312,7 +312,12 @@ def main() -> None:
             if decision < 0.0 and normality_decision < 0.0:
                 normal_shift += 0.25 * normality_decision
             if not args.disable_video_suppression:
-                corrected = expit(logit(corrected) + normal_suppression_weight * normal_shift)
+                abnormal_shift = max(0.0, min(decision, normality_decision))
+                corrected = expit(
+                    logit(corrected)
+                    + normal_suppression_weight * normal_shift
+                    + 0.25 * abnormal_shift
+                )
             if not args.disable_temporal:
                 persistent = median_filter(corrected, persistence_width, mode="nearest")
                 corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
@@ -361,7 +366,7 @@ def main() -> None:
             "neuron_consensus_weight": neuron_consensus_weight,
             "triple_agreement_weight": triple_agreement_weight,
             "normal_suppression_weight": normal_suppression_weight,
-            "video_prior": "training-only one-sided classifier with all three CLS-neuron views and pairwise consensus",
+            "video_prior": "training-only normal suppression plus bounded two-prior abnormal consensus",
             "persistence_width": persistence_width,
             "persistence_width_rule": "0.35 * training gate-run q75, nearest odd, clipped to [7, 21]",
             "duration_factor": duration_factor,

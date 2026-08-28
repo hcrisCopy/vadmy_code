@@ -154,6 +154,11 @@ def main() -> None:
     parser.add_argument("--persistence-weight", type=float, default=0.75)
     parser.add_argument("--gaussian-sigma", type=float, default=0.0)
     parser.add_argument("--advance-snippets", type=int, default=1)
+    parser.add_argument("--disable-correction", action="store_true")
+    parser.add_argument("--disable-agreement", action="store_true")
+    parser.add_argument("--disable-event-gate", action="store_true")
+    parser.add_argument("--disable-video-suppression", action="store_true")
+    parser.add_argument("--disable-temporal", action="store_true")
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -177,6 +182,8 @@ def main() -> None:
 
     output = Path(args.out_dir)
     output.mkdir(parents=True, exist_ok=True)
+    curve_dir = output / "curves"
+    curve_dir.mkdir(parents=True, exist_ok=True)
     checkpoint = torch.load(args.correction_model, map_location="cpu", weights_only=False)
     if checkpoint.get("baseline") != args.baseline or checkpoint.get("dataset") != args.dataset:
         raise ValueError("correction checkpoint baseline/dataset mismatch")
@@ -248,10 +255,13 @@ def main() -> None:
             student_curve = resample_curve(np.load(str(row.student_score_path)), len(base))
             base_tensor = torch.from_numpy(base).unsqueeze(0).to(device)
             neuron_tensor = torch.from_numpy(neuron).unsqueeze(0).to(device)
-            correction = model(base_tensor, neuron_tensor)
-            corrected = calibrated_probability(
-                base_tensor, neuron_tensor, correction, correction_weight, neuron_weight
-            )[0].cpu().numpy().astype(np.float32)
+            if args.disable_correction:
+                corrected = base.copy()
+            else:
+                correction = model(base_tensor, neuron_tensor)
+                corrected = calibrated_probability(
+                    base_tensor, neuron_tensor, correction, correction_weight, neuron_weight
+                )[0].cpu().numpy().astype(np.float32)
             standardized = (neuron - neuron.mean()) / max(float(neuron.std()), 1e-6)
             standardized2 = fuse_standardized(neuron2, student_curve, context_diverse_weight)
             standardized2 = (standardized2 - standardized2.mean()) / max(float(standardized2.std()), 1e-6)
@@ -265,35 +275,38 @@ def main() -> None:
             standardized3 = (standardized3 - standardized3.mean()) / max(float(standardized3.std()), 1e-6)
             standardized_base = (base - base.mean()) / max(float(base.std()), 1e-6)
             high_high = np.minimum(np.maximum(standardized_base, 0.0), np.maximum(standardized, 0.0))
-            corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + agreement_residual_weight * high_high)))
-            triple_high = np.minimum(high_high, np.maximum(standardized3, 0.0))
-            corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + triple_agreement_weight * triple_high)))
+            if not args.disable_agreement:
+                corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + agreement_residual_weight * high_high)))
+                triple_high = np.minimum(high_high, np.maximum(standardized3, 0.0))
+                corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + triple_agreement_weight * triple_high)))
             neuron_gate = 1.0 / (1.0 + np.exp(-(standardized + standardized2 + normality_gate_weight * standardized3)))
-            expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
-            corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
+            if not args.disable_event_gate:
+                expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
+                corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
             decision = float(video_model.decision_function(np.asarray(joint_video_features(base, neuron))[None])[0])
             normal_shift = min(0.0, decision)
             normality_decision = float(normality_video_model.decision_function(np.asarray(normality_video_features(base, neuron, blend_normality(neuron3_context, args.normality_smoothing_blend)))[None])[0])
             if decision < 0.0 and normality_decision < 0.0:
                 normal_shift += 0.25 * normality_decision
-            corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + normal_suppression_weight * normal_shift)))
-            persistent = median_filter(corrected, persistence_width, mode="nearest")
-            corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
-            if final_dilation_width > 1 and final_dilation_weight > 0.0:
-                dilated = maximum_filter1d(corrected, final_dilation_width, mode="nearest")
-                corrected = corrected + final_dilation_weight * (dilated - corrected)
-            if args.gaussian_sigma > 0:
-                corrected = gaussian_filter1d(corrected, args.gaussian_sigma, mode="nearest")
-            if not 0 <= args.advance_snippets < len(corrected):
-                raise ValueError("advance-snippets must be non-negative and shorter than every video")
-            if args.advance_snippets:
-                corrected = np.concatenate([
-                    corrected[args.advance_snippets:],
-                    np.repeat(corrected[-1:], args.advance_snippets),
-                ])
+            if not args.disable_video_suppression:
+                corrected = 1.0 / (1.0 + np.exp(-(logit(corrected) + normal_suppression_weight * normal_shift)))
+            if not args.disable_temporal:
+                persistent = median_filter(corrected, persistence_width, mode="nearest")
+                corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
+                if final_dilation_width > 1 and final_dilation_weight > 0.0:
+                    dilated = maximum_filter1d(corrected, final_dilation_width, mode="nearest")
+                    corrected = corrected + final_dilation_weight * (dilated - corrected)
+                if args.gaussian_sigma > 0:
+                    corrected = gaussian_filter1d(corrected, args.gaussian_sigma, mode="nearest")
+                if not 0 <= args.advance_snippets < len(corrected):
+                    raise ValueError("advance-snippets must be non-negative and shorter than every video")
+                if args.advance_snippets:
+                    corrected = np.concatenate([corrected[args.advance_snippets:], np.repeat(corrected[-1:], args.advance_snippets)])
             baseline_curves.append(base)
             corrected_curves.append(corrected)
-            rows.append({"key": str(row.key), "snippets": len(base), "corrected_mean": float(corrected.mean())})
+            curve_path = curve_dir / f"{row.key}.npz"
+            np.savez_compressed(curve_path, baseline=base, corrected=corrected.astype(np.float32))
+            rows.append({"key": str(row.key), "binary_label": int(row.binary_label), "snippets": len(base), "curve_path": str(curve_path), "corrected_mean": float(corrected.mean())})
 
     truth = np.load(args.gt_path).astype(np.int64).reshape(-1)
     baseline_frames = np.repeat(np.concatenate(baseline_curves), args.frames_per_snippet)
@@ -335,6 +348,15 @@ def main() -> None:
             "persistence_weight": args.persistence_weight,
             "gaussian_sigma": args.gaussian_sigma,
             "advance_snippets": args.advance_snippets,
+            "disabled_components": [
+                name for name, disabled in {
+                    "correction": args.disable_correction,
+                    "agreement": args.disable_agreement,
+                    "event_gate": args.disable_event_gate,
+                    "video_suppression": args.disable_video_suppression,
+                    "temporal": args.disable_temporal,
+                }.items() if disabled
+            ],
         },
         "frames": len(truth),
     }

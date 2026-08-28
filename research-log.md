@@ -195,3 +195,13 @@ The unchanged official DSANet detection evaluator was run at IoU 0.1 through 0.5
 ## Selected-neuron causal removal control
 
 At test time only, selected raw CLS dimensions were replaced by their per-snippet layer mean; models and calibration data were left unchanged. Five controls removed the same number of random dimensions. Selected-neuron removal reduced LaGoVAD/DeSC/DSANet by 51.466/0.800/0.488 AUC pp on UCF and 13.136/0.493/1.050 AP pp on XD. Mean random-removal changes were only 0.050/0.004/0.002 pp on UCF and -0.011/-0.002/0.003 pp on XD. This supports a causal role for the selected coordinates under the intervention, while the extreme LaGoVAD sensitivity also warns that its adapter is strongly dependent on the learned neuron evidence.
+
+## Three-seed repeat and neuron-identity stability
+
+The frozen formal configuration was repeated with seeds 234, 3407, and 2026; no setting was selected from test performance. Mean +/- population standard deviation was LaGoVAD UCF AUC 86.210 +/- 0.822, DeSC UCF 90.152 +/- 0.144, DSANet UCF 89.848 +/- 0.352, LaGoVAD XD AP 78.594 +/- 0.102, DeSC XD 88.223 +/- 0.024, and DSANet XD 88.165 +/- 0.027. All 18 repeated corrected metrics remained above their paired executable baselines, but UCF, especially LaGoVAD, was less stable than XD. Exact selected-coordinate identity was not stable: mean pairwise Jaccard was 0.220 on UCF and 0.150 on XD. The evidence supports a distributed functional neuron subspace rather than a seed-invariant list of individual neuron coordinates.
+
+## Post-hoc parameter robustness and cached-score efficiency
+
+After freezing the formal setting, event widths 33/41/49 and temporal advances 0/1/2 were evaluated only as a local robustness check; none of these test results was used to select a new setting. Across both datasets and all three baselines, every tested variant remained positive, with gains ranging from +0.695 to +6.637 pp. For the central width-41/advance-1 setting, cached-score adapter evaluation averaged 13.010 seconds and 134,656 frames/s, with maximum peak CUDA allocation of 1.979 MB. This efficiency scope includes manifest and cached-curve loading plus adapter evaluation, but excludes baseline inference and CLIP hidden-state extraction.
+
+Focused visualizations use a video whose per-video gain is closest to the dataset/baseline median rather than the maximum-gain video. The robustness heatmap emphasizes the two tested temporal parameters and marks the frozen central configuration. This avoids qualitative cherry-picking and keeps the figures tied to the main claims.

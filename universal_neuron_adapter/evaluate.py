@@ -299,9 +299,13 @@ def main() -> None:
                 np.maximum(standardized, 0.0), np.maximum(standardized3, 0.0)
             )
             if not args.disable_agreement:
+                residual_scale = (
+                    (1.0 - duration_factor) * 0.3
+                    + duration_factor * video_anomaly_gate * neuron_consensus_weight
+                )
                 corrected = expit(
                     logit(corrected)
-                    + neuron_consensus_weight * video_anomaly_gate * neuron_consensus
+                    + residual_scale * neuron_consensus
                 )
             high_high = np.minimum(np.maximum(standardized_base, 0.0), np.maximum(standardized, 0.0))
             if not args.disable_agreement:
@@ -370,7 +374,7 @@ def main() -> None:
             "normality_smoothing_blend": args.normality_smoothing_blend,
             "agreement_residual_weight": agreement_residual_weight,
             "neuron_consensus_weight": neuron_consensus_weight,
-            "neuron_consensus_context": "sigmoid of the smaller training-only video-prior logit",
+            "neuron_consensus_context": "duration interpolation from fixed 0.3 to gated unit residual",
             "triple_agreement_weight": triple_agreement_weight,
             "normal_suppression_weight": normal_suppression_weight,
             "video_prior": "training-only one-sided classifier with all three CLS-neuron views and pairwise consensus",

@@ -4,5 +4,3 @@ The neuron adapter and analysis code are original project code using PyTorch, Nu
 
 Frozen baseline score curves, the first sparse CLS-neuron expert, and correction checkpoints are reused from autoresearch trial `9d1a066`. Hidden-state extraction follows the repository's existing DSANet CLIP ViT-B/16 loader and saves only the 12 block-level CLS tokens, not patch tokens or optical flow.
 
-The coordinate-disjoint residual detector and probability-union MIL objective are implemented in this package. They read the current dataset's official training and internal validation manifests only; test hidden states are passed through the frozen detector solely for final inference.
-

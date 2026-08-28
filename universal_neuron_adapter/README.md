@@ -4,7 +4,7 @@ This package implements one score-space adapter shared by LaGoVAD, DeSC, and DSA
 
 ## Method
 
-The adapter combines a conservative learned score correction with three sparse CLS-neuron views. A direct residual recovers baseline misses where the primary and directional detectors have positive intersecting evidence. Short events use a fixed conservative residual; persistent events use a stronger residual multiplied by the Sigmoid of the smaller logit from two training-only video priors. The training-inferred duration factor continuously interpolates between them. Baseline-neuron agreement separately controls local event expansion. Persistent-event data also fuse the inferred median trajectory with a second scale of width `2w-1`, while short-event data retain the single scale.
+The adapter combines three modular CLS-neuron views. The primary sparse MIL detector emphasizes individually discriminative coordinates. A deterministic minimum-redundancy maximum-relevance detector selects 32 coordinates per layer that retain video-label relevance while penalizing pairwise response redundancy. A directional normality detector models one-sided departures from normal training moments. This gives the second detector a collective-information role instead of manufacturing diversity by changing seed and doubling capacity. The shared score adapter and training-inferred temporal modules then fuse these views with exactly one current baseline stream.
 
 ## Data-integrity policy
 

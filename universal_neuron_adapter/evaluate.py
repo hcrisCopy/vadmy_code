@@ -292,13 +292,8 @@ def main() -> None:
                 standardized3 = (1.0 - args.normality_smoothing_blend) * standardized3 + args.normality_smoothing_blend * smooth_neuron3
             standardized3 = (standardized3 - standardized3.mean()) / max(float(standardized3.std()), 1e-6)
             standardized_base = (base - base.mean()) / max(float(base.std()), 1e-6)
-            primary_positive = np.maximum(standardized, 0.0)
-            directional_positive = np.maximum(standardized3, 0.0)
-            neuron_consensus = (
-                2.0
-                * primary_positive
-                * directional_positive
-                / np.maximum(primary_positive + directional_positive, 1e-6)
+            neuron_consensus = np.minimum(
+                np.maximum(standardized, 0.0), np.maximum(standardized3, 0.0)
             )
             if not args.disable_agreement:
                 corrected = expit(logit(corrected) + neuron_consensus_weight * neuron_consensus)
@@ -371,7 +366,6 @@ def main() -> None:
             "normality_smoothing_blend": args.normality_smoothing_blend,
             "agreement_residual_weight": agreement_residual_weight,
             "neuron_consensus_weight": neuron_consensus_weight,
-            "neuron_consensus_operator": "harmonic mean of positive primary and directional evidence",
             "triple_agreement_weight": triple_agreement_weight,
             "normal_suppression_weight": normal_suppression_weight,
             "video_prior": "training-only one-sided classifier with all three CLS-neuron views and pairwise consensus",

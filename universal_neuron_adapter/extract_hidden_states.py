@@ -27,7 +27,10 @@ def scan_videos(root):
 
 
 def base_key(path_or_key: str) -> str:
-    return CHUNK_RE.sub('', Path(str(path_or_key)).stem)
+    value = Path(str(path_or_key)).name
+    if Path(value).suffix.lower() in VIDEO_SUFFIXES | {'.npy', '.npz'}:
+        value = Path(value).stem
+    return CHUNK_RE.sub('', value)
 
 
 def keys_from_csv(paths):

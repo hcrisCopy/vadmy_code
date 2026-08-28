@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import re
 
 
 FORBIDDEN_TOKENS = (
@@ -21,13 +20,18 @@ def main() -> None:
     found = [token for token in FORBIDDEN_TOKENS if token in lowered]
     if found:
         raise RuntimeError(f"cross-baseline inputs are forbidden: {found}")
-    matches = re.findall(
-        r"python -m universal_neuron_adapter\.evaluate\s+((?:.*\\\n)*?.*)",
-        command,
-    )
-    if len(matches) != 1:
-        raise RuntimeError(f"expected one shared evaluation command, found {len(matches)}")
-    evaluation = matches[0]
+    lines = command.splitlines()
+    starts = [index for index, line in enumerate(lines) if line.strip().startswith("python -m universal_neuron_adapter.evaluate ")]
+    if len(starts) != 1:
+        raise RuntimeError(f"expected one shared evaluation command, found {len(starts)}")
+    block = [lines[starts[0]]]
+    index = starts[0]
+    while block[-1].rstrip().endswith("\\"):
+        index += 1
+        if index >= len(lines):
+            raise RuntimeError("unterminated shared evaluation command")
+        block.append(lines[index])
+    evaluation = "\n".join(block)
     if evaluation.count("--baseline-manifest") != 1:
         raise RuntimeError("the shared evaluation command must expose exactly one baseline input")
     if evaluation.count("--baseline-train-manifest") != 1:

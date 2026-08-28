@@ -15,7 +15,10 @@ CHUNK_SUFFIX = re.compile(r"__(\d+)$")
 
 
 def base_key(path_or_key: str) -> str:
-    return CHUNK_SUFFIX.sub("", Path(str(path_or_key)).stem)
+    value = Path(str(path_or_key)).name
+    if Path(value).suffix.lower() in {".npy", ".npz", ".avi", ".mp4", ".mkv", ".mov", ".webm"}:
+        value = Path(value).stem
+    return CHUNK_SUFFIX.sub("", value)
 
 
 def is_normal_label(label: str) -> bool:

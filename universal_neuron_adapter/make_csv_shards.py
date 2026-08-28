@@ -8,14 +8,21 @@ from pathlib import Path
 import pandas as pd
 
 CHUNK_RE = re.compile(r'__(\d+)$')
+KNOWN_SUFFIXES = {'.npy', '.npz', '.avi', '.mp4', '.mkv', '.mov', '.webm'}
 
 
 def base_key(path_or_key: str) -> str:
-    return CHUNK_RE.sub('', Path(str(path_or_key)).stem)
+    value = Path(str(path_or_key)).name
+    if Path(value).suffix.lower() in KNOWN_SUFFIXES:
+        value = Path(value).stem
+    return CHUNK_RE.sub('', value)
 
 
 def chunk_idx(path_or_key: str) -> int:
-    m = CHUNK_RE.search(Path(str(path_or_key)).stem)
+    value = Path(str(path_or_key)).name
+    if Path(value).suffix.lower() in KNOWN_SUFFIXES:
+        value = Path(value).stem
+    m = CHUNK_RE.search(value)
     return int(m.group(1)) if m else 0
 
 

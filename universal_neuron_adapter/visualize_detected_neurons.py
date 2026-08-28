@@ -9,7 +9,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import torch
 from tqdm import tqdm
+
+from universal_neuron_adapter.data import load_hidden_array
+from universal_neuron_adapter.normality import layer_normalize
 
 
 DATASETS = ("ucf", "xd")
@@ -44,10 +48,10 @@ def prepare_output(output: Path, clean: bool) -> bool:
         output / "detected_neurons.pdf",
         output / "detected_neuron_heatmap.png",
         output / "detected_neuron_heatmap.pdf",
-        output / "ucf_top_neuron_heatmap.png",
-        output / "ucf_top_neuron_heatmap.pdf",
-        output / "xd_top_neuron_heatmap.png",
-        output / "xd_top_neuron_heatmap.pdf",
+        output / "ucf_neuron_response_heatmap.png",
+        output / "ucf_neuron_response_heatmap.pdf",
+        output / "xd_neuron_response_heatmap.png",
+        output / "xd_neuron_response_heatmap.pdf",
     )
     if clean and output.exists():
         shutil.rmtree(output)
@@ -366,75 +370,145 @@ def render_neuron_heatmap(
     (output / "detected_neuron_heatmap_caption.txt").write_text(caption, encoding="utf-8")
 
 
-def ranked_neuron_matrix(
-    frame: pd.DataFrame,
-    detector: str,
-    active_per_layer: int,
-) -> tuple[np.ndarray, list[dict]]:
-    matrix = np.zeros((12, active_per_layer), dtype=np.float64)
+def learned_detector_spec(checkpoint_path: Path) -> dict[str, np.ndarray | int]:
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    state = checkpoint["model_state_dict"]
+    gates = torch.sigmoid(state["gate_logits"]).numpy()
+    weights = state["neuron_weights"].numpy()
+    active = int(checkpoint["config"]["active_per_layer"])
+    indices = np.argsort(gates, axis=1)[:, -active:]
+    selected_weights = np.take_along_axis(weights, indices, axis=1)
+    directions = np.where(selected_weights >= 0.0, 1.0, -1.0).astype(np.float32)
+    return {"indices": indices.astype(np.int64), "directions": directions, "active": active}
+
+
+def directional_detector_spec(model_path: Path) -> dict[str, np.ndarray | int]:
+    with np.load(model_path, allow_pickle=False) as model:
+        indices = np.asarray(model["indices"], dtype=np.int64)
+        directions = np.where(np.asarray(model["directions"]) == 0, 1.0, -1.0).astype(np.float32)
+        normal_mean = np.asarray(model["normal_mean"], dtype=np.float32)
+        normal_scale = np.asarray(model["normal_scale"], dtype=np.float32)
+    return {
+        "indices": indices,
+        "directions": directions,
+        "normal_mean": normal_mean,
+        "normal_scale": normal_scale,
+        "active": int(indices.shape[1]),
+    }
+
+
+def bounded_hidden(path: str, maximum_length: int = 256) -> np.ndarray:
+    hidden = load_hidden_array(path)
+    if len(hidden) > maximum_length:
+        indices = np.linspace(0, len(hidden) - 1, maximum_length).round().astype(np.int64)
+        hidden = hidden[indices]
+    return layer_normalize(hidden)
+
+
+def video_top_response(response: np.ndarray) -> np.ndarray:
+    count = min(len(response), max(1, len(response) // 16 + 1))
+    return np.partition(response, len(response) - count, axis=0)[-count:].mean(axis=0)
+
+
+def response_effect_table(
+    dataset: str,
+    manifest_path: Path,
+    primary_spec: dict[str, np.ndarray | int],
+    diverse_spec: dict[str, np.ndarray | int],
+    directional_spec: dict[str, np.ndarray | int],
+) -> pd.DataFrame:
+    names = ("Primary sparse", "Diverse sparse", "Directional normality")
+    specs = (primary_spec, diverse_spec, directional_spec)
+    sums = {name: np.zeros((2, 12, int(spec["active"])), dtype=np.float64) for name, spec in zip(names, specs)}
+    squares = {name: np.zeros_like(sums[name]) for name in names}
+    counts = np.zeros(2, dtype=np.int64)
+    manifest = pd.read_csv(manifest_path)
+    for row in tqdm(
+        manifest.itertuples(index=False), total=len(manifest), desc=f"{dataset}: neuron response effects"
+    ):
+        hidden = bounded_hidden(str(row.hidden_path))
+        label = int(row.binary_label)
+        for name, spec in zip(names, specs):
+            indices = np.asarray(spec["indices"], dtype=np.int64)
+            directions = np.asarray(spec["directions"], dtype=np.float32)
+            if name == "Directional normality":
+                z_score = (
+                    hidden - np.asarray(spec["normal_mean"], dtype=np.float32)
+                ) / np.asarray(spec["normal_scale"], dtype=np.float32)
+                selected = np.take_along_axis(z_score, indices[None], axis=2)
+                response = np.maximum(selected * directions[None], 0.0)
+            else:
+                selected = np.take_along_axis(hidden, indices[None], axis=2)
+                response = selected * directions[None]
+            summary = video_top_response(response)
+            sums[name][label] += summary
+            squares[name][label] += np.square(summary, dtype=np.float64)
+        counts[label] += 1
+    if np.any(counts == 0):
+        raise ValueError(f"{dataset} training manifest must contain normal and abnormal videos")
+
     rows = []
-    for layer in range(1, 13):
-        selected = frame[frame["layer"] == layer].copy()
-        if detector == "Directional normality":
-            selected["raw_importance"] = selected["weight"].astype(float)
-        else:
-            selected["raw_importance"] = (
-                selected["gate"].astype(float) * selected["absolute_weight"].astype(float)
-            )
-        selected = selected.sort_values("raw_importance", ascending=False).head(active_per_layer)
-        if len(selected) != active_per_layer:
-            raise ValueError(
-                f"{detector} layer {layer} has {len(selected)} neurons, expected {active_per_layer}"
-            )
-        values = selected["raw_importance"].to_numpy(dtype=np.float64)
-        normalized = values / max(float(values.max()), 1e-12)
-        matrix[layer - 1] = normalized
-        for rank, (item, value) in enumerate(zip(selected.itertuples(index=False), normalized), start=1):
-            rows.append(
-                {
-                    "detector": detector,
-                    "layer": layer,
-                    "rank": rank,
-                    "dimension": int(item.dimension),
-                    "raw_importance": float(item.raw_importance),
-                    "within_layer_normalized_importance": float(value),
-                }
-            )
-    return matrix, rows
+    for name, spec in zip(names, specs):
+        means = sums[name] / counts[:, None, None]
+        variances = squares[name] / counts[:, None, None] - np.square(means)
+        effect = (means[1] - means[0]) / np.sqrt(np.maximum(variances[0] + variances[1], 1e-6))
+        indices = np.asarray(spec["indices"], dtype=np.int64)
+        directions = np.asarray(spec["directions"], dtype=np.float32)
+        for layer in range(12):
+            order = np.argsort(effect[layer])[::-1]
+            ordered_effect = effect[layer, order]
+            scale = max(float(np.max(np.abs(ordered_effect))), 1e-12)
+            for rank, position in enumerate(order, start=1):
+                rows.append(
+                    {
+                        "dataset": dataset,
+                        "detector": name,
+                        "layer": layer + 1,
+                        "rank": rank,
+                        "dimension": int(indices[layer, position]),
+                        "response_direction": "higher" if directions[layer, position] > 0 else "lower",
+                        "raw_abnormal_vs_normal_effect": float(effect[layer, position]),
+                        "within_layer_normalized_effect": float(effect[layer, position] / scale),
+                    }
+                )
+    return pd.DataFrame(rows)
 
 
-def render_top_neuron_heatmaps(
+def render_response_effect_heatmaps(
     output: Path,
-    primary: pd.DataFrame,
-    diverse: pd.DataFrame,
-    normality: pd.DataFrame,
+    source_root: Path,
+    diverse_root: Path,
+    diverse_tag: str,
+    normality_root: Path,
+    normality_tag: str,
 ) -> None:
     names = ("Primary sparse", "Diverse sparse", "Directional normality")
     active_counts = (32, 64, 32)
-    frames = (primary, diverse, normality)
-    source_rows = []
+    all_tables = []
     for dataset in DATASETS:
-        matrices = []
-        dataset_rows = []
-        for name, count, frame in zip(names, active_counts, frames):
-            matrix, rows = ranked_neuron_matrix(
-                frame[frame["dataset"] == dataset], name, count
-            )
-            matrices.append(matrix)
-            dataset_rows.extend({"dataset": dataset, **row} for row in rows)
-        source_rows.extend(dataset_rows)
+        table = response_effect_table(
+            dataset,
+            source_root / dataset / "data" / "expert_train.csv",
+            learned_detector_spec(source_root / dataset / "expert" / "expert_best.pth"),
+            learned_detector_spec(diverse_root / dataset / diverse_tag / "expert_best.pth"),
+            directional_detector_spec(
+                normality_root / dataset / normality_tag / "normality_expert.npz"
+            ),
+        )
+        all_tables.append(table)
 
         figure, axes = plt.subplots(3, 1, figsize=(10.2, 7.4), constrained_layout=True)
         mesh = None
-        for panel, (axis, name, count, matrix) in enumerate(
-            zip(axes, names, active_counts, matrices)
-        ):
+        for panel, (axis, name, count) in enumerate(zip(axes, names, active_counts)):
+            selected = table[table["detector"] == name]
+            matrix = selected.pivot(index="layer", columns="rank", values="within_layer_normalized_effect")
+            matrix = matrix.reindex(index=range(1, 13), columns=range(1, count + 1)).to_numpy()
             mesh = axis.pcolormesh(
                 np.arange(count + 1),
                 np.arange(13),
                 matrix,
-                cmap="viridis",
-                vmin=0.0,
+                cmap="RdBu_r",
+                vmin=-1.0,
                 vmax=1.0,
                 edgecolors="white",
                 linewidth=0.42,
@@ -452,28 +526,28 @@ def render_top_neuron_heatmaps(
             axis.set_xticks(ticks - 0.5, labels=ticks)
             axis.set_xlabel("Selected-neuron rank within each layer")
             axis.set_title(
-                f"{chr(ord('a') + panel)}  {name} detector (Top-{count} per layer)",
+                f"{chr(ord('a') + panel)}  {name} detector (Top-{count} selected per layer)",
                 loc="left",
                 fontweight="bold",
             )
         if mesh is None:
             raise RuntimeError(f"no heatmap was rendered for {dataset}")
         colorbar = figure.colorbar(mesh, ax=axes, pad=0.018, aspect=34)
-        colorbar.set_label("Within-layer normalized importance")
+        colorbar.set_label("Normalized response effect: normal stronger  ←  0  →  abnormal stronger")
         figure.suptitle(DATASET_LABELS[dataset], fontsize=12, fontweight="bold")
-        figure.savefig(output / f"{dataset}_top_neuron_heatmap.png", dpi=400, bbox_inches="tight")
-        figure.savefig(output / f"{dataset}_top_neuron_heatmap.pdf", bbox_inches="tight")
+        figure.savefig(output / f"{dataset}_neuron_response_heatmap.png", dpi=400, bbox_inches="tight")
+        figure.savefig(output / f"{dataset}_neuron_response_heatmap.pdf", bbox_inches="tight")
         plt.close(figure)
 
-    pd.DataFrame(source_rows).to_csv(output / "top_neuron_heatmap_values.csv", index=False)
+    pd.concat(all_tables, ignore_index=True).to_csv(output / "neuron_response_effects.csv", index=False)
     caption = (
-        "All three CLS-neuron detectors retain strong, structured neuron responses across the 12 CLIP layers. "
-        "Each row contains only the neurons selected in that layer, ordered from most to least important; "
-        "colour is normalized by the strongest selected neuron in the same layer. Primary sparse, diverse "
-        "sparse, and directional normality detectors show Top-32, Top-64, and Top-32 neurons per layer. "
-        "Normalization is for within-layer visualization and does not support absolute comparisons between detectors."
+        "Selected CLS neurons show layer-dependent abnormal-versus-normal response effects on official training videos. "
+        "Each row contains only neurons retained by that detector and is ordered by the raw standardized response effect. "
+        "Red denotes stronger abnormal-video response and blue denotes stronger normal-video response; values are normalized "
+        "by the largest absolute effect in the same layer for visualization. Primary sparse, diverse sparse, and directional "
+        "normality detectors contain 32, 64, and 32 selected neurons per layer, respectively."
     )
-    (output / "top_neuron_heatmap_caption.txt").write_text(caption, encoding="utf-8")
+    (output / "neuron_response_heatmap_caption.txt").write_text(caption, encoding="utf-8")
 
 
 def main() -> None:
@@ -527,7 +601,14 @@ def main() -> None:
     figure.savefig(output / "detected_neurons.pdf", bbox_inches="tight")
     plt.close(figure)
     render_neuron_heatmap(output, primary_table, normality_table, primary_weights)
-    render_top_neuron_heatmaps(output, primary_table, diverse_table, normality_table)
+    render_response_effect_heatmaps(
+        output,
+        source_root,
+        diverse_root,
+        args.diverse_tag,
+        normality_root,
+        args.normality_tag,
+    )
 
     primary_table.to_csv(output / "detected_neuron_atlas.csv", index=False)
     diverse_table.to_csv(output / "diverse_neuron_atlas.csv", index=False)

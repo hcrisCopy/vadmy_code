@@ -307,10 +307,10 @@ def main() -> None:
                 expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
                 corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
             decision = float(video_model.decision_function(np.asarray(joint_video_features(base, neuron))[None])[0])
+            normal_shift = min(0.0, decision)
             normality_decision = float(normality_video_model.decision_function(np.asarray(normality_video_features(base, neuron, neuron2, blend_normality(neuron3_context, args.normality_smoothing_blend)))[None])[0])
-            normal_shift = min(0.0, normality_decision)
             if decision < 0.0 and normality_decision < 0.0:
-                normal_shift += 0.25 * decision
+                normal_shift += 0.25 * normality_decision
             if not args.disable_video_suppression:
                 corrected = expit(logit(corrected) + normal_suppression_weight * normal_shift)
             if not args.disable_temporal:

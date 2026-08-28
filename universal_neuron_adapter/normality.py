@@ -26,7 +26,6 @@ def normality_evidence(hidden: np.ndarray, model: dict[str, np.ndarray]) -> np.n
         selected = np.maximum(selected, 0.0)
     else:
         selected = np.abs(selected)
-    weighted = (selected * model["weights"][None]).reshape(len(selected), -1)
-    tail_count = max(1, weighted.shape[1] // 4)
-    evidence = np.partition(weighted, weighted.shape[1] - tail_count, axis=1)[:, -tail_count:].mean(axis=1)
+    weights = model["weights"][None]
+    evidence = (selected * weights).sum(axis=(1, 2)) / np.maximum(weights.sum(), 1e-6)
     return evidence.astype(np.float32)

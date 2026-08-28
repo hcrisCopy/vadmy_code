@@ -25,7 +25,7 @@ for dataset in ucf xd; do
   python -m universal_neuron_adapter.export_diverse_expert \
     --manifest "$SOURCE/$dataset/data/expert_train.csv" --expert-model "$diverse/expert_best.pth" \
     --out-dir "$diverse/train" --device cuda
-  normality="$ROOT/normality_expert_cache/$dataset/top32_signed_cvar25_v2"
+  normality="$ROOT/normality_expert_cache/$dataset/top32_signed_v1"
   python -m universal_neuron_adapter.fit_normality_expert \
     --manifest "$SOURCE/$dataset/data/expert_train.csv" --out-dir "$normality" \
     --active-per-layer 32 --maximum-length 256 --resume
@@ -35,7 +35,7 @@ for dataset in ucf xd; do
   python -m universal_neuron_adapter.export_normality_expert \
     --manifest "$SOURCE/$dataset/data/expert_train.csv" --expert-model "$normality/normality_expert.npz" \
     --out-dir "$normality/train"
-  context="$ROOT/context_student_cache/$dataset/top32_multiscale_cvar25_seed3407_v2"
+  context="$ROOT/context_student_cache/$dataset/top32_multiscale_seed3407"
   python -m universal_neuron_adapter.fit_context_student \
     --manifest "$SOURCE/$dataset/data/expert_train.csv" \
     --expert-manifest "$SOURCE/$dataset/expert/train/expert_scores.csv" \

@@ -22,10 +22,12 @@ def parse_args() -> argparse.Namespace:
         description="Visualize which CLS neurons are detected and whether they are functionally important."
     )
     parser.add_argument("--source-root", required=True, help="Frozen main-run root (the 9d1a066 run).")
+    parser.add_argument("--diverse-root", required=True, help="Root of the independent sparse-expert caches.")
     parser.add_argument("--normality-root", required=True, help="Root of directional normality caches.")
     parser.add_argument("--controls-csv", required=True, help="Selected-vs-random neuron-removal summary.")
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--normality-tag", default="top32_signed_v1")
+    parser.add_argument("--diverse-tag", default="active64_seed3407")
     parser.add_argument("--clean", action="store_true")
     return parser.parse_args()
 
@@ -42,6 +44,8 @@ def prepare_output(output: Path, clean: bool) -> bool:
         output / "detected_neurons.pdf",
         output / "detected_neuron_heatmap.png",
         output / "detected_neuron_heatmap.pdf",
+        output / "detected_neuron_block_heatmap.png",
+        output / "detected_neuron_block_heatmap.pdf",
     )
     if clean and output.exists():
         shutil.rmtree(output)
@@ -58,6 +62,14 @@ def load_primary(source_root: Path, dataset: str) -> tuple[pd.DataFrame, np.ndar
     neurons = pd.DataFrame(payload["neurons"])
     neurons["dataset"] = dataset
     return neurons, np.asarray(payload["layer_weights"], dtype=np.float64)
+
+
+def load_diverse(diverse_root: Path, tag: str, dataset: str) -> pd.DataFrame:
+    selected_path = diverse_root / dataset / tag / "selected_neurons.json"
+    payload = json.loads(selected_path.read_text(encoding="utf-8"))
+    neurons = pd.DataFrame(payload["neurons"])
+    neurons["dataset"] = dataset
+    return neurons
 
 
 def load_normality(normality_root: Path, tag: str, dataset: str) -> tuple[pd.DataFrame, np.ndarray]:
@@ -352,14 +364,120 @@ def render_neuron_heatmap(
     (output / "detected_neuron_heatmap_caption.txt").write_text(caption, encoding="utf-8")
 
 
+def binned_selection_density(frame: pd.DataFrame, active_per_layer: int) -> tuple[np.ndarray, list[dict]]:
+    bins, width = 32, 24
+    matrix = np.zeros((12, bins), dtype=np.float64)
+    rows = []
+    for layer in range(1, 13):
+        dimensions = frame.loc[frame["layer"] == layer, "dimension"].to_numpy(dtype=np.int64)
+        counts = np.bincount(dimensions // width, minlength=bins)
+        matrix[layer - 1] = 100.0 * counts / float(active_per_layer)
+        for index, count in enumerate(counts):
+            rows.append(
+                {
+                    "layer": layer,
+                    "dimension_start": index * width,
+                    "dimension_end": (index + 1) * width - 1,
+                    "selected_count": int(count),
+                    "selected_fraction_percent": float(100.0 * count / active_per_layer),
+                }
+            )
+    return matrix, rows
+
+
+def render_neuron_block_heatmap(
+    output: Path,
+    primary: pd.DataFrame,
+    diverse: pd.DataFrame,
+    normality: pd.DataFrame,
+) -> None:
+    names = ("Primary sparse", "Diverse sparse", "Directional normality")
+    active = (32, 64, 32)
+    frames = (primary, diverse, normality)
+    matrices: dict[str, np.ndarray] = {}
+    source_rows = []
+    for dataset in DATASETS:
+        blocks = []
+        for name, count, frame in zip(names, active, frames):
+            matrix, rows = binned_selection_density(frame[frame["dataset"] == dataset], count)
+            blocks.append(matrix)
+            for row in rows:
+                source_rows.append({"dataset": dataset, "detector": name, **row})
+        matrices[dataset] = np.concatenate(blocks, axis=0)
+
+    maximum = max(float(matrix.max()) for matrix in matrices.values())
+    figure, axes = plt.subplots(1, 2, figsize=(11.4, 7.2), sharey=True, constrained_layout=True)
+    mesh = None
+    for column, dataset in enumerate(DATASETS):
+        axis = axes[column]
+        mesh = axis.pcolormesh(
+            np.arange(33),
+            np.arange(37),
+            matrices[dataset],
+            cmap="viridis",
+            vmin=0.0,
+            vmax=maximum,
+            edgecolors="white",
+            linewidth=0.32,
+            shading="flat",
+            rasterized=False,
+        )
+        axis.set_xlim(0, 32)
+        axis.set_ylim(36, 0)
+        axis.set_title(
+            f"{'a' if column == 0 else 'b'}  {DATASET_LABELS[dataset]}",
+            loc="left",
+            fontweight="bold",
+        )
+        tick_bins = np.arange(0, 32, 4)
+        axis.set_xticks(tick_bins + 0.5, labels=[f"{value * 24}–{value * 24 + 23}" for value in tick_bins])
+        axis.tick_params(axis="x", labelrotation=35)
+        axis.set_xlabel("CLS dimension range (24 dimensions per block)")
+        axis.set_yticks(np.arange(36) + 0.5, labels=[str(layer) for _ in names for layer in range(1, 13)])
+        axis.set_ylabel("CLIP visual layer" if column == 0 else "")
+        for boundary in (12, 24):
+            axis.axhline(boundary, color="white", linewidth=2.5)
+        if column == 0:
+            for center, name in zip((6, 18, 30), names):
+                axis.text(
+                    -0.17,
+                    1.0 - center / 36.0,
+                    name,
+                    transform=axis.transAxes,
+                    ha="right",
+                    va="center",
+                    fontsize=8.5,
+                    fontweight="bold",
+                )
+    if mesh is None:
+        raise RuntimeError("no detector density was rendered")
+    colorbar = figure.colorbar(mesh, ax=axes, pad=0.02, aspect=32)
+    colorbar.set_label("Selected neurons in dimension block (%)")
+    figure.savefig(output / "detected_neuron_block_heatmap.png", dpi=400, bbox_inches="tight")
+    figure.savefig(output / "detected_neuron_block_heatmap.pdf", bbox_inches="tight")
+    plt.close(figure)
+
+    pd.DataFrame(source_rows).to_csv(output / "detected_neuron_block_heatmap.csv", index=False)
+    caption = (
+        "The three CLS-neuron detectors discover distinct but distributed neuron groups across CLIP layers. "
+        "Each colour block aggregates 24 consecutive CLS dimensions; colour intensity is the percentage of "
+        "neurons selected from that layer within the block. Primary sparse, diverse sparse, and directional "
+        "normality detectors select 32, 64, and 32 neurons per layer, respectively, using the same procedure "
+        "on UCF-Crime and XD-Violence."
+    )
+    (output / "detected_neuron_block_heatmap_caption.txt").write_text(caption, encoding="utf-8")
+
+
 def main() -> None:
     args = parse_args()
     source_root = Path(args.source_root)
+    diverse_root = Path(args.diverse_root)
     normality_root = Path(args.normality_root)
     controls_path = Path(args.controls_csv)
     output = Path(args.out_dir)
     for path, name in (
         (source_root, "--source-root"),
+        (diverse_root, "--diverse-root"),
         (normality_root, "--normality-root"),
         (controls_path, "--controls-csv"),
     ):
@@ -367,16 +485,19 @@ def main() -> None:
     if not prepare_output(output, args.clean):
         return
 
-    primary_parts, normality_parts, response_parts = [], [], []
+    primary_parts, diverse_parts, normality_parts, response_parts = [], [], [], []
     primary_weights: dict[str, np.ndarray] = {}
     normality_mass: dict[str, np.ndarray] = {}
     for dataset in tqdm(DATASETS, desc="load neuron evidence"):
         primary, primary_weights[dataset] = load_primary(source_root, dataset)
+        diverse = load_diverse(diverse_root, args.diverse_tag, dataset)
         normality, normality_mass[dataset] = load_normality(normality_root, args.normality_tag, dataset)
         primary_parts.append(primary)
+        diverse_parts.append(diverse)
         normality_parts.append(normality)
         response_parts.append(video_response_table(source_root, dataset))
     primary_table = pd.concat(primary_parts, ignore_index=True)
+    diverse_table = pd.concat(diverse_parts, ignore_index=True)
     normality_table = pd.concat(normality_parts, ignore_index=True)
     responses = pd.concat(response_parts, ignore_index=True)
     controls = pd.read_csv(controls_path)
@@ -398,8 +519,10 @@ def main() -> None:
     figure.savefig(output / "detected_neurons.pdf", bbox_inches="tight")
     plt.close(figure)
     render_neuron_heatmap(output, primary_table, normality_table, primary_weights)
+    render_neuron_block_heatmap(output, primary_table, diverse_table, normality_table)
 
     primary_table.to_csv(output / "detected_neuron_atlas.csv", index=False)
+    diverse_table.to_csv(output / "diverse_neuron_atlas.csv", index=False)
     normality_table.to_csv(output / "directional_neuron_atlas.csv", index=False)
     responses.to_csv(output / "training_neuron_responses.csv", index=False)
     metadata = {
@@ -415,6 +538,7 @@ def main() -> None:
         "panel_c_data": "official training videos only; top 10% mean of per-snippet primary neuron score",
         "panel_d_data": "post-hoc test-set causal intervention; five size-matched random removals",
         "source_root": str(source_root),
+        "diverse_root": str(diverse_root),
         "normality_root": str(normality_root),
         "controls_csv": str(controls_path),
     }

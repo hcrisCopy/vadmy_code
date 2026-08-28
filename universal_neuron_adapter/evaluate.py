@@ -189,7 +189,6 @@ def main() -> None:
     normal_suppression_weight = 2.0 - duration_factor
     context_diverse_weight = 8.0 * duration_factor
     context_normality_weight = duration_factor
-    adaptive_event_width = args.event_width + 2 * round(4.0 * duration_factor)
     final_dilation_width = 1 + 2 * round(8.0 * duration_factor)
     final_dilation_weight = 0.75 * duration_factor
 
@@ -315,7 +314,7 @@ def main() -> None:
                 corrected = expit(logit(corrected) + triple_agreement_weight * triple_high)
             neuron_gate = expit(standardized + standardized2 + normality_gate_weight * standardized3)
             if not args.disable_event_gate:
-                expanded = maximum_filter1d(corrected, adaptive_event_width, mode="nearest")
+                expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
                 corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
             normal_shift = min(0.0, decision)
             if decision < 0.0 and normality_decision < 0.0:
@@ -367,8 +366,7 @@ def main() -> None:
         "configuration": {
             "correction_weight": correction_weight,
             "neuron_weight": neuron_weight,
-            "event_width": adaptive_event_width,
-            "event_width_rule": "base width plus an even duration-derived expansion, preserving an odd window",
+            "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(sum of video-standardized CLS-neuron evidence)",
             "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",

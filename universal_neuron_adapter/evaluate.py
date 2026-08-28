@@ -327,8 +327,8 @@ def main() -> None:
                     long_width = 2 * persistence_width - 1
                     long_persistent = median_filter(corrected, long_width, mode="nearest")
                     persistent = (
-                        (1.0 - duration_factor) * persistent
-                        + duration_factor * long_persistent
+                        (1.0 - 0.5 * duration_factor) * persistent
+                        + 0.5 * duration_factor * long_persistent
                     )
                 corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
                 if final_dilation_width > 1 and final_dilation_weight > 0.0:

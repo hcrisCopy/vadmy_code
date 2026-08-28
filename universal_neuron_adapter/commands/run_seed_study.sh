@@ -3,7 +3,7 @@ set -euo pipefail
 export TOKENIZERS_PARALLELISM=false
 
 SOURCE="../vadmy_data/universal_neuron_adapter/runs/9d1a066"
-ROOT="../vadmy_data/universal_neuron_adapter/seed_study/$(git rev-parse --short HEAD)"
+ROOT="${SEED_STUDY_ROOT:-../vadmy_data/universal_neuron_adapter/seed_study/$(git rev-parse --short HEAD)}"
 SEEDS=(234 3407 2026)
 mkdir -p "$ROOT"
 exec > >(tee -a "$ROOT/run.log") 2>&1

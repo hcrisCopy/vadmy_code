@@ -4,7 +4,7 @@ This package implements one score-space adapter shared by LaGoVAD, DeSC, and DSA
 
 ## Method
 
-The adapter combines a conservative learned score correction with three sparse CLS-neuron views. A small direct residual recovers baseline misses only where the primary sparse detector and the independently fitted directional detector have positive intersecting evidence; baseline-neuron agreement separately controls local event expansion. A training-only one-sided video prior uses all three neuron views and their pairwise correlations and disagreements to suppress likely normal videos. The temporal width is inferred from training-video evidence. Short-event data fuse half-width and inferred-width median trajectories; persistent-event data fuse inferred-width and `2w-1` trajectories. The same continuous duration factor selects between these two scale pairs for all six settings.
+The adapter combines a conservative learned score correction with three sparse CLS-neuron views. A small direct residual recovers baseline misses only where the primary sparse detector and the independently fitted directional detector have positive intersecting evidence; baseline-neuron agreement separately controls local event expansion. A training-only one-sided video prior uses all three neuron views and their pairwise correlations and disagreements to suppress likely normal videos. The temporal width is inferred from training-video evidence; persistent-event data fuse the inferred median trajectory with a second scale of width `2w-1`, while short-event data retain the single scale. The same continuous duration factor controls this consensus and dilation for all six settings.
 
 ## Data-integrity policy
 

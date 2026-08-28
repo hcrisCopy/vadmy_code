@@ -180,9 +180,6 @@ def main() -> None:
         args.normality_smoothing_blend,
     )
     duration_factor = float(np.clip((persistence_width - 11.0) / 4.0, 0.0, 1.0))
-    short_persistence_width = max(
-        3, 2 * round((0.5 * persistence_width - 1.0) / 2.0) + 1
-    )
     correction_weight = 3.0 * duration_factor
     neuron_weight = 0.3 - 0.1 * duration_factor
     normality_gate_weight = 1.0 + 2.0 * duration_factor
@@ -317,15 +314,13 @@ def main() -> None:
             if not args.disable_video_suppression:
                 corrected = expit(logit(corrected) + normal_suppression_weight * normal_shift)
             if not args.disable_temporal:
-                base_persistent = median_filter(corrected, persistence_width, mode="nearest")
-                short_persistent = median_filter(corrected, short_persistence_width, mode="nearest")
-                persistent = 0.5 * short_persistent + 0.5 * base_persistent
+                persistent = median_filter(corrected, persistence_width, mode="nearest")
                 if duration_factor > 0.0:
                     long_width = 2 * persistence_width - 1
                     long_persistent = median_filter(corrected, long_width, mode="nearest")
                     persistent = (
-                        (1.0 - duration_factor) * persistent
-                        + duration_factor * (0.5 * base_persistent + 0.5 * long_persistent)
+                        (1.0 - 0.5 * duration_factor) * persistent
+                        + 0.5 * duration_factor * long_persistent
                     )
                 corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
                 if final_dilation_width > 1 and final_dilation_weight > 0.0:
@@ -383,7 +378,7 @@ def main() -> None:
             "final_dilation_width": final_dilation_width,
             "final_dilation_weight": final_dilation_weight,
             "persistence_weight": args.persistence_weight,
-            "persistence_scales": [short_persistence_width, persistence_width, 2 * persistence_width - 1],
+            "persistence_scales": [persistence_width, 2 * persistence_width - 1],
             "gaussian_sigma": args.gaussian_sigma,
             "advance_snippets": args.advance_snippets,
             "disabled_components": [

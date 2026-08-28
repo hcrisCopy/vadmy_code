@@ -9,8 +9,7 @@ import numpy as np
 import pandas as pd
 import torch
 from scipy.ndimage import gaussian_filter1d, maximum_filter1d, median_filter
-from scipy.special import expit, ndtri
-from scipy.stats import rankdata
+from scipy.special import expit
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.pipeline import make_pipeline
@@ -97,15 +96,6 @@ def fuse_standardized(primary: np.ndarray, auxiliary: np.ndarray, weight: float)
     primary = (primary - primary.mean()) / max(float(primary.std()), 1e-6)
     auxiliary = (auxiliary - auxiliary.mean()) / max(float(auxiliary.std()), 1e-6)
     return (primary + weight * auxiliary).astype(np.float32)
-
-
-def rank_gaussian_standardize(curve: np.ndarray) -> np.ndarray:
-    """Map a video-local evidence distribution to a stable standard-normal scale."""
-    curve = np.asarray(curve, dtype=np.float32)
-    if len(curve) < 2 or float(curve.max() - curve.min()) <= 1e-8:
-        return np.zeros_like(curve)
-    quantiles = (rankdata(curve, method="average") - 0.5) / len(curve)
-    return ndtri(np.clip(quantiles, 1e-4, 1.0 - 1e-4)).astype(np.float32)
 
 
 def longest_positive_run(values: np.ndarray) -> int:
@@ -290,9 +280,9 @@ def main() -> None:
                 corrected = calibrated_probability(
                     base_tensor, neuron_tensor, correction, correction_weight, neuron_weight
                 )[0].cpu().numpy().astype(np.float32)
-            standardized = rank_gaussian_standardize(neuron)
+            standardized = (neuron - neuron.mean()) / max(float(neuron.std()), 1e-6)
             standardized2 = fuse_standardized(neuron2, student_curve, context_diverse_weight)
-            standardized2 = rank_gaussian_standardize(standardized2)
+            standardized2 = (standardized2 - standardized2.mean()) / max(float(standardized2.std()), 1e-6)
             neuron3_context = fuse_standardized(neuron3, student_curve, context_normality_weight)
             standardized3 = neuron3_context
             if not 0.0 <= args.normality_smoothing_blend <= 1.0:
@@ -300,7 +290,7 @@ def main() -> None:
             if args.normality_smoothing_blend:
                 smooth_neuron3 = gaussian_filter1d(standardized3, 1.0, mode="nearest")
                 standardized3 = (1.0 - args.normality_smoothing_blend) * standardized3 + args.normality_smoothing_blend * smooth_neuron3
-            standardized3 = rank_gaussian_standardize(standardized3)
+            standardized3 = (standardized3 - standardized3.mean()) / max(float(standardized3.std()), 1e-6)
             decision = float(video_model.decision_function(np.asarray(joint_video_features(base, neuron))[None])[0])
             normality_decision = float(normality_video_model.decision_function(np.asarray(normality_video_features(base, neuron, neuron2, blend_normality(neuron3_context, args.normality_smoothing_blend)))[None])[0])
             video_anomaly_gate = float(expit(min(decision, normality_decision)))
@@ -379,7 +369,6 @@ def main() -> None:
             "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(sum of video-standardized CLS-neuron evidence)",
-            "neuron_calibration": "label-free within-video rank Gaussianization",
             "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
             "normality_gate_weight": normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,

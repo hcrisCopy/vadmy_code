@@ -9,8 +9,8 @@ import torch
 import torch.nn.functional as functional
 from tqdm import tqdm
 
-from neuron_responsibility.baselines import build_baseline
-from neuron_responsibility.desc_inference import desc_official_probabilities, desc_primary_anomaly_probability
+from universal_neuron_adapter.baseline_adapters import build_baseline
+from universal_neuron_adapter.desc_inference import desc_official_probabilities, desc_primary_anomaly_probability
 from universal_neuron_adapter.data import resample_curve
 
 

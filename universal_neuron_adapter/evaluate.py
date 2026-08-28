@@ -283,7 +283,6 @@ def main() -> None:
             standardized = (neuron - neuron.mean()) / max(float(neuron.std()), 1e-6)
             standardized2 = fuse_standardized(neuron2, student_curve, context_diverse_weight)
             standardized2 = (standardized2 - standardized2.mean()) / max(float(standardized2.std()), 1e-6)
-            standardized_student = (student_curve - student_curve.mean()) / max(float(student_curve.std()), 1e-6)
             neuron3_context = fuse_standardized(neuron3, student_curve, context_normality_weight)
             standardized3 = neuron3_context
             if not 0.0 <= args.normality_smoothing_blend <= 1.0:
@@ -300,10 +299,9 @@ def main() -> None:
                 np.maximum(standardized, 0.0), np.maximum(standardized3, 0.0)
             )
             if not args.disable_agreement:
-                context_reliability = 0.5 + expit(standardized_student)
                 residual_scale = (
                     (1.0 - duration_factor) * 0.3
-                    + duration_factor * video_anomaly_gate * neuron_consensus_weight * context_reliability
+                    + duration_factor * video_anomaly_gate * neuron_consensus_weight
                 )
                 corrected = expit(
                     logit(corrected)
@@ -376,7 +374,7 @@ def main() -> None:
             "normality_smoothing_blend": args.normality_smoothing_blend,
             "agreement_residual_weight": agreement_residual_weight,
             "neuron_consensus_weight": neuron_consensus_weight,
-            "neuron_consensus_context": "persistent residual reliability-gated by the standardized multi-scale context student",
+            "neuron_consensus_context": "duration interpolation from fixed 0.3 to gated unit residual",
             "triple_agreement_weight": triple_agreement_weight,
             "normal_suppression_weight": normal_suppression_weight,
             "video_prior": "training-only one-sided classifier with all three CLS-neuron views and pairwise consensus",

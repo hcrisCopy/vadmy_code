@@ -23,7 +23,7 @@ def seed_everything(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
-def loss_terms(logits, baseline, labels, lengths, anchor_weight):
+def loss_terms(logits, baseline, labels, lengths):
     probability = torch.sigmoid(logits)
     mask = valid_mask(lengths, logits.shape[1], logits.dtype)
     bag = topk_bag(probability, lengths)
@@ -35,7 +35,7 @@ def loss_terms(logits, baseline, labels, lengths, anchor_weight):
     anchor = (((probability - baseline) ** 2) * mask).sum() / mask.sum().clamp_min(1)
     pair = mask[:, 1:] * mask[:, :-1]
     smooth = (((probability[:, 1:] - probability[:, :-1]) ** 2) * pair).sum() / pair.sum().clamp_min(1)
-    return bag_loss + 0.5 * normal_loss + 0.5 * ranking + anchor_weight * anchor + 0.02 * smooth
+    return bag_loss + 0.5 * normal_loss + 0.5 * ranking + 2.0 * anchor + 0.02 * smooth
 
 
 def validate(model, loader, device):
@@ -61,7 +61,6 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
-    parser.add_argument("--anchor-weight", type=float, default=2.0)
     parser.add_argument("--maximum-length", type=int, default=256)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=234)
@@ -82,18 +81,16 @@ def main() -> None:
     start, best = 0, -float("inf")
     if args.resume and last.exists():
         checkpoint = torch.load(last, map_location="cpu", weights_only=False)
-        if float(checkpoint["config"].get("anchor_weight", 2.0)) != args.anchor_weight:
-            raise ValueError("checkpoint anchor weight mismatch")
         model.load_state_dict(checkpoint["model_state_dict"]); optimizer.load_state_dict(checkpoint["optimizer_state_dict"]); scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
         start, best = int(checkpoint["epoch"]) + 1, float(checkpoint["best_metric"])
     for epoch in range(start, args.max_epoch):
         model.train(); running = 0.0
         for batch in tqdm(train, desc=f"correction {args.baseline}/{args.dataset} {epoch + 1}/{args.max_epoch}"):
             base, expert, lengths, labels = batch["baseline"].to(device), batch["expert"].to(device), batch["lengths"].to(device), batch["labels"].to(device)
-            loss = loss_terms(model(base, expert), base, labels, lengths, args.anchor_weight)
+            loss = loss_terms(model(base, expert), base, labels, lengths)
             optimizer.zero_grad(set_to_none=True); loss.backward(); optimizer.step(); running += float(loss.detach())
         scheduler.step(); metrics = validate(model, val, device); selection = 0.5 * (metrics["corrected_video_auc"] + metrics["corrected_video_ap"])
-        payload = {"epoch": epoch, "best_metric": max(best, selection), "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "scheduler_state_dict": scheduler.state_dict(), "config": {"width": args.width, "anchor_weight": args.anchor_weight}, "baseline": args.baseline, "dataset": args.dataset, "metrics": metrics}
+        payload = {"epoch": epoch, "best_metric": max(best, selection), "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "scheduler_state_dict": scheduler.state_dict(), "config": {"width": args.width}, "baseline": args.baseline, "dataset": args.dataset, "metrics": metrics}
         torch.save(payload, last)
         if selection > best: best = selection; torch.save(payload, best_path)
         with (output / "history.jsonl").open("a", encoding="utf-8") as handle: handle.write(json.dumps({"epoch": epoch + 1, "loss": running / max(1, len(train)), **metrics}) + "\n")

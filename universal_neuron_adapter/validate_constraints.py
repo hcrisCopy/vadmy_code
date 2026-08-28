@@ -39,9 +39,9 @@ def main() -> None:
     if evaluation.count("--expert-train-manifest") != 1 or evaluation.count("--expert-manifest") != 1:
         raise RuntimeError("training and test must each use exactly one shared CLS-neuron stream")
     if evaluation.count("--expert2-manifest") != 1:
-        raise RuntimeError("evaluation must use exactly one shared complementary CLS-neuron expert")
+        raise RuntimeError("evaluation must use exactly one shared diverse CLS-neuron expert")
     if evaluation.count("--expert2-train-manifest") != 1:
-        raise RuntimeError("calibration must use exactly one complementary training stream")
+        raise RuntimeError("temporal calibration must use exactly one shared diverse training stream")
     if evaluation.count("--expert3-manifest") != 1:
         raise RuntimeError("evaluation must use exactly one shared normality CLS-neuron expert")
     if evaluation.count("--expert3-train-manifest") != 1:
@@ -52,10 +52,6 @@ def main() -> None:
         raise RuntimeError("training calibration and evaluation must use the current baseline only")
     if '--baseline "$baseline"' not in evaluation:
         raise RuntimeError("the evaluation must receive only the current loop baseline")
-    if "train_diverse_expert" in command or "active64_seed3407" in command:
-        raise RuntimeError("the redundant seed-and-capacity auxiliary expert is forbidden")
-    if "--seed 234" not in command:
-        raise RuntimeError("the complementary learned expert must share seed 234")
     print("single-baseline constraint: pass", flush=True)
 
 

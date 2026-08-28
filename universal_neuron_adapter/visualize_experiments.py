@@ -67,12 +67,18 @@ def main() -> None:
                 if np.isfinite(gain): candidates.append((gain, str(video.key), target, base, method))
             if not candidates:
                 continue
-            gain, key, target, base, method = max(candidates, key=lambda item: item[0])
+            median_gain = float(np.median([item[0] for item in candidates]))
+            gain, key, target, base, method = min(
+                candidates, key=lambda item: abs(item[0] - median_gain)
+            )
             axis = axes[row_index, column]; time = np.arange(len(target)) / args.frames_per_snippet
             axis.fill_between(time, 0, target, color="#D1495B", alpha=0.18, label="ground truth")
             axis.plot(time, base, color="#6C757D", linewidth=1.0, label="baseline")
             axis.plot(time, method, color="#176B87", linewidth=1.2, label="adapter")
-            axis.set_title(f"{dataset.upper()} / {baseline}\n{key}, gain {100 * gain:.2f}")
+            axis.set_title(
+                f"{dataset.upper()} / {baseline}, median-gain representative\n"
+                f"{key}, gain {100 * gain:.2f}"
+            )
             axis.set_xlabel("snippet index"); axis.set_ylim(-0.03, 1.03); plotted += 1
     if plotted:
         axes[0, 0].legend(loc="upper right", fontsize=7)

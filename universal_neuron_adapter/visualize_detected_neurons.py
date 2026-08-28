@@ -209,7 +209,13 @@ def plot_causal_control(axis: plt.Axes, controls: pd.DataFrame) -> None:
     axis.set(yticks=positions, yticklabels=order, xlabel="Performance drop (metric points)")
     axis.invert_yaxis()
     axis.set_title("d  Causal neuron-removal control", loc="left", fontweight="bold")
-    axis.legend(frameon=False, fontsize=8, loc="lower right")
+    axis.legend(
+        frameon=False,
+        fontsize=8,
+        loc="upper right",
+        bbox_to_anchor=(1.0, -0.16),
+        borderaxespad=0,
+    )
 
 
 def main() -> None:

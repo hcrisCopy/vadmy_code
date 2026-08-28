@@ -72,7 +72,7 @@ def main() -> None:
     parser.add_argument("--ucf-gt", required=True)
     parser.add_argument("--xd-gt", required=True)
     parser.add_argument("--out-dir", required=True)
-    parser.add_argument("--bootstrap-repeats", type=int, default=2000)
+    parser.add_argument("--bootstrap-repeats", type=int, default=200)
     parser.add_argument("--seed", type=int, default=3407)
     parser.add_argument("--frames-per-snippet", type=int, default=16)
     parser.add_argument("--selection", action="append", default=[])

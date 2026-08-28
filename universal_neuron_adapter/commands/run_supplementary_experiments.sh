@@ -55,7 +55,7 @@ done
 
 python -m universal_neuron_adapter.analyze_results \
   --results-root "$ROOT/ablations/full" --ucf-gt ../vadmy_data/annotations/ucf/gt.npy \
-  --xd-gt ../vadmy_data/annotations/xd/gt.npy --out-dir "$ROOT/statistics" --bootstrap-repeats 2000 --seed 3407
+  --xd-gt ../vadmy_data/annotations/xd/gt.npy --out-dir "$ROOT/statistics" --bootstrap-repeats 200 --seed 3407
 python -m universal_neuron_adapter.visualize_experiments \
   --experiment-root "$ROOT" --ucf-gt ../vadmy_data/annotations/ucf/gt.npy \
   --xd-gt ../vadmy_data/annotations/xd/gt.npy --out-dir "$ROOT/figures"

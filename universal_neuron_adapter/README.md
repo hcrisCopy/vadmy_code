@@ -43,6 +43,6 @@ bash universal_neuron_adapter/commands/run_seed_study.sh
 bash universal_neuron_adapter/commands/run_neuron_controls.sh
 ```
 
-The supplementary runner performs the split audit, a cumulative component ablation across all six settings, a 2,000-repeat paired video bootstrap, and focused heatmap/timeline figures. The detection runner executes the official DSANet detection-mAP function and preserves DSANet's conditional abnormal-class distribution when replacing total anomaly mass. The seed study retrains all stochastic adapter components for seeds 234, 3407, and 2026. The neuron controls compare removal of selected neurons with five size-matched random removals.
+The supplementary runner performs the split audit, a cumulative component ablation across all six settings, a 200-repeat exact paired video bootstrap over the official frame metric, and focused heatmap/timeline figures. The detection runner executes the official DSANet detection-mAP function and preserves DSANet's conditional abnormal-class distribution when replacing total anomaly mass. The seed study retrains all stochastic adapter components for seeds 234, 3407, and 2026. The neuron controls compare removal of selected neurons with five size-matched random removals.
 
 All results, logs, checkpoints, cached curves, figures, and reports are written below `../vadmy_data/universal_neuron_adapter`.

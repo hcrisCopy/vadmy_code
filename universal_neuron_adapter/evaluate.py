@@ -187,7 +187,7 @@ def main() -> None:
     triple_agreement_weight = 0.6 + 1.7 * duration_factor
     neuron_consensus_weight = 1.0
     normal_suppression_weight = 2.0 - duration_factor
-    context_diverse_weight = 12.0 * duration_factor
+    context_diverse_weight = 8.0 * duration_factor
     context_normality_weight = duration_factor
     final_dilation_width = 1 + 2 * round(8.0 * duration_factor)
     final_dilation_weight = 0.75 * duration_factor

@@ -34,8 +34,17 @@ def infer(adapter, baseline: str, dataset: str, clip: np.ndarray, device: torch.
     output = adapter.forward_baseline(chunks.to(device), lengths.to(device))
     binary_parts, semantic_parts = [], []
     for index, valid in enumerate(lengths.tolist()):
-        binary_parts.append(torch.sigmoid(output.binary_logits[index, :valid]).cpu())
-        semantic_parts.append(functional.softmax(output.semantic_logits[index, :valid], dim=-1).cpu())
+        binary_logits = output.binary_logits[index, :valid]
+        semantic_logits = output.semantic_logits[index, :valid]
+        binary_parts.append(torch.sigmoid(binary_logits).cpu())
+        if baseline == "dsanet":
+            temperature = float(adapter.options.temp)
+            abnormal_mass = torch.sigmoid(binary_logits / temperature).unsqueeze(1)
+            aligned = functional.softmax(semantic_logits / temperature, dim=-1)[:, 1:]
+            conditional = aligned / aligned.sum(dim=1, keepdim=True).clamp_min(1e-12)
+            semantic_parts.append(torch.cat([1.0 - abnormal_mass, abnormal_mass * conditional], dim=1).cpu())
+        else:
+            semantic_parts.append(functional.softmax(semantic_logits, dim=-1).cpu())
     return torch.cat(binary_parts).numpy().astype(np.float32), torch.cat(semantic_parts).numpy().astype(np.float32)
 
 

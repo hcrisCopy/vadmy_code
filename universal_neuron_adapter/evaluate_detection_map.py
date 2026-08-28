@@ -48,8 +48,8 @@ def main() -> None:
     for row in frame.itertuples(index=False):
         semantic = np.load(str(row.semantic_score_path)).astype(np.float32)
         curves = np.load(str(row.curve_path))
-        original.append(semantic)
-        corrected.append(redistribute_semantic_mass(semantic, curves["corrected"]))
+        original.append(np.repeat(semantic, 16, axis=0))
+        corrected.append(np.repeat(redistribute_semantic_mass(semantic, curves["corrected"]), 16, axis=0))
     evaluator_path = Path(args.dsanet_root) / "src" / "utils" / f"{args.dataset}_detectionMAP.py"
     official = load_official_evaluator(evaluator_path)
     segments = np.load(args.segment_gt, allow_pickle=True)

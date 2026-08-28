@@ -4,7 +4,7 @@ This package implements one score-space adapter shared by LaGoVAD, DeSC, and DSA
 
 ## Method
 
-The adapter combines a conservative learned score correction with three sparse CLS-neuron views. Agreement gates permit local event expansion only where baseline and neuron evidence support an anomaly. A one-sided video prior suppresses likely normal videos. The temporal width is inferred from training-video evidence and controls persistence smoothing and dilation through one shared continuous rule. The formula and coefficients are identical for all six baseline/dataset settings.
+The adapter contains three independently ablatable modules. Coordinate-subspace discovery combines a compact primary expert with a same-budget, same-seed expert constrained to its exact coordinate-orthogonal complement. Information fusion estimates a non-negative precision-weighted direction on a fixed-sum simplex from training-only neuron evidence, suppressing redundant streams without reversing their anomaly orientation. Baseline-preserving temporal correction then permits local event expansion only where the fused neuron evidence supports an anomaly. The formula and coefficients are identical for all six baseline/dataset settings.
 
 ## Data-integrity policy
 

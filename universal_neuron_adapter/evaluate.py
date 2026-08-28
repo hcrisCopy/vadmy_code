@@ -17,6 +17,7 @@ from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
 from universal_neuron_adapter.data import resample_curve
+from universal_neuron_adapter.information_fusion import fit_information_fusion_weights
 from universal_neuron_adapter.model import ScoreCorrectionHead, calibrated_probability
 
 
@@ -139,6 +140,7 @@ def main() -> None:
     parser.add_argument("--expert3-train-manifest", required=True)
     parser.add_argument("--student-manifest", required=True)
     parser.add_argument("--student-train-manifest", required=True)
+    parser.add_argument("--neuron-train-key-manifest", required=True)
     parser.add_argument("--correction-model", required=True)
     parser.add_argument("--gt-path", required=True)
     parser.add_argument("--baseline", choices=["lagovad", "desc", "dsanet"], required=True)
@@ -182,6 +184,17 @@ def main() -> None:
     context_normality_weight = duration_factor
     final_dilation_width = 1 + 2 * round(8.0 * duration_factor)
     final_dilation_weight = 0.75 * duration_factor
+    information_weights = fit_information_fusion_weights(
+        args.neuron_train_key_manifest,
+        args.expert_train_manifest,
+        args.expert2_train_manifest,
+        args.expert3_train_manifest,
+        args.student_train_manifest,
+        context_diverse_weight,
+        context_normality_weight,
+        args.normality_smoothing_blend,
+        2.0 + normality_gate_weight,
+    )
 
     output = Path(args.out_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -284,7 +297,11 @@ def main() -> None:
                 corrected = expit(logit(corrected) + agreement_residual_weight * high_high)
                 triple_high = np.minimum(high_high, np.maximum(standardized3, 0.0))
                 corrected = expit(logit(corrected) + triple_agreement_weight * triple_high)
-            neuron_gate = expit(standardized + standardized2 + normality_gate_weight * standardized3)
+            neuron_gate = expit(
+                information_weights[0] * standardized
+                + information_weights[1] * standardized2
+                + information_weights[2] * standardized3
+            )
             if not args.disable_event_gate:
                 expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
                 corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
@@ -335,8 +352,9 @@ def main() -> None:
             "neuron_weight": neuron_weight,
             "event_width": args.event_width,
             "event_weight": args.event_weight,
-            "event_gate": "sigmoid(sum of video-standardized CLS-neuron evidence)",
-            "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
+            "event_gate": "training-only non-negative precision fusion of standardized neuron evidence",
+            "event_gate_experts": "primary, coordinate-orthogonal, and directional-normality experts",
+            "information_fusion_weights": information_weights.tolist(),
             "normality_gate_weight": normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,
             "agreement_residual_weight": agreement_residual_weight,

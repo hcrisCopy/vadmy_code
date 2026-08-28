@@ -173,3 +173,25 @@ Hypothesis: the training-estimated persistence width should control how aggressi
 The first formal attempt was infrastructure-invalid after training and exporting the UCF student: validation compared its 1288 shared-subset keys against the first expert's 1610-key full export rather than the 1288-key diverse/normality training subset. No metric was produced, and the controller fully reverted the trial. The retry changes only that manifest invariant and reuses the completed cache.
 
 The corrected formal run produced LaGoVAD UCF 86.447 (+5.327), LaGoVAD XD 78.626 (+4.376), DeSC UCF 90.383 (+1.013), DeSC XD 88.209 (+1.029), DSANet UCF 90.492 (+1.052), and DSANet XD 88.136 (+1.186). The duration factor was 1.0 for the training width 15 on UCF and 0.0 for width 11 on XD, with no dataset-name or baseline-name branch. Minimum gain was +1.012768 pp, so the trial was retained and the target was reached.
+
+## Formal data-integrity audit
+
+The UCF-Crime audit found 1610 official training videos and 290 official test videos. The training-only deterministic split contains 1288 expert-training and 322 validation videos. Official train/test video overlap, train/test hidden-state overlap, and validation/test overlap were all exactly zero; every hidden-state file was present.
+
+The XD-Violence audit found 3950 official training videos and 800 official test videos. The training-only split contains 3160 expert-training and 790 validation entries before unavailable-source filtering. All three overlap counts were again zero. Four official training videos lacked pre-extracted hidden states and were explicitly logged and skipped: `NewAdd.NBA-2017.12.25_CLE@GSW__#01-08-34_01-40-09_label_A`, `Saving.Private.Ryan.1998__#02-29-31_02-30-55_label_B2-G-0`, `v=8cTqh9tMz_I__#1_label_A`, and `v=9eME1y6V-T4__#01-12-00_01-18-00_label_A`. No test video was skipped or copied into training. Test annotations were used only for reporting, ablations, and explicitly labeled post-hoc checks.
+
+## Cumulative component ablation
+
+The executable frozen-baseline streams and final method gave paired gains of +6.561/+6.624 pp for LaGoVAD UCF/XD, +1.008/+1.034 pp for DeSC, and +1.047/+1.185 pp for DSANet. Cumulative correction, agreement, event gating, video suppression, and full temporal processing were evaluated for all six settings. The main honest exception is the intermediate event-gate stage on DSANet/XD, which was -0.048 pp relative to its executable baseline; normal-video suppression and temporal processing recovered it to +1.185 pp. Therefore the final result depends on the complete constrained system, not on every component being individually monotonic.
+
+## Paired video bootstrap
+
+An exact paired bootstrap resampled whole videos and recomputed the official frame metric for 200 repeats. The 95% intervals for gain were: LaGoVAD UCF [1.080, 10.875], DeSC UCF [0.141, 2.172], DSANet UCF [-0.025, 2.369], LaGoVAD XD [3.902, 10.505], DeSC XD [0.463, 1.578], and DSANet XD [0.584, 1.827] pp. Estimated probabilities of positive gain were 0.995, 0.975, 0.965, 1.000, 1.000, and 1.000 respectively. DSANet/UCF narrowly crosses zero at the 95% level and must not be described as conventionally significant.
+
+## Official DSANet detection mAP
+
+The unchanged official DSANet detection evaluator was run at IoU 0.1 through 0.5. On UCF-Crime, baseline mAP values [21.390, 14.955, 11.739, 8.984, 8.002] averaged 13.014, while corrected values [19.415, 14.280, 6.649, 4.875, 2.740] averaged 9.592. The method therefore hurts UCF detection mAP by 3.422 pp despite improving frame AUC. On XD-Violence, the baseline mean was 28.872 and the corrected mean was 31.217, an improvement of 2.346 pp. The method is not claimed to universally improve temporal detection mAP.
+
+## Selected-neuron causal removal control
+
+At test time only, selected raw CLS dimensions were replaced by their per-snippet layer mean; models and calibration data were left unchanged. Five controls removed the same number of random dimensions. Selected-neuron removal reduced LaGoVAD/DeSC/DSANet by 51.466/0.800/0.488 AUC pp on UCF and 13.136/0.493/1.050 AP pp on XD. Mean random-removal changes were only 0.050/0.004/0.002 pp on UCF and -0.011/-0.002/0.003 pp on XD. This supports a causal role for the selected coordinates under the intervention, while the extreme LaGoVAD sensitivity also warns that its adapter is strongly dependent on the learned neuron evidence.

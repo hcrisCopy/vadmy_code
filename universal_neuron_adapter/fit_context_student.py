@@ -63,7 +63,8 @@ def main() -> None:
         third = resample_curve(np.load(str(row.expert3_score_path)), length)
         first = (first - first.mean()) / max(float(first.std()), 1e-6)
         third = (third - third.mean()) / max(float(third.std()), 1e-6)
-        teacher = first + 3.0 * third
+        teacher = np.minimum(np.maximum(first, 0.0), np.maximum(third, 0.0))
+        teacher += 0.01 * (first + third)
         count = max(1, int(np.ceil(args.positive_fraction * length)))
         indices = np.argpartition(teacher, length - count)[-count:]
         samples.append(features[indices])
@@ -96,4 +97,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -366,8 +366,7 @@ def main() -> None:
                         (1.0 - 0.5 * duration_factor) * persistent
                         + 0.5 * duration_factor * long_persistent
                     )
-                persistence_weight = args.persistence_weight * (1.0 - video_anomaly_gate)
-                corrected = (1.0 - persistence_weight) * corrected + persistence_weight * persistent
+                corrected = (1.0 - args.persistence_weight) * corrected + args.persistence_weight * persistent
                 if final_dilation_width > 1 and final_dilation_weight > 0.0:
                     dilated = maximum_filter1d(corrected, final_dilation_width, mode="nearest")
                     corrected = corrected + final_dilation_weight * (dilated - corrected)
@@ -431,7 +430,7 @@ def main() -> None:
             "context_normality_weight": context_normality_weight,
             "final_dilation_width": final_dilation_width,
             "final_dilation_weight": final_dilation_weight,
-            "persistence_weight": "training-only video confidence adaptive",
+            "persistence_weight": args.persistence_weight,
             "persistence_scales": [persistence_width, 2 * persistence_width - 1],
             "gaussian_sigma": effective_gaussian_sigma,
             "advance_snippets": args.advance_snippets,

@@ -177,13 +177,27 @@ def plot_results(output: Path, controls: pd.DataFrame, layers: pd.DataFrame, cou
     control_plot = controls.groupby("control", as_index=False).agg(
         mean=("test_auc", "mean"), std=("test_auc", "std")
     ).fillna(0.0)
-    control_plot = control_plot.sort_values("mean")
-    axes[0, 0].barh(
-        control_plot.control,
-        100 * control_plot["mean"],
-        xerr=100 * control_plot["std"],
-        color=[colors["ours"] if value == "selected" else colors["control"] for value in control_plot.control],
+    control_order = ["global_random", "same_layer_random", "hard_nonselected", "selected"]
+    control_plot["order"] = control_plot.control.map(
+        {name: index for index, name in enumerate(control_order)}
     )
+    control_plot = control_plot.sort_values("order")
+    positions = np.arange(len(control_plot))
+    for position, row in zip(positions, control_plot.itertuples(index=False)):
+        axes[0, 0].errorbar(
+            100 * row.mean,
+            position,
+            xerr=100 * row.std,
+            marker="o",
+            markersize=7 if row.control == "selected" else 5,
+            capsize=3,
+            color=colors["ours"] if row.control == "selected" else colors["control"],
+        )
+    axes[0, 0].set_yticks(positions, control_plot.control)
+    lower_bound = 100 * max(0.0, control_plot["mean"].min() - control_plot["std"].max() - 0.01)
+    upper_bound = 100 * min(1.0, control_plot["mean"].max() + 0.015)
+    axes[0, 0].set_xlim(lower_bound, upper_bound)
+    axes[0, 0].grid(axis="x", alpha=0.25)
     axes[0, 0].set_title("(a) Fixed-budget neuron specificity")
     axes[0, 0].set_xlabel("Video AUC (%)")
 
@@ -209,16 +223,34 @@ def plot_results(output: Path, controls: pd.DataFrame, layers: pd.DataFrame, cou
     axes[1, 0].grid(axis="y", alpha=0.25)
 
     intervention_plot = interventions.groupby("control", as_index=False).agg(
-        up=("normal_to_abnormal_logit_shift", "mean"),
-        down=("abnormal_to_normal_logit_shift", "mean"),
+        up=("normal_to_abnormal_flip_rate", "mean"),
+        up_std=("normal_to_abnormal_flip_rate", "std"),
+        down=("abnormal_to_normal_flip_rate", "mean"),
+        down_std=("abnormal_to_normal_flip_rate", "std"),
     )
+    intervention_plot = intervention_plot.fillna(0.0)
     positions = np.arange(len(intervention_plot))
-    axes[1, 1].bar(positions - 0.18, intervention_plot.up, 0.36, label="normal -> abnormal", color="#D55E00")
-    axes[1, 1].bar(positions + 0.18, intervention_plot.down, 0.36, label="abnormal -> normal", color="#009E73")
-    axes[1, 1].axhline(0.0, color="#333333", linewidth=0.8)
+    axes[1, 1].bar(
+        positions - 0.18,
+        100 * intervention_plot.up,
+        0.36,
+        yerr=100 * intervention_plot.up_std,
+        capsize=3,
+        label="normal -> abnormal",
+        color="#D55E00",
+    )
+    axes[1, 1].bar(
+        positions + 0.18,
+        100 * intervention_plot.down,
+        0.36,
+        yerr=100 * intervention_plot.down_std,
+        capsize=3,
+        label="abnormal -> normal",
+        color="#009E73",
+    )
     axes[1, 1].set_xticks(positions, intervention_plot.control)
     axes[1, 1].set_title("(d) Directional activation intervention")
-    axes[1, 1].set_ylabel("Mean decision-logit shift")
+    axes[1, 1].set_ylabel("Directional prediction flips (%)")
     axes[1, 1].legend(frameon=False, fontsize=7)
 
     for axis in axes.flat:

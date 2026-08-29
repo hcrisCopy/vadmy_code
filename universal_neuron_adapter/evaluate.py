@@ -106,20 +106,6 @@ def longest_positive_run(values: np.ndarray) -> int:
     return int(lengths.max()) if len(lengths) else 1
 
 
-def entropy_reliability_weights(*curves: np.ndarray) -> np.ndarray:
-    """Return mean-one weights from normalized temporal information concentration."""
-    reliability = []
-    for curve in curves:
-        shifted = np.asarray(curve, dtype=np.float64) - float(np.max(curve))
-        probability = np.exp(np.clip(shifted, -30.0, 0.0))
-        probability /= max(float(probability.sum()), 1e-12)
-        entropy = -float(np.sum(probability * np.log(np.maximum(probability, 1e-12))))
-        normalized_entropy = entropy / max(float(np.log(len(probability))), 1e-12)
-        reliability.append(max(1.0 - normalized_entropy, 1e-3))
-    weights = np.asarray(reliability, dtype=np.float32)
-    return weights / max(float(weights.mean()), 1e-6)
-
-
 def estimate_persistence_width(
     expert_manifest: str,
     expert2_manifest: str,
@@ -333,14 +319,7 @@ def main() -> None:
                 corrected = expit(logit(corrected) + agreement_residual_weight * high_high)
                 triple_high = np.minimum(high_high, np.maximum(standardized3, 0.0))
                 corrected = expit(logit(corrected) + triple_agreement_weight * triple_high)
-            information_weights = entropy_reliability_weights(
-                standardized, standardized2, standardized3
-            )
-            neuron_gate = expit(
-                information_weights[0] * standardized
-                + information_weights[1] * standardized2
-                + normality_gate_weight * information_weights[2] * standardized3
-            )
+            neuron_gate = expit(standardized + standardized2 + normality_gate_weight * standardized3)
             if not args.disable_event_gate:
                 expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
                 corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
@@ -397,7 +376,6 @@ def main() -> None:
             "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(sum of video-standardized CLS-neuron evidence)",
-            "event_gate_reliability": "mean-one weights from normalized temporal entropy",
             "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
             "normality_gate_weight": normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,

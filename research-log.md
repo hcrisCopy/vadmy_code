@@ -259,3 +259,13 @@ Useful results:
 Limitations: these probes use video-level weak labels and a fixed linear readout, so they demonstrate information content and intervention sensitivity rather than a complete semantic explanation of each neuron. The benchmark test sets were not used to fit these probes, but were already observed during broader method development; these results remain development-test evidence rather than a blind confirmatory evaluation.
 
 Artifacts are stored under `../vadmy_data/universal_neuron_adapter/interpretability_ablations/3f04e82/`. The four-panel plots and discovery-size plots are available as PNG/PDF with their source CSV files.
+
+## 2026-08-29 lightweight innovation-evidence suite (`12db776`)
+
+A small read-only evidence suite was added under `innovation_evidence/`. It reuses frozen models and cached score streams, produces one PNG/PDF/CSV per claim, and performs no feature extraction or baseline retraining. All frame metrics passed strict alignment against 1,109,888 UCF frames and 2,331,296 XD frames.
+
+- Innovation 1: the selected primary neurons achieved 95.895 UCF and 98.769 XD video AUC, exceeding global random (95.262/97.299), layer-matched random (95.573/97.091), and hard non-selected controls (95.852/98.094). Directional heatmaps expose all 12-by-32 signed normality coordinates. Standardized context-student coefficient mass was distributed over current/short/long scales as 31.58/32.17/36.25% on UCF and 29.44/30.93/39.63% on XD, confirming that context reuses the directional neurons across time scales rather than selecting a third neuron set.
+- Innovation 2 negative result: replacing uniform gate reliability with the positive-correlation principal-eigenvector weights inside the complete adapter changed UCF LaGoVAD/DeSC/DSANet by -0.006/+0.004/+0.015 pp and XD by -0.184/-0.018/-0.039 pp. Treating the gate alone as a detector was also worse than uniform by 2.376 UCF AUC pp and 3.389 XD AP pp. The current spectral weighting is therefore not supported as a stable performance contribution; its per-video weight visualization may describe adaptation but cannot establish superiority.
+- Innovation 3: relative to positive agreement alone, adding the fixed conflict-suppression term improved all six diagnostics. Additional gains were +0.169/+0.012/+0.008 UCF AUC pp and +0.275/+0.054/+0.105 XD AP pp for LaGoVAD/DeSC/DSANet. This isolates a small but directionally consistent benefit from asymmetric conflict handling.
+
+These are development-test diagnostics, not hyperparameter-selection runs or replacements for the formal six-way evaluation. Artifacts are under `../vadmy_data/innovation_evidence/12db776/`; the negative spectral result is retained rather than filtered from the output.

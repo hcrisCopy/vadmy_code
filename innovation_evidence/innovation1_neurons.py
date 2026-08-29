@@ -56,7 +56,7 @@ def plot_directional_heatmap(model_path: Path, dataset: str, output: Path) -> No
     axis.set_ylabel("CLIP visual layer")
     axis.set_title(f"{DATASET_NAMES[dataset]}: directional normality neurons")
     colorbar = figure.colorbar(image, ax=axis)
-    colorbar.set_label("Signed importance (blue: below normal; red: above normal)")
+    colorbar.set_label("Signed importance")
     figure.savefig(output / f"{dataset}_directional_neurons.png", dpi=300)
     figure.savefig(output / f"{dataset}_directional_neurons.pdf")
     plt.close(figure)

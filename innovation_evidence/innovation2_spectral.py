@@ -72,7 +72,7 @@ def render(dataset: str, metrics: pd.DataFrame, weights: pd.DataFrame, output: P
     figure, axis = plt.subplots(figsize=(4.8, 3.0), constrained_layout=True)
     axis.boxplot(
         [weights[name] for name in ("primary", "context", "normality")],
-        labels=("Sparse", "Context", "Normality"),
+        tick_labels=("Sparse", "Context", "Normality"),
         showfliers=False,
     )
     axis.axhline(1.0, color="#777777", linestyle="--", linewidth=1)

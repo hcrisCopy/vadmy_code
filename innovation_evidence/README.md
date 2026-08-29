@@ -18,3 +18,5 @@ bash innovation_evidence/run_all.sh
 - `innovation3/*_asymmetric_residual`：在同一冻结 baseline 上，比较只奖励一致异常与额外抑制冲突，隔离不对称残差的作用。
 
 注意：这些是机制诊断图，不替代六组正式主实验，也不用于重新选择超参数。`standalone_gate_diagnostic.csv` 额外记录了把 gate 单独当检测器时的负结果；它不是正式方法的使用方式，但仍保留以避免选择性报告。
+
+当前结论：创新一和创新三的快速对照为正；谱权重在完整适配器中只对 UCF 的 DeSC/DSANet 有极小正贡献，在其余四组为负。因此创新二的图目前用于发现问题，不能写成“谱融合稳定优于均匀融合”。

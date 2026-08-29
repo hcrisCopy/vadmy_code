@@ -60,6 +60,33 @@ class SparseNeuronExpert(nn.Module):
         return {"definition": "CLIP ViT-B/16 CLS hidden-state coordinate", "active_per_layer": self.active_per_layer, "layer_weights": torch.softmax(self.layer_logits.detach(), 0).tolist(), "neurons": rows}
 
 
+class DynamicSparseNeuronExpert(SparseNeuronExpert):
+    """Top-K CLS coordinates modeled through activation and temporal change."""
+
+    def __init__(self, active_per_layer: int = 32, temporal_width: int = 64) -> None:
+        super().__init__(active_per_layer, temporal_width)
+        self.change_weights = nn.Parameter(torch.empty(12, 768))
+        nn.init.normal_(self.change_weights, std=0.02)
+        self.temporal = nn.Sequential(
+            nn.Conv1d(24, temporal_width, 3, padding=1),
+            nn.GELU(),
+            nn.Conv1d(temporal_width, temporal_width, 3, padding=2, dilation=2),
+            nn.GELU(),
+            nn.Conv1d(temporal_width, 1, 1),
+        )
+
+    def forward(self, hidden: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
+        normalized = F.layer_norm(hidden, (768,))
+        gates = self.gates()
+        layer_scale = torch.softmax(self.layer_logits, 0).view(1, 1, 12) * 12.0
+        level = (normalized * self.neuron_weights * gates).sum(-1) / math.sqrt(self.active_per_layer)
+        change = F.pad(normalized[:, 1:] - normalized[:, :-1], (0, 0, 0, 0, 1, 0))
+        change = (change * self.change_weights * gates).sum(-1) / math.sqrt(self.active_per_layer)
+        evidence = torch.cat([level * layer_scale, change * layer_scale], dim=-1)
+        logits = self.temporal(evidence.transpose(1, 2)).squeeze(1)
+        return logits * valid_mask(lengths, logits.shape[1], logits.dtype)
+
+
 def expert_mil_loss(logits: torch.Tensor, labels: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
     probability = torch.sigmoid(logits)
     mask = valid_mask(lengths, logits.shape[1], logits.dtype)

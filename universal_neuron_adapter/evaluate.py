@@ -204,7 +204,7 @@ def main() -> None:
     neuron_weight = 0.3 - 0.1 * duration_factor
     normality_gate_weight = 1.0 + 2.0 * duration_factor
     agreement_residual_weight = 0.5 - 0.3 * duration_factor
-    triple_agreement_weight = 0.6 + 1.7 * duration_factor
+    triple_agreement_weight = 3.0
     neuron_consensus_weight = 1.0
     neuron_conflict_weight = 1.2
     normal_suppression_weight = 1.0

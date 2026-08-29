@@ -1,8 +1,8 @@
 本文件是vadmy_code文件夹下项目文件编写规范
-采用3个Baseline：LaGoVAD,DeSC，DSANet
+采用4个Baseline：LaGoVAD，DeSC，DSANet，VadClip
 基本思想：
 （1）可解释性：探测神经元，我提取好了CLIP ViT-B/16 每个 snippet 的 CLS hidden states，探测的神经元定义是hiddden states的维度。
-（2）通用性：设计的方法应该适配3个baseline，以及两个数据集UCF-Crime和XD-Violence，不因baseline或者数据集而异。
+（2）通用性：设计的方法应该适配4个baseline，以及两个数据集UCF-Crime和XD-Violence，不因baseline或者数据集而异。
 
 写代码要有开源代码参考，不要自己凭空编造，参考代码需要克隆仓库（不要保留.git），放到vadmy_code\rely，禁止修改rely文件夹中的代码
 baseline代码：vadmy_code\baseline\下，禁止修改baseline文件夹中的代码

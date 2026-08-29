@@ -13,12 +13,12 @@ exec > >(tee -a "$OUT/run.log") 2>&1
 for dataset in ucf xd; do
   # The sparse expert depends only on the dataset and fixed neuron configuration,
   # so keep its resumable checkpoint outside commit-keyed evaluation directories.
-  diverse="$ROOT/diverse_expert_cache/$dataset/dynamic32_seed234"
+  diverse="$ROOT/diverse_expert_cache/$dataset/active64_seed3407"
   python -m universal_neuron_adapter.train_diverse_expert \
     --train-manifest "$SOURCE/$dataset/data/expert_train.csv" --val-manifest "$SOURCE/$dataset/data/expert_val.csv" \
-    --out-dir "$diverse" --active-per-layer 32 --temporal-width 64 --max-epoch 20 \
+    --out-dir "$diverse" --active-per-layer 64 --temporal-width 64 --max-epoch 20 \
     --batch-size 8 --lr 0.0003 --weight-decay 0.0001 --sparsity-weight 0.001 \
-    --maximum-length 256 --num-workers 4 --seed 234 --device cuda --dynamic --resume
+    --maximum-length 256 --num-workers 4 --seed 3407 --device cuda --resume
   python -m universal_neuron_adapter.export_diverse_expert \
     --manifest "$SOURCE/$dataset/data/test.csv" --expert-model "$diverse/expert_best.pth" \
     --out-dir "$diverse/test" --device cuda

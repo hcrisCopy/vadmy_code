@@ -333,8 +333,6 @@ def main() -> None:
             consensus_weights = spectral_consensus_weights(
                 standardized, standardized2, standardized3
             )
-            consensus_weights = np.square(consensus_weights)
-            consensus_weights /= max(float(consensus_weights.mean()), 1e-6)
             neuron_gate = expit(
                 consensus_weights[0] * standardized
                 + consensus_weights[1] * standardized2
@@ -396,7 +394,7 @@ def main() -> None:
             "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(sum of video-standardized CLS-neuron evidence)",
-            "event_gate_reliability": "mean-one squared principal-eigenvector detector agreement",
+            "event_gate_reliability": "principal eigenvector of positive detector agreement",
             "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
             "normality_gate_weight": normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,

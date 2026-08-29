@@ -199,6 +199,7 @@ def main() -> None:
         args.expert3_train_manifest,
         args.normality_smoothing_blend,
     )
+    event_width = 2 * persistence_width - 1
     duration_factor = float(np.clip((persistence_width - 11.0) / 4.0, 0.0, 1.0))
     correction_weight = 3.0 * duration_factor
     neuron_weight = 0.3 - 0.1 * duration_factor
@@ -348,7 +349,7 @@ def main() -> None:
                 + normality_gate_weight * consensus_weights[2] * standardized3
             )
             if not args.disable_event_gate:
-                expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
+                expanded = maximum_filter1d(corrected, event_width, mode="nearest")
                 corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
             normal_shift = (
                 decision + normality_decision
@@ -408,7 +409,7 @@ def main() -> None:
         "configuration": {
             "correction_weight": correction_weight,
             "neuron_weight": neuron_weight,
-            "event_width": args.event_width,
+            "event_width": event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(sum of video-standardized CLS-neuron evidence)",
             "event_gate_reliability": "principal eigenvector of positive detector agreement",

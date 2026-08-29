@@ -8,24 +8,22 @@ exec > >(tee -a "$ROOT/run.log") 2>&1
 for dataset in ucf xd; do
   expert_model="$SOURCE/$dataset/expert/expert_best.pth"
   for control in remove_selected random_matched; do
-    seeds=(3407)
+    seeds=(234)
     if [[ "$control" == "random_matched" ]]; then seeds=(234 3407 2026 17 73); fi
     for seed in "${seeds[@]}"; do
       expert="$ROOT/$control/seed_$seed/$dataset/expert"
       python -m universal_neuron_adapter.export_expert --manifest "$SOURCE/$dataset/data/test.csv" --expert-model "$expert_model" --out-dir "$expert/test" --device cuda --control "$control" --control-seed "$seed"
-      diverse="../vadmy_data/universal_neuron_adapter/diverse_expert_cache/$dataset/active64_seed3407"
+      context="../vadmy_data/universal_neuron_adapter/context_student_cache/$dataset/top32_multiscale_seed234"
       normality="../vadmy_data/universal_neuron_adapter/normality_expert_cache/$dataset/top32_signed_v1"
-      context="../vadmy_data/universal_neuron_adapter/context_student_cache/$dataset/top32_multiscale_seed3407"
       for baseline in lagovad desc dsanet; do
         source_base="$SOURCE/$dataset/$baseline"
         python -m universal_neuron_adapter.evaluate --baseline-train-manifest "$source_base/baseline_train/baseline_scores.csv" --baseline-manifest "$source_base/baseline_test/baseline_scores.csv" \
           --expert-train-manifest "$SOURCE/$dataset/expert/train/expert_scores.csv" --expert-manifest "$expert/test/expert_scores.csv" \
-          --expert2-manifest "$diverse/test/expert2_scores.csv" --expert2-train-manifest "$diverse/train/expert2_scores.csv" \
           --expert3-manifest "$normality/test/expert3_scores.csv" --expert3-train-manifest "$normality/train/expert3_scores.csv" \
           --student-manifest "$context/test/student_scores.csv" --student-train-manifest "$context/train/student_scores.csv" \
           --correction-model "$source_base/correction/model_best.pth" --gt-path "../vadmy_data/annotations/$dataset/gt.npy" \
           --baseline "$baseline" --dataset "$dataset" --out-dir "$ROOT/$control/seed_$seed/$dataset/$baseline" \
-          --frames-per-snippet 16 --event-width 41 --event-weight 1.0 --normality-smoothing-blend 0.25 --persistence-weight 1.0 --gaussian-sigma 0.5 --advance-snippets 1 --device cuda
+          --frames-per-snippet 16 --event-width 41 --event-weight 1.0 --normality-smoothing-blend 0.25 --persistence-weight 1.0 --gaussian-sigma 0.5 --advance-snippets 0.5 --device cuda
       done
     done
   done

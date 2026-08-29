@@ -26,12 +26,12 @@ def parse_args() -> argparse.Namespace:
         description="Visualize which CLS neurons are detected and whether they are functionally important."
     )
     parser.add_argument("--source-root", required=True, help="Frozen main-run root (the 9d1a066 run).")
-    parser.add_argument("--diverse-root", required=True, help="Root of the independent sparse-expert caches.")
+    parser.add_argument("--context-root", required=True, help="Root of the multi-scale context-detector caches.")
     parser.add_argument("--normality-root", required=True, help="Root of directional normality caches.")
     parser.add_argument("--controls-csv", required=True, help="Selected-vs-random neuron-removal summary.")
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--normality-tag", default="top32_signed_v1")
-    parser.add_argument("--diverse-tag", default="active64_seed3407")
+    parser.add_argument("--context-tag", default="top32_multiscale_seed234")
     parser.add_argument("--clean", action="store_true")
     return parser.parse_args()
 
@@ -70,12 +70,35 @@ def load_primary(source_root: Path, dataset: str) -> tuple[pd.DataFrame, np.ndar
     return neurons, np.asarray(payload["layer_weights"], dtype=np.float64)
 
 
-def load_diverse(diverse_root: Path, tag: str, dataset: str) -> pd.DataFrame:
-    selected_path = diverse_root / dataset / tag / "selected_neurons.json"
-    payload = json.loads(selected_path.read_text(encoding="utf-8"))
-    neurons = pd.DataFrame(payload["neurons"])
-    neurons["dataset"] = dataset
-    return neurons
+def load_context(
+    context_root: Path,
+    context_tag: str,
+    normality_root: Path,
+    normality_tag: str,
+    dataset: str,
+) -> tuple[pd.DataFrame, np.ndarray]:
+    spec = context_detector_spec(
+        context_root / dataset / context_tag / "context_student.npz",
+        normality_root / dataset / normality_tag / "normality_expert.npz",
+    )
+    rows = []
+    importance = np.asarray(spec["importance"], dtype=np.float64)
+    indices = np.asarray(spec["indices"], dtype=np.int64)
+    directions = np.asarray(spec["directions"], dtype=np.float32)
+    for layer in range(12):
+        for position in range(indices.shape[1]):
+            rows.append(
+                {
+                    "dataset": dataset,
+                    "layer": layer + 1,
+                    "dimension": int(indices[layer, position]),
+                    "direction": "high" if directions[layer, position] > 0 else "low",
+                    "absolute_weight": float(importance[layer, position]),
+                }
+            )
+    mass = importance.sum(axis=1)
+    mass /= max(float(mass.sum()), 1e-12)
+    return pd.DataFrame(rows), mass
 
 
 def load_normality(normality_root: Path, tag: str, dataset: str) -> tuple[pd.DataFrame, np.ndarray]:
@@ -141,10 +164,23 @@ def plot_atlas(axis: plt.Axes, primary: pd.DataFrame) -> None:
 
 
 def plot_layer_weights(
-    axis: plt.Axes, primary_weights: dict[str, np.ndarray], normality_mass: dict[str, np.ndarray]
+    axis: plt.Axes,
+    primary_weights: dict[str, np.ndarray],
+    context_mass: dict[str, np.ndarray],
+    normality_mass: dict[str, np.ndarray],
 ) -> None:
     layers = np.arange(1, 13)
     for dataset, marker in (("ucf", "o"), ("xd", "^")):
+        axis.plot(
+            layers,
+            100 * context_mass[dataset],
+            color=COLORS[dataset],
+            marker=marker,
+            linewidth=1.4,
+            linestyle=":",
+            markersize=4,
+            label=f"{DATASET_LABELS[dataset]}: context detector",
+        )
         axis.plot(
             layers,
             100 * primary_weights[dataset],
@@ -397,6 +433,24 @@ def directional_detector_spec(model_path: Path) -> dict[str, np.ndarray | int]:
     }
 
 
+def context_detector_spec(
+    student_path: Path, normality_path: Path
+) -> dict[str, np.ndarray | int]:
+    directional = directional_detector_spec(normality_path)
+    with np.load(student_path, allow_pickle=False) as student:
+        coefficient = np.asarray(student["coef"], dtype=np.float64).reshape(-1)
+        scale = np.asarray(student["scale"], dtype=np.float64).reshape(-1)
+    active = int(directional["active"])
+    effective = (coefficient / np.maximum(scale, 1e-12)).reshape(3, 12, active).sum(axis=0)
+    base_direction = np.asarray(directional["directions"], dtype=np.float32)
+    learned_direction = np.where(effective >= 0.0, 1.0, -1.0).astype(np.float32)
+    return {
+        **directional,
+        "directions": base_direction * learned_direction,
+        "importance": np.abs(effective),
+    }
+
+
 def bounded_hidden(path: str, maximum_length: int = 256) -> np.ndarray:
     hidden = load_hidden_array(path)
     if len(hidden) > maximum_length:
@@ -414,11 +468,11 @@ def response_effect_table(
     dataset: str,
     manifest_path: Path,
     primary_spec: dict[str, np.ndarray | int],
-    diverse_spec: dict[str, np.ndarray | int],
+    context_spec: dict[str, np.ndarray | int],
     directional_spec: dict[str, np.ndarray | int],
 ) -> pd.DataFrame:
-    names = ("Primary sparse", "Diverse sparse", "Directional normality")
-    specs = (primary_spec, diverse_spec, directional_spec)
+    names = ("Primary sparse", "Multi-scale context", "Directional normality")
+    specs = (primary_spec, context_spec, directional_spec)
     sums = {name: np.zeros((2, 12, int(spec["active"])), dtype=np.float64) for name, spec in zip(names, specs)}
     squares = {name: np.zeros_like(sums[name]) for name in names}
     counts = np.zeros(2, dtype=np.int64)
@@ -431,12 +485,13 @@ def response_effect_table(
         for name, spec in zip(names, specs):
             indices = np.asarray(spec["indices"], dtype=np.int64)
             directions = np.asarray(spec["directions"], dtype=np.float32)
-            if name == "Directional normality":
+            if "normal_mean" in spec:
                 z_score = (
                     hidden - np.asarray(spec["normal_mean"], dtype=np.float32)
                 ) / np.asarray(spec["normal_scale"], dtype=np.float32)
                 selected = np.take_along_axis(z_score, indices[None], axis=2)
-                response = np.maximum(selected * directions[None], 0.0)
+                oriented = selected * directions[None]
+                response = np.maximum(oriented, 0.0) if name == "Directional normality" else oriented
             else:
                 selected = np.take_along_axis(hidden, indices[None], axis=2)
                 response = selected * directions[None]
@@ -477,20 +532,23 @@ def response_effect_table(
 def render_response_effect_heatmaps(
     output: Path,
     source_root: Path,
-    diverse_root: Path,
-    diverse_tag: str,
+    context_root: Path,
+    context_tag: str,
     normality_root: Path,
     normality_tag: str,
 ) -> None:
-    names = ("Primary sparse", "Diverse sparse", "Directional normality")
-    active_counts = (32, 64, 32)
+    names = ("Primary sparse", "Multi-scale context", "Directional normality")
+    active_counts = (32, 32, 32)
     all_tables = []
     for dataset in DATASETS:
         table = response_effect_table(
             dataset,
             source_root / dataset / "data" / "expert_train.csv",
             learned_detector_spec(source_root / dataset / "expert" / "expert_best.pth"),
-            learned_detector_spec(diverse_root / dataset / diverse_tag / "expert_best.pth"),
+            context_detector_spec(
+                context_root / dataset / context_tag / "context_student.npz",
+                normality_root / dataset / normality_tag / "normality_expert.npz",
+            ),
             directional_detector_spec(
                 normality_root / dataset / normality_tag / "normality_expert.npz"
             ),
@@ -519,10 +577,7 @@ def render_response_effect_heatmaps(
             axis.set_ylim(12, 0)
             axis.set_yticks(np.arange(12) + 0.5, labels=np.arange(1, 13))
             axis.set_ylabel("CLIP visual layer")
-            if count == 32:
-                ticks = np.asarray([1, 8, 16, 24, 32])
-            else:
-                ticks = np.asarray([1, 16, 32, 48, 64])
+            ticks = np.asarray([1, 8, 16, 24, 32])
             axis.set_xticks(ticks - 0.5, labels=ticks)
             axis.set_xlabel("Selected-neuron rank within each layer")
             axis.set_title(
@@ -544,8 +599,8 @@ def render_response_effect_heatmaps(
         "Selected CLS neurons show layer-dependent abnormal-versus-normal response effects on official training videos. "
         "Each row contains only neurons retained by that detector and is ordered by the raw standardized response effect. "
         "Red denotes stronger abnormal-video response and blue denotes stronger normal-video response; values are normalized "
-        "by the largest absolute effect in the same layer for visualization. Primary sparse, diverse sparse, and directional "
-        "normality detectors contain 32, 64, and 32 selected neurons per layer, respectively."
+        "by the largest absolute effect in the same layer for visualization. Primary sparse, multi-scale context, and "
+        "directional normality detectors each expose 32 selected neurons per layer."
     )
     (output / "neuron_response_heatmap_caption.txt").write_text(caption, encoding="utf-8")
 
@@ -553,13 +608,13 @@ def render_response_effect_heatmaps(
 def main() -> None:
     args = parse_args()
     source_root = Path(args.source_root)
-    diverse_root = Path(args.diverse_root)
+    context_root = Path(args.context_root)
     normality_root = Path(args.normality_root)
     controls_path = Path(args.controls_csv)
     output = Path(args.out_dir)
     for path, name in (
         (source_root, "--source-root"),
-        (diverse_root, "--diverse-root"),
+        (context_root, "--context-root"),
         (normality_root, "--normality-root"),
         (controls_path, "--controls-csv"),
     ):
@@ -567,19 +622,26 @@ def main() -> None:
     if not prepare_output(output, args.clean):
         return
 
-    primary_parts, diverse_parts, normality_parts, response_parts = [], [], [], []
+    primary_parts, context_parts, normality_parts, response_parts = [], [], [], []
     primary_weights: dict[str, np.ndarray] = {}
+    context_mass: dict[str, np.ndarray] = {}
     normality_mass: dict[str, np.ndarray] = {}
     for dataset in tqdm(DATASETS, desc="load neuron evidence"):
         primary, primary_weights[dataset] = load_primary(source_root, dataset)
-        diverse = load_diverse(diverse_root, args.diverse_tag, dataset)
+        context, context_mass[dataset] = load_context(
+            context_root,
+            args.context_tag,
+            normality_root,
+            args.normality_tag,
+            dataset,
+        )
         normality, normality_mass[dataset] = load_normality(normality_root, args.normality_tag, dataset)
         primary_parts.append(primary)
-        diverse_parts.append(diverse)
+        context_parts.append(context)
         normality_parts.append(normality)
         response_parts.append(video_response_table(source_root, dataset))
     primary_table = pd.concat(primary_parts, ignore_index=True)
-    diverse_table = pd.concat(diverse_parts, ignore_index=True)
+    context_table = pd.concat(context_parts, ignore_index=True)
     normality_table = pd.concat(normality_parts, ignore_index=True)
     responses = pd.concat(response_parts, ignore_index=True)
     controls = pd.read_csv(controls_path)
@@ -588,7 +650,7 @@ def main() -> None:
     plt.rcParams.update({"font.size": 8.5, "axes.titlesize": 9.5, "axes.labelsize": 8.5})
     figure, axes = plt.subplots(2, 2, figsize=(11.2, 7.2), constrained_layout=True)
     plot_atlas(axes[0, 0], primary_table)
-    plot_layer_weights(axes[0, 1], primary_weights, normality_mass)
+    plot_layer_weights(axes[0, 1], primary_weights, context_mass, normality_mass)
     plot_training_response(axes[1, 0], responses)
     plot_causal_control(axes[1, 1], controls)
     sns.despine(fig=figure)
@@ -604,14 +666,14 @@ def main() -> None:
     render_response_effect_heatmaps(
         output,
         source_root,
-        diverse_root,
-        args.diverse_tag,
+        context_root,
+        args.context_tag,
         normality_root,
         args.normality_tag,
     )
 
     primary_table.to_csv(output / "detected_neuron_atlas.csv", index=False)
-    diverse_table.to_csv(output / "diverse_neuron_atlas.csv", index=False)
+    context_table.to_csv(output / "context_neuron_atlas.csv", index=False)
     normality_table.to_csv(output / "directional_neuron_atlas.csv", index=False)
     responses.to_csv(output / "training_neuron_responses.csv", index=False)
     metadata = {
@@ -621,13 +683,13 @@ def main() -> None:
         "seed_policy": {
             "data_split": 234,
             "primary_expert_and_correction_heads": 234,
-            "diverse_expert_and_context_student": 3407,
+            "context_student": 234,
             "directional_normality_expert": "deterministic",
         },
         "panel_c_data": "official training videos only; top 10% mean of per-snippet primary neuron score",
         "panel_d_data": "post-hoc test-set causal intervention; five size-matched random removals",
         "source_root": str(source_root),
-        "diverse_root": str(diverse_root),
+        "context_root": str(context_root),
         "normality_root": str(normality_root),
         "controls_csv": str(controls_path),
     }

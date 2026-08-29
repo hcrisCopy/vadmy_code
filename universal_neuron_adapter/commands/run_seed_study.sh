@@ -12,7 +12,6 @@ for seed in "${SEEDS[@]}"; do
   for dataset in ucf xd; do
     data="$SOURCE/$dataset/data"
     primary="$ROOT/seed_$seed/$dataset/primary"
-    diverse="$ROOT/seed_$seed/$dataset/diverse"
     normality="../vadmy_data/universal_neuron_adapter/normality_expert_cache/$dataset/top32_signed_v1"
     context="$ROOT/seed_$seed/$dataset/context"
     python -m universal_neuron_adapter.train_expert --train-manifest "$data/expert_train.csv" --val-manifest "$data/expert_val.csv" \
@@ -22,11 +21,6 @@ for seed in "${SEEDS[@]}"; do
     # validation split, so its score cache must cover both disjoint key sets.
     python -m universal_neuron_adapter.export_expert --manifest "$data/train_all.csv" --expert-model "$primary/expert_best.pth" --out-dir "$primary/train" --device cuda
     python -m universal_neuron_adapter.export_expert --manifest "$data/test.csv" --expert-model "$primary/expert_best.pth" --out-dir "$primary/test" --device cuda
-    python -m universal_neuron_adapter.train_diverse_expert --train-manifest "$data/expert_train.csv" --val-manifest "$data/expert_val.csv" \
-      --out-dir "$diverse" --active-per-layer 64 --temporal-width 64 --max-epoch 20 --batch-size 8 \
-      --lr 0.0003 --weight-decay 0.0001 --sparsity-weight 0.001 --maximum-length 256 --num-workers 4 --seed "$seed" --device cuda --resume
-    python -m universal_neuron_adapter.export_diverse_expert --manifest "$data/expert_train.csv" --expert-model "$diverse/expert_best.pth" --out-dir "$diverse/train" --device cuda
-    python -m universal_neuron_adapter.export_diverse_expert --manifest "$data/test.csv" --expert-model "$diverse/expert_best.pth" --out-dir "$diverse/test" --device cuda
     python -m universal_neuron_adapter.fit_context_student --manifest "$data/expert_train.csv" \
       --expert-manifest "$primary/train/expert_scores.csv" --normality-manifest "$normality/train/expert3_scores.csv" \
       --normality-model "$normality/normality_expert.npz" --out-dir "$context" --normal-samples 32 \
@@ -41,13 +35,12 @@ for seed in "${SEEDS[@]}"; do
         --lr 0.0003 --weight-decay 0.0001 --maximum-length 256 --num-workers 4 --seed "$seed" --device cuda --resume
       python -m universal_neuron_adapter.evaluate --baseline-train-manifest "$source_base/baseline_train/baseline_scores.csv" \
         --baseline-manifest "$source_base/baseline_test/baseline_scores.csv" --expert-train-manifest "$primary/train/expert_scores.csv" \
-        --expert-manifest "$primary/test/expert_scores.csv" --expert2-manifest "$diverse/test/expert2_scores.csv" \
-        --expert2-train-manifest "$diverse/train/expert2_scores.csv" --expert3-manifest "$normality/test/expert3_scores.csv" \
+        --expert-manifest "$primary/test/expert_scores.csv" --expert3-manifest "$normality/test/expert3_scores.csv" \
         --expert3-train-manifest "$normality/train/expert3_scores.csv" --student-manifest "$context/test/student_scores.csv" \
         --student-train-manifest "$context/train/student_scores.csv" --correction-model "$correction/model_best.pth" \
         --gt-path "../vadmy_data/annotations/$dataset/gt.npy" --baseline "$baseline" --dataset "$dataset" \
         --out-dir "$ROOT/seed_$seed/$dataset/$baseline/evaluation" --frames-per-snippet 16 --event-width 41 \
-        --event-weight 1.0 --normality-smoothing-blend 0.25 --persistence-weight 1.0 --gaussian-sigma 0.5 --advance-snippets 1 --device cuda
+        --event-weight 1.0 --normality-smoothing-blend 0.25 --persistence-weight 1.0 --gaussian-sigma 0.5 --advance-snippets 0.5 --device cuda
     done
   done
 done

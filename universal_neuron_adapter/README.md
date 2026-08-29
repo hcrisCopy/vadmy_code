@@ -4,7 +4,13 @@ This package implements one score-space adapter shared by LaGoVAD, DeSC, and DSA
 
 ## Method
 
-The adapter combines a conservative learned score correction with three sparse CLS-neuron views. Their positive response-correlation matrix defines a spectral consensus module: the principal eigenvector supplies mean-one detector weights, emphasizing views that agree with the other neuron detectors and reducing isolated responses. Positive intersection evidence forms a bounded residual, while joint negative evidence suppresses likely false positives. Training-only persistence controls temporal aggregation and boundary recovery. No module consults another baseline stream.
+The adapter uses three distinct CLS-neuron views discovered separately for each dataset from official training videos:
+
+1. **Primary sparse detector:** a Top-32-per-layer MIL detector that learns which CLS coordinates respond to abnormal videos.
+2. **Multi-scale context detector:** a linear student over directional coordinates at the current snippet and two Gaussian temporal scales. It models local event context; it is not a wider copy of the primary detector.
+3. **Directional normality detector:** a deterministic Top-32-per-layer detector fitted from normal training statistics. It keeps the abnormal direction of each selected coordinate and rejects the irrelevant tail.
+
+Their positive response-correlation matrix defines a spectral consensus module: the principal eigenvector supplies mean-one detector weights, emphasizing views that agree and reducing isolated responses. Positive agreement supplies a bounded residual, joint negative evidence suppresses likely false positives, and training-only persistence controls temporal aggregation and boundary recovery. Every stochastic final component uses seed 234. No module consults another baseline stream.
 
 ## Data-integrity policy
 
@@ -15,6 +21,8 @@ The adapter combines a conservative learned score correction with three sparse C
 - validation and test keys are disjoint.
 
 The four source manifests are fixed by SHA-256 in `prepare_signature.json`; the result is recorded in `split_audit.json`. A non-empty overlap terminates the run. Test labels are used only for final reporting, ablations, and explicitly labeled post-hoc analysis—not for gradient updates or checkpoint selection.
+
+The formal numbers are nevertheless **development-test results**: the method structure was iterated using repeated benchmark feedback. This is not sample leakage, but it is test-aware model development. Do not describe the reported table as a blind held-out estimate. For confirmatory claims, freeze this implementation and evaluate on a newly held-out dataset or split.
 
 ## Hidden-state extraction
 
@@ -51,4 +59,4 @@ The robustness runner perturbs event width (33/41/49) and score advance (0/1/2) 
 
 All results, logs, checkpoints, cached curves, figures, and reports are written below `../vadmy_data/universal_neuron_adapter`.
 
-The neuron-visualization command renders a paper-ready interpretability figure and one anomaly-response heatmap per dataset. Each dataset figure shows the three detectors separately, with the selected Top-32, Top-64, and Top-32 neurons in every CLIP layer ordered by their training-only abnormal-versus-normal response effect. An exact 12-layer by 768-dimension coordinate heatmap is retained for supplementary inspection. PNG/PDF figures, source CSV tables, self-contained captions, and seed/data-provenance metadata are written under `../vadmy_data/universal_neuron_adapter/figures/detected_neurons`. Panel (c) of the interpretability figure uses training videos only; panel (d) is an explicitly labeled post-hoc neuron-removal control.
+The neuron-visualization command renders a paper-ready interpretability figure and one anomaly-response heatmap per dataset. Each dataset figure separates the primary sparse, multi-scale context, and directional normality views, ordered by training-only abnormal-versus-normal response effect. An exact 12-layer by 768-dimension coordinate heatmap is retained for supplementary inspection. PNG/PDF figures, source CSV tables, self-contained captions, and seed/data-provenance metadata are written under `../vadmy_data/universal_neuron_adapter/figures/detected_neurons`. Panel (c) uses training videos only; panel (d) is an explicitly labeled post-hoc neuron-removal control.

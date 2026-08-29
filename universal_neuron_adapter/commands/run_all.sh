@@ -37,7 +37,6 @@ for dataset in ucf xd; do
     --manifest "$SOURCE/$dataset/data/expert_train.csv" \
     --student-model "$context/context_student.npz" \
     --normality-model "$normality/normality_expert.npz" --out-dir "$context/train"
-  diverse="$context"
   for baseline in lagovad desc dsanet; do
     source_base="$SOURCE/$dataset/$baseline"
     target="$OUT/$dataset/$baseline/evaluation"
@@ -46,8 +45,6 @@ for dataset in ucf xd; do
       --baseline-manifest "$source_base/baseline_test/baseline_scores.csv" \
       --expert-train-manifest "$SOURCE/$dataset/expert/train/expert_scores.csv" \
       --expert-manifest "$SOURCE/$dataset/expert/test/expert_scores.csv" \
-      --expert2-manifest "$diverse/test/student_scores.csv" \
-      --expert2-train-manifest "$diverse/train/student_scores.csv" \
       --expert3-manifest "$normality/test/expert3_scores.csv" \
       --expert3-train-manifest "$normality/train/expert3_scores.csv" \
       --student-manifest "$context/test/student_scores.csv" \

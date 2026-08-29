@@ -71,11 +71,15 @@ def main() -> None:
     with torch.no_grad():
         for row in tqdm(frame.itertuples(index=False), total=len(frame), desc=f"cache {args.baseline} {args.split}"):
             paths = str(row.clip_paths).split("|")
-            paths = [paths[len(paths) // 2]]
+            # Official training features contain ten same-length spatial views
+            # (`__0` ... `__9`), not temporal chunks.  Infer every view and
+            # average below; selecting one arbitrary middle view is not the
+            # official multi-view protocol.  Test manifests contain one path.
             binary_curves, semantic_curves = [], []
             for clip_path in paths:
                 binary, semantic = infer(adapter, args.baseline, args.dataset, np.load(clip_path).astype(np.float32), device)
-                binary_curves.append(binary); semantic_curves.append(semantic)
+                binary_curves.append(binary)
+                semantic_curves.append(semantic)
             length = len(binary_curves[0])
             binary = np.mean([resample_curve(curve, length) for curve in binary_curves], axis=0).astype(np.float32)
             semantic = np.mean(semantic_curves, axis=0).astype(np.float32)

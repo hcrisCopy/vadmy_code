@@ -20,7 +20,7 @@ def main() -> None:
         name = "auc" if dataset == "ucf" else "ap"
         for baseline in ("lagovad", "desc", "dsanet"):
             full = json.loads((full_root / dataset / baseline / "metrics.json").read_text(encoding="utf-8"))["corrected"][name]
-            selected = json.loads((root / "remove_selected" / "seed_3407" / dataset / baseline / "metrics.json").read_text(encoding="utf-8"))["corrected"][name]
+            selected = json.loads((root / "remove_selected" / "seed_234" / dataset / baseline / "metrics.json").read_text(encoding="utf-8"))["corrected"][name]
             random_values = [json.loads((root / "random_matched" / f"seed_{seed}" / dataset / baseline / "metrics.json").read_text(encoding="utf-8"))["corrected"][name] for seed in args.random_seeds]
             rows.append({"dataset": dataset, "baseline": baseline, "metric": name, "full": 100 * full, "selected_removal_drop": 100 * (full - selected), "random_removal_drop_mean": 100 * (full - np.mean(random_values)), "random_removal_drop_std": 100 * np.std(random_values, ddof=1)})
     frame = pd.DataFrame(rows)

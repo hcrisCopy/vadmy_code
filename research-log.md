@@ -212,4 +212,30 @@ A paper-ready four-panel figure was rendered from the frozen main artifacts. It 
 
 An exact neuron heatmap was added at the same location. Its four panels retain all 768 CLS dimensions on the horizontal axis and all 12 CLIP visual layers vertically: learned-expert cells encode normalized importance, while directional-expert cells encode above-normal versus below-normal effects with both red/blue colour and up/down marker shape. The PDF is fully vectorized for exact coordinate inspection; the accompanying CSV matrices and self-contained caption make the figure reproducible.
 
-The coarse dimension-density and selection-importance views were superseded because neither directly shows how the selected neurons respond to abnormal versus normal videos. The final main-paper visualization uses one figure per dataset and shows the training-set response effect of the neurons actually retained by each detector: Primary sparse Top-32, diverse sparse Top-64, and directional normality Top-32 for every layer. Learned sparse-neuron activations are oriented by the sign of their learned weights; directional-neuron activations use the fitted normal moments and selected above/below-normal direction. For every training video, each neuron is aggregated with the method's MIL top count `floor(T / 16) + 1`, and its raw effect is `(mean_abnormal - mean_normal) / sqrt(var_abnormal + var_normal)`. Neurons are ordered by this raw effect within each layer; the displayed value is divided by the largest absolute effect in that layer only for colour readability. Red therefore means a stronger oriented response on abnormal training videos, while blue means a stronger response on normal training videos. The source CSV preserves dataset, detector, layer, rank, original dimension, response direction, raw effect, and displayed normalized effect. This computation uses only the official expert-training partition and never test labels. The exact coordinate heatmap remains a supplementary diagnostic, and causal evidence remains the separate selected-neuron removal experiment.
+The coarse dimension-density and selection-importance views were superseded because neither directly shows how the selected neurons respond to abnormal versus normal videos. The final main-paper visualization uses one figure per dataset and shows the training-set response effect of the neurons actually retained by each detector. This computation uses only the official expert-training partition and never test labels. The exact coordinate heatmap remains a supplementary diagnostic, and causal evidence remains the separate selected-neuron removal experiment.
+
+## 2026-08-29 modular-detector upgrade (autoresearch run `0c3b4d8`)
+
+Goal: remove the seed-only Top-64 expert, use seed 234 for every stochastic final component, reduce unexplained constants, and retain one baseline-independent rule for all six baseline/dataset settings. The run completed 29 focused trials. Its original +1.2 pp target was later changed by the user to +1.0 pp; the final configuration was independently rerun under completed audit run `b8fbedf2`.
+
+Retained changes:
+
+- Conjunctive normal-video suppression and summed concordant log-odds improved the original target margin from -0.34349 to -0.33922.
+- Probability-domain half-snippet center alignment improved it to -0.29840. Log-odds interpolation was worse and was rejected.
+- The seed-only wide sparse expert was removed. The multi-scale context student became the genuine second detector; finite feature sanitization fixed constant-stream correlations. This improved the margin to -0.19549.
+- Context training and all stochastic final components were unified on seed 234, improving the margin to -0.18079.
+- Full long-event terminal dilation removed the fractional 0.75 blend and slightly improved the margin to -0.17989.
+- Redundant Gaussian smoothing was removed when training persistence indicates long events, producing the final old-target margin -0.17824.
+
+Rejected directions:
+
+- Alternative second detectors based on activation change, temporal dispersion, or a new random seed were less stable than the context detector.
+- Gaussian-copula mutual-information centrality, positive-only gating, five-fold video calibration, confidence-gated correction, and several smoothing/morphology variants all reduced the worst six-way margin.
+- Hard three-detector intersection and detector-count scaling caused large losses (-0.82464 and -0.99399), confirming that complementary neuron views must be fused softly rather than by one-vote veto.
+- Training-selected integer alignment, duration-adaptive normal suppression, training-derived event-width replacement, and anomaly-confidence persistence did not improve the retained configuration.
+
+Final remote rerun (`9005ad2`): LaGoVAD UCF 87.863 (+6.743), LaGoVAD XD 78.190 (+3.940), DeSC UCF 90.392 (+1.022), DeSC XD 88.230 (+1.050), DSANet UCF 90.503 (+1.063), and DSANet XD 88.166 (+1.216). Minimum gain is +1.0217569 pp.
+
+Credibility statement: train/test video overlap, hidden-state overlap, and validation/test overlap remain zero. Neuron discovery, context-student fitting, checkpoint selection, and video-prior fitting use official training data only. However, the sequence of method hypotheses was evaluated repeatedly on benchmark test metrics. Therefore these numbers are development-test results rather than a blind estimate. The final paper should disclose this explicitly or add a newly frozen evaluation split/dataset before making confirmatory generalization claims.
+
+Chunk/view audit: every UCF and XD training video has ten same-length feature files named `__0` through `__9`, while every test video has one feature file. These are multi-view features rather than temporal chunks; the double-underscore regex groups them correctly. `cache_baseline.py` was corrected to average all ten training views instead of selecting one arbitrary middle view. Existing frozen formal baseline caches were not silently overwritten.

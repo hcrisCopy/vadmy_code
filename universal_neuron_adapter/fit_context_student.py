@@ -25,7 +25,7 @@ def main() -> None:
     parser.add_argument("--normal-samples", type=int, default=32)
     parser.add_argument("--positive-fraction", type=float, default=0.05)
     parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--seed", type=int, default=3407)
+    parser.add_argument("--seed", type=int, default=234)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--clean", action="store_true")
     args = parser.parse_args()

@@ -192,7 +192,9 @@ class ScorePairDataset(torch.utils.data.Dataset):
         baseline = pd.read_csv(baseline_manifest)
         expert = pd.read_csv(expert_manifest)[["key", "expert_score_path"]]
         keys = set(pd.read_csv(key_manifest)["key"].astype(str))
-        self.frame = baseline.merge(expert, on="key", validate="one_to_one")
+        self.frame = baseline.merge(
+            expert, on="key", validate="one_to_one", sort=False
+        ).reset_index(drop=True)
         self.frame = self.frame[self.frame["key"].astype(str).isin(keys)].reset_index(drop=True)
         self.maximum_length = int(maximum_length)
 

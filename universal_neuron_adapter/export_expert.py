@@ -19,7 +19,7 @@ def main() -> None:
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--control", choices=["none", "remove_selected", "random_matched"], default="none")
-    parser.add_argument("--control-seed", type=int, default=3407)
+    parser.add_argument("--control-seed", type=int, default=234)
     args = parser.parse_args()
     output = Path(args.out_dir)
     score_dir = output / "scores"

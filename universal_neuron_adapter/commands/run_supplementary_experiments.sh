@@ -24,22 +24,20 @@ done
 
 evaluate_variant() {
   local variant="$1" dataset="$2" baseline="$3"; shift 3
-  local diverse="../vadmy_data/universal_neuron_adapter/diverse_expert_cache/$dataset/active64_seed3407"
+  local context="../vadmy_data/universal_neuron_adapter/context_student_cache/$dataset/top32_multiscale_seed234"
   local normality="../vadmy_data/universal_neuron_adapter/normality_expert_cache/$dataset/top32_signed_v1"
-  local context="../vadmy_data/universal_neuron_adapter/context_student_cache/$dataset/top32_multiscale_seed3407"
   local source_base="$SOURCE/$dataset/$baseline"
   python -m universal_neuron_adapter.evaluate \
     --baseline-train-manifest "$source_base/baseline_train/baseline_scores.csv" \
     --baseline-manifest "$source_base/baseline_test/baseline_scores.csv" \
     --expert-train-manifest "$SOURCE/$dataset/expert/train/expert_scores.csv" \
     --expert-manifest "$SOURCE/$dataset/expert/test/expert_scores.csv" \
-    --expert2-manifest "$diverse/test/expert2_scores.csv" --expert2-train-manifest "$diverse/train/expert2_scores.csv" \
     --expert3-manifest "$normality/test/expert3_scores.csv" --expert3-train-manifest "$normality/train/expert3_scores.csv" \
     --student-manifest "$context/test/student_scores.csv" --student-train-manifest "$context/train/student_scores.csv" \
     --correction-model "$source_base/correction/model_best.pth" --gt-path "../vadmy_data/annotations/$dataset/gt.npy" \
     --baseline "$baseline" --dataset "$dataset" --out-dir "$ROOT/ablations/$variant/$dataset/$baseline" \
     --frames-per-snippet 16 --event-width 41 --event-weight 1.0 --normality-smoothing-blend 0.25 \
-    --persistence-weight 1.0 --gaussian-sigma 0.5 --advance-snippets 1 --device cuda "$@"
+    --persistence-weight 1.0 --gaussian-sigma 0.5 --advance-snippets 0.5 --device cuda "$@"
 }
 
 for dataset in ucf xd; do
@@ -55,7 +53,7 @@ done
 
 python -m universal_neuron_adapter.analyze_results \
   --results-root "$ROOT/ablations/full" --ucf-gt ../vadmy_data/annotations/ucf/gt.npy \
-  --xd-gt ../vadmy_data/annotations/xd/gt.npy --out-dir "$ROOT/statistics" --bootstrap-repeats 200 --seed 3407
+  --xd-gt ../vadmy_data/annotations/xd/gt.npy --out-dir "$ROOT/statistics" --bootstrap-repeats 200 --seed 234
 python -m universal_neuron_adapter.visualize_experiments \
   --experiment-root "$ROOT" --ucf-gt ../vadmy_data/annotations/ucf/gt.npy \
   --xd-gt ../vadmy_data/annotations/xd/gt.npy --out-dir "$ROOT/figures"

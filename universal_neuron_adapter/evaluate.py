@@ -192,6 +192,7 @@ def main() -> None:
     context_normality_weight = duration_factor
     final_dilation_width = 1 + 2 * round(12.0 * duration_factor)
     final_dilation_weight = 0.75 * duration_factor
+    effective_gaussian_sigma = args.gaussian_sigma + 0.5 * duration_factor
 
     output = Path(args.out_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -340,8 +341,8 @@ def main() -> None:
                 if final_dilation_width > 1 and final_dilation_weight > 0.0:
                     dilated = maximum_filter1d(corrected, final_dilation_width, mode="nearest")
                     corrected = corrected + final_dilation_weight * (dilated - corrected)
-                if args.gaussian_sigma > 0:
-                    corrected = gaussian_filter1d(corrected, args.gaussian_sigma, mode="nearest")
+                if effective_gaussian_sigma > 0:
+                    corrected = gaussian_filter1d(corrected, effective_gaussian_sigma, mode="nearest")
                 if not 0 <= args.advance_snippets < len(corrected):
                     raise ValueError("advance-snippets must be non-negative and shorter than every video")
                 if args.advance_snippets:
@@ -395,7 +396,7 @@ def main() -> None:
             "final_dilation_weight": final_dilation_weight,
             "persistence_weight": args.persistence_weight,
             "persistence_scales": [persistence_width, 2 * persistence_width - 1],
-            "gaussian_sigma": args.gaussian_sigma,
+            "gaussian_sigma": effective_gaussian_sigma,
             "advance_snippets": args.advance_snippets,
             "disabled_components": [
                 name for name, disabled in {

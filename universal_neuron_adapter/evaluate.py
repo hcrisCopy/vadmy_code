@@ -341,9 +341,11 @@ def main() -> None:
             if not args.disable_event_gate:
                 expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
                 corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
-            normal_shift = min(0.0, decision)
-            if decision < 0.0 and normality_decision < 0.0:
-                normal_shift += 0.25 * normality_decision
+            normal_shift = (
+                min(0.0, decision, normality_decision)
+                if decision < 0.0 and normality_decision < 0.0
+                else 0.0
+            )
             if not args.disable_video_suppression:
                 corrected = expit(logit(corrected) + normal_suppression_weight * normal_shift)
             if not args.disable_temporal:

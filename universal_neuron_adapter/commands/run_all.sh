@@ -72,7 +72,6 @@ for dataset in ucf xd; do
       --event-width 41 --event-weight 1.0 \
       --normality-smoothing-blend 0.25 \
       --persistence-weight 1.0 \
-      --gaussian-sigma 0.5 \
       --advance-snippets 1 --device cuda
   done
 done

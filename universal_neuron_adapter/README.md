@@ -51,6 +51,7 @@ bash universal_neuron_adapter/commands/run_seed_study.sh
 bash universal_neuron_adapter/commands/run_neuron_controls.sh
 bash universal_neuron_adapter/commands/run_robustness_efficiency.sh
 bash universal_neuron_adapter/commands/run_neuron_visualization.sh
+bash universal_neuron_adapter/commands/run_method_overview.sh --clean
 ```
 
 The supplementary runner performs the split audit, a cumulative component ablation across all six settings, a 200-repeat exact paired video bootstrap over the official frame metric, and focused heatmap/timeline figures. The detection runner executes the official DSANet detection-mAP function and preserves DSANet's conditional abnormal-class distribution when replacing total anomaly mass. The seed study retrains all stochastic adapter components for seeds 234, 3407, and 2026. The neuron controls compare removal of selected neurons with five size-matched random removals.
@@ -58,5 +59,7 @@ The supplementary runner performs the split audit, a cumulative component ablati
 The robustness runner perturbs event width (33/41/49) and score advance (0/1/2) one factor at a time. These test-set measurements are post-hoc robustness checks only and never select the formal setting. It also records cached-score adapter wall time, throughput, and peak CUDA allocation, then renders one focused gain heatmap.
 
 All results, logs, checkpoints, cached curves, figures, and reports are written below `../vadmy_data/universal_neuron_adapter`.
+
+The method-overview runner exports an editable SVG, a vector PDF, a PNG preview, and a self-contained caption under `../vadmy_data/universal_neuron_adapter/figures/method_overview`.
 
 The neuron-visualization command renders a paper-ready interpretability figure and one anomaly-response heatmap per dataset. Each dataset figure separates the primary sparse, multi-scale context, and directional normality views, ordered by training-only abnormal-versus-normal response effect. An exact 12-layer by 768-dimension coordinate heatmap is retained for supplementary inspection. PNG/PDF figures, source CSV tables, self-contained captions, and seed/data-provenance metadata are written under `../vadmy_data/universal_neuron_adapter/figures/detected_neurons`. Panel (c) uses training videos only; panel (d) is an explicitly labeled post-hoc neuron-removal control.

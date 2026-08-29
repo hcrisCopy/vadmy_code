@@ -106,6 +106,17 @@ def longest_positive_run(values: np.ndarray) -> int:
     return int(lengths.max()) if len(lengths) else 1
 
 
+def spectral_consensus_weights(*curves: np.ndarray) -> np.ndarray:
+    """Return mean-one eigenvector-centrality weights from positive agreement."""
+    matrix = np.corrcoef(np.stack(curves))
+    matrix = np.nan_to_num(matrix, nan=0.0, posinf=0.0, neginf=0.0)
+    matrix = np.maximum(matrix, 0.0)
+    np.fill_diagonal(matrix, 1.0)
+    _, eigenvectors = np.linalg.eigh(matrix)
+    weights = np.abs(eigenvectors[:, -1]).astype(np.float32)
+    return weights / max(float(weights.mean()), 1e-6)
+
+
 def estimate_persistence_width(
     expert_manifest: str,
     expert2_manifest: str,
@@ -319,7 +330,14 @@ def main() -> None:
                 corrected = expit(logit(corrected) + agreement_residual_weight * high_high)
                 triple_high = np.minimum(high_high, np.maximum(standardized3, 0.0))
                 corrected = expit(logit(corrected) + triple_agreement_weight * triple_high)
-            neuron_gate = expit(standardized + standardized2 + normality_gate_weight * standardized3)
+            consensus_weights = spectral_consensus_weights(
+                standardized, standardized2, standardized3
+            )
+            neuron_gate = expit(
+                consensus_weights[0] * standardized
+                + consensus_weights[1] * standardized2
+                + normality_gate_weight * consensus_weights[2] * standardized3
+            )
             if not args.disable_event_gate:
                 expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
                 corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
@@ -376,6 +394,7 @@ def main() -> None:
             "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(sum of video-standardized CLS-neuron evidence)",
+            "event_gate_reliability": "principal eigenvector of positive detector agreement",
             "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
             "normality_gate_weight": normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,

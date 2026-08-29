@@ -10,7 +10,6 @@ import pandas as pd
 import torch
 from scipy.ndimage import gaussian_filter1d, maximum_filter1d, median_filter
 from scipy.special import expit
-from scipy.stats import rankdata
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.pipeline import make_pipeline
@@ -108,12 +107,10 @@ def longest_positive_run(values: np.ndarray) -> int:
 
 
 def spectral_consensus_weights(*curves: np.ndarray) -> np.ndarray:
-    """Return mean-one centrality from positive Gaussian-copula information."""
-    ranked = np.stack([rankdata(curve) for curve in curves])
-    correlation = np.corrcoef(ranked)
-    correlation = np.nan_to_num(correlation, nan=0.0, posinf=0.0, neginf=0.0)
-    correlation = np.clip(correlation, 0.0, 1.0 - np.finfo(np.float32).eps)
-    matrix = -0.5 * np.log1p(-np.square(correlation))
+    """Return mean-one eigenvector-centrality weights from positive agreement."""
+    matrix = np.corrcoef(np.stack(curves))
+    matrix = np.nan_to_num(matrix, nan=0.0, posinf=0.0, neginf=0.0)
+    matrix = np.maximum(matrix, 0.0)
     np.fill_diagonal(matrix, 1.0)
     _, eigenvectors = np.linalg.eigh(matrix)
     weights = np.abs(eigenvectors[:, -1]).astype(np.float32)

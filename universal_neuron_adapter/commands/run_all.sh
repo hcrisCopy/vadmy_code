@@ -35,15 +35,14 @@ for dataset in ucf xd; do
   python -m universal_neuron_adapter.export_normality_expert \
     --manifest "$SOURCE/$dataset/data/expert_train.csv" --expert-model "$normality/normality_expert.npz" \
     --out-dir "$normality/train"
-  context="$ROOT/context_student_cache/$dataset/top32_spectral_seed234"
+  context="$ROOT/context_student_cache/$dataset/top32_multiscale_seed3407"
   python -m universal_neuron_adapter.fit_context_student \
     --manifest "$SOURCE/$dataset/data/expert_train.csv" \
     --expert-manifest "$SOURCE/$dataset/expert/train/expert_scores.csv" \
-    --auxiliary-manifest "$diverse/train/expert2_scores.csv" \
     --normality-manifest "$normality/train/expert3_scores.csv" \
     --normality-model "$normality/normality_expert.npz" \
     --out-dir "$context" --normal-samples 32 --positive-fraction 0.05 \
-    --epochs 20 --seed 234 --resume
+    --epochs 20 --seed 3407 --resume
   python -m universal_neuron_adapter.export_context_student \
     --manifest "$SOURCE/$dataset/data/test.csv" \
     --student-model "$context/context_student.npz" \

@@ -4,7 +4,7 @@ This package implements one score-space adapter shared by LaGoVAD, DeSC, and DSA
 
 ## Method
 
-The adapter combines a conservative learned score correction with three sparse CLS-neuron views. Their positive response-correlation matrix defines a spectral consensus module whose principal eigenvector weights the event gate. The same training-only spectral consensus selects high-confidence positive snippets for a seed-234 multi-scale context student, distilling agreement rather than one detector's noise. Positive and negative hard intersections remain conservative. No module consults another baseline stream.
+The adapter combines a conservative learned score correction with three sparse CLS-neuron views. Their positive response-correlation matrix defines a spectral consensus module: the principal eigenvector supplies mean-one detector weights, emphasizing views that agree with the other neuron detectors and reducing isolated responses. Positive intersection evidence forms a bounded residual, while joint negative evidence suppresses likely false positives. Training-only persistence controls temporal aggregation and boundary recovery. No module consults another baseline stream.
 
 ## Data-integrity policy
 

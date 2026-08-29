@@ -191,10 +191,7 @@ def main() -> None:
         args.normality_smoothing_blend,
     )
     duration_factor = float(np.clip((persistence_width - 11.0) / 4.0, 0.0, 1.0))
-    # A validation-selected correction head is used once by default.  The
-    # training-derived duration factor only controls up to two additional
-    # residual applications for datasets dominated by sustained events.
-    correction_weight = 1.0 + 2.0 * duration_factor
+    correction_weight = 3.0 * duration_factor
     neuron_weight = 0.3 - 0.1 * duration_factor
     normality_gate_weight = 1.0 + 2.0 * duration_factor
     agreement_residual_weight = 0.5 - 0.3 * duration_factor

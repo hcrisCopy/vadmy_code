@@ -10,10 +10,8 @@ import pandas as pd
 import torch
 from scipy.ndimage import gaussian_filter1d, maximum_filter1d, median_filter
 from scipy.special import expit
-from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
-from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
@@ -51,15 +49,6 @@ def joint_video_features(baseline: np.ndarray, neuron: np.ndarray) -> np.ndarray
             float(np.max(baseline - neuron)), float(np.max(neuron - baseline)),
         ], dtype=np.float32),
     ])
-
-
-def calibrated_video_classifier() -> CalibratedClassifierCV:
-    estimator = make_pipeline(
-        StandardScaler(),
-        LogisticRegression(class_weight="balanced", max_iter=1000, random_state=234),
-    )
-    folds = StratifiedKFold(n_splits=5, shuffle=True, random_state=234)
-    return CalibratedClassifierCV(estimator, method="sigmoid", cv=folds)
 
 
 def normality_video_features(
@@ -240,7 +229,10 @@ def main() -> None:
     ).merge(expert3_train, on="key", validate="one_to_one").merge(
         student_train, on="key", validate="one_to_one"
     )
-    video_model = calibrated_video_classifier()
+    video_model = make_pipeline(
+        StandardScaler(),
+        LogisticRegression(class_weight="balanced", max_iter=1000, random_state=3407),
+    )
     video_model.fit(
         np.asarray([
             joint_video_features(
@@ -249,7 +241,10 @@ def main() -> None:
         ]),
         video_train["binary_label"].to_numpy(),
     )
-    normality_video_model = calibrated_video_classifier()
+    normality_video_model = make_pipeline(
+        StandardScaler(),
+        LogisticRegression(class_weight="balanced", max_iter=1000, random_state=3407),
+    )
     normality_video_model.fit(
         np.asarray([
             normality_video_features(
@@ -309,17 +304,8 @@ def main() -> None:
                 smooth_neuron3 = gaussian_filter1d(standardized3, 1.0, mode="nearest")
                 standardized3 = (1.0 - args.normality_smoothing_blend) * standardized3 + args.normality_smoothing_blend * smooth_neuron3
             standardized3 = (standardized3 - standardized3.mean()) / max(float(standardized3.std()), 1e-6)
-            decision = float(logit(video_model.predict_proba(
-                np.asarray(joint_video_features(base, neuron))[None]
-            )[:, 1])[0])
-            normality_decision = float(logit(normality_video_model.predict_proba(
-                np.asarray(normality_video_features(
-                    base,
-                    neuron,
-                    neuron2,
-                    blend_normality(neuron3_context, args.normality_smoothing_blend),
-                ))[None]
-            )[:, 1])[0])
+            decision = float(video_model.decision_function(np.asarray(joint_video_features(base, neuron))[None])[0])
+            normality_decision = float(normality_video_model.decision_function(np.asarray(normality_video_features(base, neuron, neuron2, blend_normality(neuron3_context, args.normality_smoothing_blend)))[None])[0])
             video_anomaly_gate = float(expit(min(decision, normality_decision)))
             standardized_base = (base - base.mean()) / max(float(base.std()), 1e-6)
             neuron_consensus = np.minimum(

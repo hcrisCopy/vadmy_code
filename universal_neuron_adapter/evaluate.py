@@ -346,6 +346,7 @@ def main() -> None:
                     raise ValueError("advance-snippets must be non-negative and shorter than every video")
                 if args.advance_snippets:
                     corrected = np.concatenate([corrected[args.advance_snippets:], np.repeat(corrected[-1:], args.advance_snippets)])
+            corrected = expit(0.8 * logit(corrected) + 0.2 * logit(base))
             baseline_curves.append(base)
             corrected_curves.append(corrected)
             curve_path = curve_dir / f"{row.key}.npz"
@@ -397,6 +398,7 @@ def main() -> None:
             "persistence_scales": [persistence_width, 2 * persistence_width - 1],
             "gaussian_sigma": args.gaussian_sigma,
             "advance_snippets": args.advance_snippets,
+            "final_baseline_logit_shrinkage": 0.2,
             "disabled_components": [
                 name for name, disabled in {
                     "correction": args.disable_correction,

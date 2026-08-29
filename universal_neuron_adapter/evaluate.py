@@ -204,7 +204,7 @@ def main() -> None:
     neuron_weight = 0.3 - 0.1 * duration_factor
     normality_gate_weight = 1.0 + 2.0 * duration_factor
     agreement_residual_weight = 0.5 - 0.3 * duration_factor
-    triple_agreement_weight = 0.6 + 1.7 * duration_factor
+    triple_agreement_weight = 3.0
     neuron_consensus_weight = 1.0
     neuron_conflict_weight = 1.2
     normal_suppression_weight = 1.0
@@ -337,7 +337,13 @@ def main() -> None:
             high_high = np.minimum(np.maximum(standardized_base, 0.0), np.maximum(standardized, 0.0))
             if not args.disable_agreement:
                 corrected = expit(logit(corrected) + agreement_residual_weight * high_high)
-                triple_high = np.minimum(high_high, np.maximum(standardized3, 0.0))
+                triple_high = np.minimum(
+                    high_high,
+                    np.minimum(
+                        np.maximum(standardized2, 0.0),
+                        np.maximum(standardized3, 0.0),
+                    ),
+                )
                 corrected = expit(logit(corrected) + triple_agreement_weight * triple_high)
             consensus_weights = spectral_consensus_weights(
                 standardized, standardized2, standardized3

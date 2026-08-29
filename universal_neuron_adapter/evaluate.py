@@ -229,6 +229,32 @@ def main() -> None:
     ).merge(expert3_train, on="key", validate="one_to_one").merge(
         student_train, on="key", validate="one_to_one"
     )
+    training_spectral_weights = []
+    for row in video_train.itertuples(index=False):
+        training_primary = np.load(str(row.expert_score_path))
+        training_auxiliary = fuse_standardized(
+            np.load(str(row.expert2_score_path)),
+            np.load(str(row.student_score_path)),
+            context_diverse_weight,
+        )
+        training_directional = blend_normality(
+            fuse_standardized(
+                np.load(str(row.expert3_score_path)),
+                np.load(str(row.student_score_path)),
+                context_normality_weight,
+            ),
+            args.normality_smoothing_blend,
+        )
+        standardized_training = []
+        for curve in (training_primary, training_auxiliary, training_directional):
+            standardized_training.append(
+                (curve - curve.mean()) / max(float(curve.std()), 1e-6)
+            )
+        training_spectral_weights.append(
+            spectral_consensus_weights(*standardized_training)
+        )
+    training_spectral_weights = np.mean(training_spectral_weights, axis=0)
+    training_spectral_weights /= max(float(training_spectral_weights.mean()), 1e-6)
     video_model = make_pipeline(
         StandardScaler(),
         LogisticRegression(class_weight="balanced", max_iter=1000, random_state=3407),
@@ -333,6 +359,7 @@ def main() -> None:
             consensus_weights = spectral_consensus_weights(
                 standardized, standardized2, standardized3
             )
+            consensus_weights = 0.5 * consensus_weights + 0.5 * training_spectral_weights
             neuron_gate = expit(
                 consensus_weights[0] * standardized
                 + consensus_weights[1] * standardized2
@@ -394,7 +421,8 @@ def main() -> None:
             "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(sum of video-standardized CLS-neuron evidence)",
-            "event_gate_reliability": "principal eigenvector of positive detector agreement",
+            "event_gate_reliability": "equal blend of training-mean and per-video spectral agreement",
+            "training_spectral_weights": training_spectral_weights.tolist(),
             "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
             "normality_gate_weight": normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,

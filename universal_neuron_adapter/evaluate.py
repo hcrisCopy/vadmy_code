@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from scipy.ndimage import gaussian_filter1d, maximum_filter1d, median_filter
+from scipy.ndimage import gaussian_filter1d, maximum_filter1d, minimum_filter1d
 from scipy.special import expit
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
@@ -104,6 +104,11 @@ def longest_positive_run(values: np.ndarray) -> int:
     changes = np.flatnonzero(padded[1:] != padded[:-1])
     lengths = changes[1::2] - changes[::2]
     return int(lengths.max()) if len(lengths) else 1
+
+
+def close_short_gaps(curve: np.ndarray, width: int) -> np.ndarray:
+    expanded = maximum_filter1d(curve, width, mode="nearest")
+    return minimum_filter1d(expanded, width, mode="nearest")
 
 
 def spectral_consensus_weights(*curves: np.ndarray) -> np.ndarray:
@@ -349,10 +354,10 @@ def main() -> None:
             if not args.disable_video_suppression:
                 corrected = expit(logit(corrected) + normal_suppression_weight * normal_shift)
             if not args.disable_temporal:
-                persistent = median_filter(corrected, persistence_width, mode="nearest")
+                persistent = close_short_gaps(corrected, persistence_width)
                 if duration_factor > 0.0:
                     long_width = 2 * persistence_width - 1
-                    long_persistent = median_filter(corrected, long_width, mode="nearest")
+                    long_persistent = close_short_gaps(corrected, long_width)
                     persistent = (
                         (1.0 - 0.5 * duration_factor) * persistent
                         + 0.5 * duration_factor * long_persistent

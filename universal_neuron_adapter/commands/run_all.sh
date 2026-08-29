@@ -60,7 +60,7 @@ for dataset in ucf xd; do
       --normality-smoothing-blend 0.25 \
       --persistence-weight 1.0 \
       --gaussian-sigma 0.5 \
-      --advance-snippets 0.5 --device cuda
+      --device cuda
   done
 done
 

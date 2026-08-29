@@ -115,6 +115,32 @@ def read_second_expert_manifest(path: str) -> pd.DataFrame:
     return frame[["key", "expert2_score_path"]]
 
 
+def estimate_alignment_advance(frame: pd.DataFrame) -> float:
+    correlations = []
+    for row in frame.itertuples(index=False):
+        baseline = np.load(str(row.baseline_score_path)).astype(np.float32)
+        evidence_curves = []
+        for path in (
+            row.expert_score_path,
+            row.expert2_score_path,
+            row.expert3_score_path,
+        ):
+            curve = resample_curve(np.load(str(path)), len(baseline))
+            curve = (curve - curve.mean()) / max(float(curve.std()), 1e-6)
+            evidence_curves.append(curve)
+        consensus = sum(evidence_curves)
+        if len(baseline) < 3 or baseline.std() <= 0.0 or consensus.std() <= 0.0:
+            continue
+        current = float(np.corrcoef(baseline, consensus)[0, 1])
+        advanced = float(np.corrcoef(baseline[:-1], consensus[1:])[0, 1])
+        if np.isfinite(current) and np.isfinite(advanced):
+            correlations.append((current, advanced))
+    if not correlations:
+        return 0.0
+    median = np.median(np.asarray(correlations), axis=0)
+    return float(median[1] > median[0])
+
+
 def spectral_consensus_weights(*curves: np.ndarray) -> np.ndarray:
     """Return mean-one eigenvector-centrality weights from positive agreement."""
     matrix = np.corrcoef(np.stack(curves))
@@ -184,7 +210,6 @@ def main() -> None:
     parser.add_argument("--normal-suppression-weight", type=float, default=1.0)
     parser.add_argument("--persistence-weight", type=float, default=0.75)
     parser.add_argument("--gaussian-sigma", type=float, default=0.0)
-    parser.add_argument("--advance-snippets", type=float, default=0.5)
     parser.add_argument("--disable-correction", action="store_true")
     parser.add_argument("--disable-agreement", action="store_true")
     parser.add_argument("--disable-event-gate", action="store_true")
@@ -238,6 +263,7 @@ def main() -> None:
     ).merge(expert3_train, on="key", validate="one_to_one").merge(
         student_train, on="key", validate="one_to_one"
     )
+    advance_snippets = estimate_alignment_advance(video_train)
     video_model = make_pipeline(
         StandardScaler(),
         LogisticRegression(class_weight="balanced", max_iter=1000, random_state=3407),
@@ -372,12 +398,12 @@ def main() -> None:
                     corrected = corrected + final_dilation_weight * (dilated - corrected)
                 if effective_gaussian_sigma > 0:
                     corrected = gaussian_filter1d(corrected, effective_gaussian_sigma, mode="nearest")
-                if not 0.0 <= args.advance_snippets < len(corrected):
+                if not 0.0 <= advance_snippets < len(corrected):
                     raise ValueError("advance-snippets must be non-negative and shorter than every video")
-                if args.advance_snippets:
+                if advance_snippets:
                     positions = np.arange(len(corrected), dtype=np.float32)
                     corrected = np.interp(
-                        positions + args.advance_snippets,
+                        positions + advance_snippets,
                         positions,
                         corrected,
                         right=float(corrected[-1]),
@@ -433,7 +459,8 @@ def main() -> None:
             "persistence_weight": args.persistence_weight,
             "persistence_scales": [persistence_width, 2 * persistence_width - 1],
             "gaussian_sigma": effective_gaussian_sigma,
-            "advance_snippets": args.advance_snippets,
+            "advance_snippets": advance_snippets,
+            "advance_rule": "training median zero-lag versus one-step detector-consensus correlation",
             "disabled_components": [
                 name for name, disabled in {
                     "correction": args.disable_correction,

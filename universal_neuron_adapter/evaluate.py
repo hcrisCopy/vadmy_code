@@ -211,7 +211,7 @@ def main() -> None:
     context_diverse_weight = 8.0 * duration_factor
     context_normality_weight = duration_factor
     final_dilation_width = 1 + 2 * round(12.0 * duration_factor)
-    final_dilation_weight = 0.75 * duration_factor
+    final_dilation_weight = duration_factor
     effective_gaussian_sigma = args.gaussian_sigma + 0.5 * duration_factor
 
     output = Path(args.out_dir)

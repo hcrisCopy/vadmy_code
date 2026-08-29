@@ -251,33 +251,6 @@ def main() -> None:
         ]),
         video_train["binary_label"].to_numpy(),
     )
-    training_prior_minima = []
-    for row in video_train.itertuples(index=False):
-        baseline_curve = np.load(str(row.baseline_score_path))
-        primary_curve = np.load(str(row.expert_score_path))
-        auxiliary_curve = np.load(str(row.expert2_score_path))
-        normality_curve = blend_normality(
-            fuse_standardized(
-                np.load(str(row.expert3_score_path)),
-                np.load(str(row.student_score_path)),
-                context_normality_weight,
-            ),
-            args.normality_smoothing_blend,
-        )
-        first_prior = float(video_model.decision_function(
-            np.asarray(joint_video_features(baseline_curve, primary_curve))[None]
-        )[0])
-        second_prior = float(normality_video_model.decision_function(
-            np.asarray(normality_video_features(
-                baseline_curve, primary_curve, auxiliary_curve, normality_curve
-            ))[None]
-        )[0])
-        training_prior_minima.append(min(first_prior, second_prior))
-    normal_prior_minima = np.asarray(training_prior_minima)[
-        video_train["binary_label"].to_numpy() == 0
-    ]
-    conformal_positive_threshold = float(np.quantile(normal_prior_minima, 0.95))
-    conformal_positive_weight = 0.3
     baseline = pd.read_csv(args.baseline_manifest)
     expert = pd.read_csv(args.expert_manifest)[["key", "expert_score_path"]]
     expert2 = pd.read_csv(args.expert2_manifest)[["key", "expert2_score_path"]]
@@ -354,12 +327,6 @@ def main() -> None:
                 normal_shift += 0.25 * normality_decision
             if not args.disable_video_suppression:
                 corrected = expit(logit(corrected) + normal_suppression_weight * normal_shift)
-                positive_excess = max(
-                    0.0, min(decision, normality_decision) - conformal_positive_threshold
-                )
-                corrected = expit(
-                    logit(corrected) + conformal_positive_weight * positive_excess
-                )
             if not args.disable_temporal:
                 persistent = median_filter(corrected, persistence_width, mode="nearest")
                 if duration_factor > 0.0:
@@ -418,8 +385,6 @@ def main() -> None:
             "triple_agreement_weight": triple_agreement_weight,
             "normal_suppression_weight": normal_suppression_weight,
             "video_prior": "training-only one-sided classifier with all three CLS-neuron views and pairwise consensus",
-            "conformal_positive_threshold": conformal_positive_threshold,
-            "conformal_positive_weight": conformal_positive_weight,
             "persistence_width": persistence_width,
             "persistence_width_rule": "0.35 * training gate-run q75, nearest odd, clipped to [7, 21]",
             "duration_factor": duration_factor,

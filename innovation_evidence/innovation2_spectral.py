@@ -65,8 +65,8 @@ def render(dataset: str, metrics: pd.DataFrame, weights: pd.DataFrame, output: P
     axis.set_title(f"{DATASET_NAMES[dataset]}: consensus-gate reliability")
     axis.tick_params(axis="x", rotation=12)
     axis.grid(axis="y", alpha=0.25)
-    figure.savefig(output / f"{dataset}_spectral_ablation.png", dpi=300)
-    figure.savefig(output / f"{dataset}_spectral_ablation.pdf")
+    figure.savefig(output / f"{dataset}_standalone_gate_diagnostic.png", dpi=300)
+    figure.savefig(output / f"{dataset}_standalone_gate_diagnostic.pdf")
     plt.close(figure)
 
     figure, axis = plt.subplots(figsize=(4.8, 3.0), constrained_layout=True)
@@ -98,7 +98,7 @@ def main() -> None:
     for name, path in roots.items():
         require_relative(path, f"--{name.replace('_', '-')}")
     output = roots["out_dir"]
-    if not prepare_output(output, args.clean, "innovation2_metrics.csv"):
+    if not prepare_output(output, args.clean, "standalone_gate_diagnostic.csv"):
         return
     metric_tables = []
     for dataset in DATASETS:
@@ -109,7 +109,9 @@ def main() -> None:
         render(dataset, metrics, weights, output)
         weights.to_csv(output / f"{dataset}_spectral_weights.csv", index=False)
         metric_tables.append(metrics)
-    pd.concat(metric_tables, ignore_index=True).to_csv(output / "innovation2_metrics.csv", index=False)
+    pd.concat(metric_tables, ignore_index=True).to_csv(
+        output / "standalone_gate_diagnostic.csv", index=False
+    )
 
 
 if __name__ == "__main__":

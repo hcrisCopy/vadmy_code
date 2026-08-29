@@ -198,7 +198,7 @@ def main() -> None:
     triple_agreement_weight = 0.6 + 1.7 * duration_factor
     neuron_consensus_weight = 1.0
     neuron_conflict_weight = 1.2
-    normal_suppression_weight = 2.0 - duration_factor
+    normal_suppression_weight = 1.0
     context_diverse_weight = 8.0 * duration_factor
     context_normality_weight = duration_factor
     final_dilation_width = 1 + 2 * round(12.0 * duration_factor)
@@ -342,7 +342,7 @@ def main() -> None:
                 expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
                 corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
             normal_shift = (
-                min(0.0, decision, normality_decision)
+                decision + normality_decision
                 if decision < 0.0 and normality_decision < 0.0
                 else 0.0
             )

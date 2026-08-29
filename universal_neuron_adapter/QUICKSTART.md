@@ -28,6 +28,7 @@ Output: per-video curves and metrics under `../vadmy_data/universal_neuron_adapt
 
 ```bash
 python -m universal_neuron_adapter.validate_constraints
+python -m pip install -r universal_neuron_adapter/requirements-dev.txt
 python -m pytest -q universal_neuron_adapter/tests
 bash universal_neuron_adapter/commands/run_neuron_visualization.sh --clean
 ```

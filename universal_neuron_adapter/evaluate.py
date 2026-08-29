@@ -351,7 +351,7 @@ def main() -> None:
                 expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
                 corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
             normal_shift = (
-                decision + (1.0 - duration_factor) * normality_decision
+                decision + normality_decision
                 if decision < 0.0 and normality_decision < 0.0
                 else 0.0
             )

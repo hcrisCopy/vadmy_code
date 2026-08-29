@@ -19,6 +19,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Fit a multi-scale directional CLS-neuron student.")
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--expert-manifest", required=True)
+    parser.add_argument("--auxiliary-manifest", required=True)
     parser.add_argument("--normality-manifest", required=True)
     parser.add_argument("--normality-model", required=True)
     parser.add_argument("--out-dir", required=True)
@@ -43,10 +44,11 @@ def main() -> None:
 
     frame = pd.read_csv(args.manifest)
     expert = pd.read_csv(args.expert_manifest)[["key", "expert_score_path"]]
+    auxiliary = pd.read_csv(args.auxiliary_manifest)[["key", "expert2_score_path"]]
     normality = pd.read_csv(args.normality_manifest)[["key", "expert3_score_path"]]
     frame = frame.merge(expert, on="key", validate="one_to_one").merge(
-        normality, on="key", validate="one_to_one"
-    )
+        auxiliary, on="key", validate="one_to_one"
+    ).merge(normality, on="key", validate="one_to_one")
     model = load_normality_model(args.normality_model)
     samples, labels = [], []
     for row in tqdm(frame.itertuples(index=False), total=len(frame), desc="sample context student"):
@@ -60,10 +62,20 @@ def main() -> None:
             labels.append(np.zeros(len(indices), dtype=np.int8))
             continue
         first = resample_curve(np.load(str(row.expert_score_path)), length)
+        second = resample_curve(np.load(str(row.expert2_score_path)), length)
         third = resample_curve(np.load(str(row.expert3_score_path)), length)
         first = (first - first.mean()) / max(float(first.std()), 1e-6)
+        second = (second - second.mean()) / max(float(second.std()), 1e-6)
         third = (third - third.mean()) / max(float(third.std()), 1e-6)
-        teacher = first + 3.0 * third
+        agreement = np.maximum(
+            np.nan_to_num(np.corrcoef(np.stack([first, second, third])), nan=0.0),
+            0.0,
+        )
+        np.fill_diagonal(agreement, 1.0)
+        _, eigenvectors = np.linalg.eigh(agreement)
+        weights = np.abs(eigenvectors[:, -1])
+        weights /= max(float(weights.mean()), 1e-6)
+        teacher = weights[0] * first + weights[1] * second + 3.0 * weights[2] * third
         count = max(1, int(np.ceil(args.positive_fraction * length)))
         indices = np.argpartition(teacher, length - count)[-count:]
         samples.append(features[indices])

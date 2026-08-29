@@ -18,7 +18,7 @@ def main() -> None:
     rows = []
     for dataset in ("ucf", "xd"):
         name = "auc" if dataset == "ucf" else "ap"
-        for baseline in ("lagovad", "desc", "dsanet"):
+        for baseline in ("lagovad", "desc", "dsanet", "vadclip"):
             full = json.loads((full_root / dataset / baseline / "metrics.json").read_text(encoding="utf-8"))["corrected"][name]
             selected = json.loads((root / "remove_selected" / "seed_234" / dataset / baseline / "metrics.json").read_text(encoding="utf-8"))["corrected"][name]
             random_values = [json.loads((root / "random_matched" / f"seed_{seed}" / dataset / baseline / "metrics.json").read_text(encoding="utf-8"))["corrected"][name] for seed in args.random_seeds]

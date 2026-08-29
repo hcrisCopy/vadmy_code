@@ -539,6 +539,79 @@ class LaGoVADAdapter(BaselineAdapter):
             raise ValueError(f"unknown train scope: {scope}")
 
 
+class VadCLIPAdapter(BaselineAdapter):
+    """VadCLIP (AAAI 2024) single-stream adapter.
+
+    VadCLIP shares the CLIPVAD backbone lineage with DSANet (temporal
+    transformer + graph convolutions + dual heads) but keeps its released
+    three-output forward: text prompts, binary anomaly logits, and
+    text-video alignment logits.  The released checkpoint stores the full
+    state dict (including the frozen CLIP weights), so it is loaded with
+    strict=True after constructing the identical released model.
+    """
+
+    def __init__(self, root: str, dataset: str, weight: str, device: str) -> None:
+        super().__init__()
+        source = str(Path(root) / "src")
+        sys.path.insert(0, source)
+        try:
+            from model import CLIPVAD
+            module_name = "ucf_option" if dataset == "ucf" else "xd_option"
+            options_module = __import__(module_name)
+            self.options = options_module.parser.parse_args([])
+        finally:
+            sys.path.pop(0)
+        self.dataset = dataset
+        self.label_map = label_map_for(dataset)
+        self.prompt = list(self.label_map.values())
+        self.visual_length = int(self.options.visual_length)
+        self.base = CLIPVAD(
+            self.options.classes_num, self.options.embed_dim, self.visual_length,
+            self.options.visual_width, self.options.visual_head, self.options.visual_layers,
+            self.options.attn_window, self.options.prompt_prefix, self.options.prompt_postfix,
+            device,
+        )
+        self.base.load_state_dict(_load_state(weight), strict=True)
+        _capture_encode_video(self.base, self, "main")
+
+    def forward_baseline(self, clip: torch.Tensor, lengths: torch.Tensor) -> BaselineOutput:
+        raw = self.base(clip, _batch_mask(lengths, clip.shape[1]), self.prompt, lengths)
+        # Released VadCLIP returns (text_features_ori, logits1, logits2):
+        # logits1 is the binary anomaly head, logits2 the text-video alignment
+        # logits whose first row is the normal class.  The released evaluator
+        # reports prob1 = sigmoid(logits1) as the primary anomaly score stream.
+        return BaselineOutput(raw[1].squeeze(-1), raw[2], self.base._responsibility_features, raw)
+
+    def original_loss(self, output, labels, texts, lengths):
+        target = class_targets(texts, self.label_map, output.binary_logits.device)
+        # Released CLASM normalizes per-video labels (multi-label XD rows).
+        target = target / target.sum(dim=1, keepdim=True).clamp_min(1e-6)
+        loss = binary_topk_mil(output.binary_logits, labels, lengths)
+        loss = loss + multiclass_topk_mil(output.semantic_logits, target, lengths)
+        # Released loss3 separates normal from abnormal text prompts; the scale
+        # is dataset-specific in the released training scripts.
+        separation_scale = 1e-1 if self.dataset == "ucf" else 1e-4
+        loss = loss + separation_scale * text_separation_loss(output.raw[0])
+        return loss
+
+    def set_train_scope(self, scope: str) -> None:
+        self.base.requires_grad_(False)
+        if scope == "frozen":
+            return
+        if scope in {"heads", "temporal_heads", "evidence_adaptation", "all_non_clip"}:
+            for module in (self.base.classifier, self.base.mlp1, self.base.mlp2):
+                module.requires_grad_(True)
+        if scope in {"temporal_only", "temporal_heads", "evidence_adaptation", "all_non_clip"}:
+            _unfreeze_last(self.base.temporal.resblocks)
+            for module in (self.base.gc2, self.base.gc4, self.base.linear):
+                module.requires_grad_(True)
+        if scope == "all_non_clip":
+            self.base.requires_grad_(True)
+            self.base.clipmodel.requires_grad_(False)
+        if scope not in {"frozen", "heads", "temporal_only", "temporal_heads", "evidence_adaptation", "all_non_clip"}:
+            raise ValueError(f"unknown train scope: {scope}")
+
+
 def build_baseline(args: argparse.Namespace, device: str) -> BaselineAdapter:
     if args.baseline == "dsanet":
         return DSANetAdapter(args.baseline_root, args.dataset, args.baseline_weight, device)
@@ -548,6 +621,8 @@ def build_baseline(args: argparse.Namespace, device: str) -> BaselineAdapter:
         )
     if args.baseline == "lagovad":
         return LaGoVADAdapter(args.baseline_root, args.dataset, args.baseline_weight, device)
+    if args.baseline == "vadclip":
+        return VadCLIPAdapter(args.baseline_root, args.dataset, args.baseline_weight, device)
     raise ValueError(f"unknown baseline: {args.baseline}")
 
 

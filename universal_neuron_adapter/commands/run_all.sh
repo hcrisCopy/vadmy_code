@@ -37,7 +37,7 @@ for dataset in ucf xd; do
     --manifest "$SOURCE/$dataset/data/expert_train.csv" \
     --student-model "$context/context_student.npz" \
     --normality-model "$normality/normality_expert.npz" --out-dir "$context/train"
-  for baseline in lagovad desc dsanet; do
+  for baseline in lagovad desc dsanet vadclip; do
     source_base="$SOURCE/$dataset/$baseline"
     target="$OUT/$dataset/$baseline/evaluation"
     python -m universal_neuron_adapter.evaluate \

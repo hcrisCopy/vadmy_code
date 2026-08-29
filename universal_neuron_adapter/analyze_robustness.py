@@ -18,7 +18,7 @@ def main() -> None:
     for variant_dir in sorted((root / "evaluations").iterdir()):
         for dataset in ("ucf", "xd"):
             metric = "auc" if dataset == "ucf" else "ap"
-            for baseline in ("lagovad", "desc", "dsanet"):
+            for baseline in ("lagovad", "desc", "dsanet", "vadclip"):
                 path = variant_dir / dataset / baseline / "metrics.json"
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 rows.append({
@@ -37,8 +37,8 @@ def main() -> None:
     order = ["width_33", "width_41", "width_49", "advance_0", "advance_2"]
     labels = ["width 33", "width 41 / advance 1", "width 49", "advance 0", "advance 2"]
     settings = [
-        ("ucf", "lagovad"), ("ucf", "desc"), ("ucf", "dsanet"),
-        ("xd", "lagovad"), ("xd", "desc"), ("xd", "dsanet"),
+        ("ucf", "lagovad"), ("ucf", "desc"), ("ucf", "dsanet"), ("ucf", "vadclip"),
+        ("xd", "lagovad"), ("xd", "desc"), ("xd", "dsanet"), ("xd", "vadclip"),
     ]
     values = np.asarray([
         [float(frame[(frame.variant == variant) & (frame.dataset == dataset) &

@@ -1,6 +1,6 @@
 # Universal CLS-neuron adapter
 
-This package implements one score-space adapter shared by LaGoVAD, DeSC, and DSANet on UCF-Crime and XD-Violence. Every evaluation receives exactly one frozen baseline score stream. It never uses another baseline as an anchor. A neuron is one coordinate of a CLIP ViT-B/16 CLS hidden state; no optical flow or patch token is extracted.
+This package implements one score-space adapter shared by LaGoVAD, DeSC, DSANet, and VadCLIP on UCF-Crime and XD-Violence. Every evaluation receives exactly one frozen baseline score stream. It never uses another baseline as an anchor. A neuron is one coordinate of a CLIP ViT-B/16 CLS hidden state; no optical flow or patch token is extracted.
 
 ## Method
 

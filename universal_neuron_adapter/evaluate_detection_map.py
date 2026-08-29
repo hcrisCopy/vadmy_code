@@ -30,13 +30,13 @@ def redistribute_semantic_mass(semantic: np.ndarray, anomaly: np.ndarray) -> np.
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the unmodified official DSANet detection-mAP protocol.")
+    parser = argparse.ArgumentParser(description="Run the unmodified official CLIPVAD-lineage detection-mAP protocol.")
     parser.add_argument("--dataset", choices=["ucf", "xd"], required=True)
     parser.add_argument("--baseline-manifest", required=True)
     parser.add_argument("--evaluation-manifest", required=True)
     parser.add_argument("--segment-gt", required=True)
     parser.add_argument("--label-gt", required=True)
-    parser.add_argument("--dsanet-root", default="baseline/DSANet")
+    parser.add_argument("--baseline-root", default="baseline/DSANet", help="Baseline whose src/utils/{ucf,xd}_detectionMAP.py implements the official evaluator (DSANet and VadCLIP ship identical files).")
     parser.add_argument("--out-path", required=True)
     args = parser.parse_args()
     baseline = pd.read_csv(args.baseline_manifest)
@@ -50,7 +50,7 @@ def main() -> None:
         curves = np.load(str(row.curve_path))
         original.append(np.repeat(semantic, 16, axis=0))
         corrected.append(np.repeat(redistribute_semantic_mass(semantic, curves["corrected"]), 16, axis=0))
-    evaluator_path = Path(args.dsanet_root) / "src" / "utils" / f"{args.dataset}_detectionMAP.py"
+    evaluator_path = Path(args.baseline_root) / "src" / "utils" / f"{args.dataset}_detectionMAP.py"
     official = load_official_evaluator(evaluator_path)
     segments = np.load(args.segment_gt, allow_pickle=True)
     labels = np.load(args.label_gt, allow_pickle=True)
@@ -59,7 +59,7 @@ def main() -> None:
     if list(ious) != list(corrected_ious):
         raise RuntimeError("official evaluator returned inconsistent IoU grids")
     report = {
-        "protocol": "DSANet official getDetectionMAP, excludeNormal=False",
+        "protocol": f"official {Path(args.baseline_root).name} getDetectionMAP, excludeNormal=False",
         "semantic_mapping": "preserve abnormal-class conditional ratios; replace total abnormal mass with adapter score",
         "iou": [float(value) for value in ious],
         "baseline_map": [float(value) for value in original_map],

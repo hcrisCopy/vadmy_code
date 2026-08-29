@@ -21,6 +21,6 @@ for dataset in ucf xd; do
   python -m universal_neuron_adapter.evaluate_detection_map \
     --dataset "$dataset" --baseline-manifest "$cache/baseline_scores.csv" \
     --evaluation-manifest "$ROOT/ablations/full/$dataset/dsanet/per_video.csv" \
-    --segment-gt "$segments" --label-gt "$labels" --dsanet-root baseline/DSANet \
+    --segment-gt "$segments" --label-gt "$labels" --baseline-root baseline/DSANet \
     --out-path "$ROOT/detection_map/$dataset/metrics.json"
 done

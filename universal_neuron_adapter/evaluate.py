@@ -231,7 +231,7 @@ def main() -> None:
     parser.add_argument("--student-train-manifest", required=True)
     parser.add_argument("--correction-model", required=True)
     parser.add_argument("--gt-path", required=True)
-    parser.add_argument("--baseline", choices=["lagovad", "desc", "dsanet"], required=True)
+    parser.add_argument("--baseline", choices=["lagovad", "desc", "dsanet", "vadclip"], required=True)
     parser.add_argument("--dataset", choices=["ucf", "xd"], required=True)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--frames-per-snippet", type=int, default=16)

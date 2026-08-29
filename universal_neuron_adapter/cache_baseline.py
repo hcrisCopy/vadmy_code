@@ -50,7 +50,7 @@ def infer(adapter, baseline: str, dataset: str, clip: np.ndarray, device: torch.
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Cache frozen single-baseline binary and semantic probabilities.")
-    parser.add_argument("--baseline", choices=["dsanet", "desc", "lagovad"], required=True)
+    parser.add_argument("--baseline", choices=["dsanet", "desc", "lagovad", "vadclip"], required=True)
     parser.add_argument("--baseline-root", required=True)
     parser.add_argument("--baseline-weight", default="")
     parser.add_argument("--sensitivity-weight", default="")

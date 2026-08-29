@@ -17,7 +17,7 @@ def main() -> None:
     rows = []
     for dataset in ("ucf", "xd"):
         metric = "auc" if dataset == "ucf" else "ap"
-        for baseline in ("lagovad", "desc", "dsanet"):
+        for baseline in ("lagovad", "desc", "dsanet", "vadclip"):
             values = []
             for seed in args.seeds:
                 path = root / f"seed_{seed}" / dataset / baseline / "evaluation" / "metrics.json"

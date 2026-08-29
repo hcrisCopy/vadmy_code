@@ -41,7 +41,7 @@ evaluate_variant() {
 }
 
 for dataset in ucf xd; do
-  for baseline in lagovad desc dsanet; do
+  for baseline in lagovad desc dsanet vadclip; do
     evaluate_variant baseline "$dataset" "$baseline" --disable-correction --disable-agreement --disable-event-gate --disable-video-suppression --disable-temporal
     evaluate_variant correction "$dataset" "$baseline" --disable-agreement --disable-event-gate --disable-video-suppression --disable-temporal
     evaluate_variant agreement "$dataset" "$baseline" --disable-event-gate --disable-video-suppression --disable-temporal

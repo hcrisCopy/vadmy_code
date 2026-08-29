@@ -81,7 +81,7 @@ def main() -> None:
     output.mkdir(parents=True, exist_ok=True)
     rows, bootstrap = [], {}
     for dataset, gt in (("ucf", Path(args.ucf_gt)), ("xd", Path(args.xd_gt))):
-        for baseline in ("lagovad", "desc", "dsanet"):
+        for baseline in ("lagovad", "desc", "dsanet", "vadclip"):
             evaluation = root / dataset / baseline
             if not (evaluation / "per_video.csv").exists():
                 continue

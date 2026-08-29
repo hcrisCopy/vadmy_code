@@ -27,7 +27,7 @@ for seed in "${SEEDS[@]}"; do
       --positive-fraction 0.05 --epochs 20 --seed "$seed" --resume
     python -m universal_neuron_adapter.export_context_student --manifest "$data/expert_train.csv" --student-model "$context/context_student.npz" --normality-model "$normality/normality_expert.npz" --out-dir "$context/train"
     python -m universal_neuron_adapter.export_context_student --manifest "$data/test.csv" --student-model "$context/context_student.npz" --normality-model "$normality/normality_expert.npz" --out-dir "$context/test"
-    for baseline in lagovad desc dsanet; do
+    for baseline in lagovad desc dsanet vadclip; do
       source_base="$SOURCE/$dataset/$baseline"; correction="$ROOT/seed_$seed/$dataset/$baseline/correction"
       python -m universal_neuron_adapter.train_correction --baseline-manifest "$source_base/baseline_train/baseline_scores.csv" \
         --expert-manifest "$primary/train/expert_scores.csv" --train-keys "$data/expert_train.csv" --val-keys "$data/expert_val.csv" \

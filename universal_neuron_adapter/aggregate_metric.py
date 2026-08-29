@@ -13,6 +13,8 @@ PAPER_BASELINES = {
     ("desc", "xd"): ("ap", 87.18),
     ("dsanet", "ucf"): ("auc", 89.44),
     ("dsanet", "xd"): ("ap", 86.95),
+    ("vadclip", "ucf"): ("auc", 88.02),
+    ("vadclip", "xd"): ("ap", 84.51),
 }
 
 

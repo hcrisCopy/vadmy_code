@@ -54,7 +54,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train a conservative single-baseline score correction head.")
     for name in ("baseline-manifest", "expert-manifest", "train-keys", "val-keys", "out-dir"):
         parser.add_argument(f"--{name}", required=True)
-    parser.add_argument("--baseline", choices=["dsanet", "desc", "lagovad"], required=True)
+    parser.add_argument("--baseline", choices=["dsanet", "desc", "lagovad", "vadclip"], required=True)
     parser.add_argument("--dataset", choices=["ucf", "xd"], required=True)
     parser.add_argument("--width", type=int, default=32)
     parser.add_argument("--max-epoch", type=int, default=15)

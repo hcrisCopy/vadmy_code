@@ -117,6 +117,24 @@ def spectral_consensus_weights(*curves: np.ndarray) -> np.ndarray:
     return weights / max(float(weights.mean()), 1e-6)
 
 
+def local_spectral_consensus_weights(width: int, *curves: np.ndarray) -> np.ndarray:
+    """Estimate smooth time-local detector centrality in an event-sized window."""
+    length = len(curves[0])
+    radius = width // 2
+    weights = np.empty((length, len(curves)), dtype=np.float32)
+    global_weights = spectral_consensus_weights(*curves)
+    for index in range(length):
+        start = max(0, index - radius)
+        stop = min(length, index + radius + 1)
+        if stop - start < 3:
+            weights[index] = global_weights
+        else:
+            weights[index] = spectral_consensus_weights(
+                *(curve[start:stop] for curve in curves)
+            )
+    return weights
+
+
 def estimate_persistence_width(
     expert_manifest: str,
     expert2_manifest: str,
@@ -330,13 +348,13 @@ def main() -> None:
                 corrected = expit(logit(corrected) + agreement_residual_weight * high_high)
                 triple_high = np.minimum(high_high, np.maximum(standardized3, 0.0))
                 corrected = expit(logit(corrected) + triple_agreement_weight * triple_high)
-            consensus_weights = spectral_consensus_weights(
-                standardized, standardized2, standardized3
+            consensus_weights = local_spectral_consensus_weights(
+                args.event_width, standardized, standardized2, standardized3
             )
             neuron_gate = expit(
-                consensus_weights[0] * standardized
-                + consensus_weights[1] * standardized2
-                + normality_gate_weight * consensus_weights[2] * standardized3
+                consensus_weights[:, 0] * standardized
+                + consensus_weights[:, 1] * standardized2
+                + normality_gate_weight * consensus_weights[:, 2] * standardized3
             )
             if not args.disable_event_gate:
                 expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
@@ -394,7 +412,7 @@ def main() -> None:
             "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(sum of video-standardized CLS-neuron evidence)",
-            "event_gate_reliability": "principal eigenvector of positive detector agreement",
+            "event_gate_reliability": "event-window local principal eigenvectors of positive detector agreement",
             "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
             "normality_gate_weight": normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,

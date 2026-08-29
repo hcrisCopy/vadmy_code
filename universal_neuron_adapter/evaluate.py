@@ -290,8 +290,23 @@ def main() -> None:
                 corrected = base.copy()
             else:
                 correction = model(base_tensor, neuron_tensor)
+                neuron_tensor_scale = neuron_tensor.std(
+                    dim=1, keepdim=True, unbiased=False
+                ).clamp_min(1e-6)
+                neuron_tensor_evidence = (
+                    neuron_tensor - neuron_tensor.mean(dim=1, keepdim=True)
+                ) / neuron_tensor_scale
+                confidence_weight = torch.tanh(neuron_tensor_evidence.abs())
+                effective_correction_weight = (
+                    correction_weight
+                    + (1.0 - duration_factor) * confidence_weight
+                )
                 corrected = calibrated_probability(
-                    base_tensor, neuron_tensor, correction, correction_weight, neuron_weight
+                    base_tensor,
+                    neuron_tensor,
+                    correction,
+                    effective_correction_weight,
+                    neuron_weight,
                 )[0].cpu().numpy().astype(np.float32)
             standardized = (neuron - neuron.mean()) / max(float(neuron.std()), 1e-6)
             standardized2 = fuse_standardized(neuron2, student_curve, context_diverse_weight)
@@ -392,6 +407,7 @@ def main() -> None:
         },
         "configuration": {
             "correction_weight": correction_weight,
+            "short_event_correction_gate": "tanh(abs(video-standardized primary neuron evidence))",
             "neuron_weight": neuron_weight,
             "event_width": args.event_width,
             "event_weight": args.event_weight,

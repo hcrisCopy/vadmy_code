@@ -294,10 +294,6 @@ def main() -> None:
                     base_tensor, neuron_tensor, correction, correction_weight, neuron_weight
                 )[0].cpu().numpy().astype(np.float32)
             standardized = (neuron - neuron.mean()) / max(float(neuron.std()), 1e-6)
-            standardized_diverse = (neuron2 - neuron2.mean()) / max(float(neuron2.std()), 1e-6)
-            standardized_student = (
-                student_curve - student_curve.mean()
-            ) / max(float(student_curve.std()), 1e-6)
             standardized2 = fuse_standardized(neuron2, student_curve, context_diverse_weight)
             standardized2 = (standardized2 - standardized2.mean()) / max(float(standardized2.std()), 1e-6)
             neuron3_context = fuse_standardized(neuron3, student_curve, context_normality_weight)
@@ -334,26 +330,14 @@ def main() -> None:
                 corrected = expit(logit(corrected) + agreement_residual_weight * high_high)
                 triple_high = np.minimum(high_high, np.maximum(standardized3, 0.0))
                 corrected = expit(logit(corrected) + triple_agreement_weight * triple_high)
-            if duration_factor > 0.0:
-                consensus_weights = spectral_consensus_weights(
-                    standardized, standardized_diverse, standardized3, standardized_student
-                )
-                neuron_gate_logit = (
-                    consensus_weights[0] * standardized
-                    + consensus_weights[1] * standardized_diverse
-                    + normality_gate_weight * consensus_weights[2] * standardized3
-                    + consensus_weights[3] * standardized_student
-                )
-            else:
-                consensus_weights = spectral_consensus_weights(
-                    standardized, standardized_diverse, standardized3
-                )
-                neuron_gate_logit = (
-                    consensus_weights[0] * standardized
-                    + consensus_weights[1] * standardized_diverse
-                    + normality_gate_weight * consensus_weights[2] * standardized3
-                )
-            neuron_gate = expit(neuron_gate_logit)
+            consensus_weights = spectral_consensus_weights(
+                standardized, standardized2, standardized3
+            )
+            neuron_gate = expit(
+                consensus_weights[0] * standardized
+                + consensus_weights[1] * standardized2
+                + normality_gate_weight * consensus_weights[2] * standardized3
+            )
             if not args.disable_event_gate:
                 expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
                 corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
@@ -410,7 +394,7 @@ def main() -> None:
             "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(sum of video-standardized CLS-neuron evidence)",
-            "event_gate_reliability": "three-node spectral graph plus a separate context node when training persistence is positive",
+            "event_gate_reliability": "principal eigenvector of positive detector agreement",
             "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
             "normality_gate_weight": normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,

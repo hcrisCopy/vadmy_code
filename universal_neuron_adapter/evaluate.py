@@ -210,7 +210,9 @@ def main() -> None:
     normal_suppression_weight = 1.0
     context_diverse_weight = 8.0 * duration_factor
     context_normality_weight = duration_factor
-    final_dilation_width = 1 + 2 * round(12.0 * duration_factor)
+    final_dilation_width = 1 + round(
+        duration_factor * (2 * persistence_width - 2)
+    )
     final_dilation_weight = duration_factor
     effective_gaussian_sigma = args.gaussian_sigma + 0.5 * duration_factor
 

@@ -186,7 +186,7 @@ def main() -> None:
     agreement_residual_weight = 0.5 - 0.3 * duration_factor
     triple_agreement_weight = 0.6 + 1.7 * duration_factor
     neuron_consensus_weight = 1.0
-    neuron_conflict_weight = 0.6
+    neuron_conflict_weight = 1.2
     normal_suppression_weight = 2.0 - duration_factor
     context_diverse_weight = 8.0 * duration_factor
     context_normality_weight = duration_factor
@@ -310,7 +310,7 @@ def main() -> None:
                 )
                 neuron_conflict = np.minimum(
                     np.maximum(standardized_base, 0.0),
-                    np.maximum(-0.5 * (standardized + standardized3), 0.0),
+                    np.minimum(np.maximum(-standardized, 0.0), np.maximum(-standardized3, 0.0)),
                 )
                 corrected = expit(logit(corrected) - neuron_conflict_weight * neuron_conflict)
             high_high = np.minimum(np.maximum(standardized_base, 0.0), np.maximum(standardized, 0.0))
@@ -381,7 +381,6 @@ def main() -> None:
             "agreement_residual_weight": agreement_residual_weight,
             "neuron_consensus_weight": neuron_consensus_weight,
             "neuron_conflict_weight": neuron_conflict_weight,
-            "neuron_conflict_context": "negative mean evidence from primary and directional neurons",
             "neuron_consensus_context": "duration interpolation from fixed 0.3 to gated unit residual",
             "triple_agreement_weight": triple_agreement_weight,
             "normal_suppression_weight": normal_suppression_weight,

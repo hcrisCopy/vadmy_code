@@ -201,7 +201,7 @@ def main() -> None:
     normal_suppression_weight = 2.0 - duration_factor
     context_diverse_weight = 8.0 * duration_factor
     context_normality_weight = duration_factor
-    final_dilation_width = 1 + 2 * round(12.0 * duration_factor)
+    final_dilation_width = 1 + 2 * round(16.0 * duration_factor)
     final_dilation_weight = 0.75 * duration_factor
     effective_gaussian_sigma = args.gaussian_sigma + 0.5 * duration_factor
 
@@ -333,6 +333,10 @@ def main() -> None:
             consensus_weights = spectral_consensus_weights(
                 standardized, standardized2, standardized3
             )
+            consensus_weights = (
+                (1.0 - duration_factor) * np.ones_like(consensus_weights)
+                + duration_factor * consensus_weights
+            )
             neuron_gate = expit(
                 consensus_weights[0] * standardized
                 + consensus_weights[1] * standardized2
@@ -394,7 +398,7 @@ def main() -> None:
             "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(sum of video-standardized CLS-neuron evidence)",
-            "event_gate_reliability": "principal eigenvector of positive detector agreement",
+            "event_gate_reliability": "training-duration interpolation from uniform to spectral detector agreement",
             "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
             "normality_gate_weight": normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,

@@ -13,17 +13,26 @@ from innovation_evidence.common import (
     prepare_output, require_relative, sigmoid_gate,
 )
 from universal_neuron_adapter.evaluate import spectral_consensus_weights
+from universal_neuron_adapter.data import resample_curve
 
 
 def evaluate_dataset(dataset: str, source: Path, normality: Path, context: Path, truth_path: Path, frames_per_snippet: int):
-    frame = merge_expert_manifests(
+    experts = merge_expert_manifests(
         source / dataset / "expert" / "test" / "expert_scores.csv",
         context / dataset / "top32_multiscale_seed234" / "test" / "student_scores.csv",
         normality / dataset / "top32_signed_v1" / "test" / "expert3_scores.csv",
     )
+    # LaGoVAD is used only as the official per-video temporal grid. Its values
+    # never enter the detector agreement matrix or either consensus gate.
+    reference = pd.read_csv(
+        source / dataset / "lagovad" / "baseline_test" / "baseline_scores.csv"
+    )[["key", "baseline_score_path"]]
+    frame = reference.merge(experts, on="key", validate="one_to_one")
     uniform_parts, spectral_parts, weight_rows = [], [], []
     for row in tqdm(frame.itertuples(index=False), total=len(frame), desc=f"{dataset}: spectral consensus"):
         curves = expert_curves(row)
+        reference_length = len(np.load(str(row.baseline_score_path)))
+        curves = tuple(resample_curve(curve, reference_length) for curve in curves)
         weights = spectral_consensus_weights(*curves)
         uniform_parts.append(sigmoid_gate(curves, np.ones(3, dtype=np.float32)))
         spectral_parts.append(sigmoid_gate(curves, weights))

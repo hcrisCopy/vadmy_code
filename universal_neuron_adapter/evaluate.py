@@ -338,9 +338,10 @@ def main() -> None:
                 + consensus_weights[1] * standardized2
                 + normality_gate_weight * consensus_weights[2] * standardized3
             )
+            positive_neuron_gate = np.maximum(0.0, 2.0 * neuron_gate - 1.0)
             if not args.disable_event_gate:
                 expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
-                corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
+                corrected = corrected + args.event_weight * positive_neuron_gate * (expanded - corrected)
             normal_shift = min(0.0, decision)
             if decision < 0.0 and normality_decision < 0.0:
                 normal_shift += 0.25 * normality_decision

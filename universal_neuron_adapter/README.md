@@ -4,7 +4,7 @@ This package implements one score-space adapter shared by LaGoVAD, DeSC, and DSA
 
 ## Method
 
-The adapter combines a conservative learned score correction with three sparse CLS-neuron views. The primary and directional detectors form an intersection residual. A single-baseline miss gate gives that residual more influence where the current baseline is below its within-video confidence center and less influence where the baseline is already confident; it never consumes another baseline stream. Training-only video priors and neuron persistence constrain video-level strength and temporal range.
+The adapter combines a conservative learned score correction with three sparse CLS-neuron views. A direct residual recovers baseline misses where the primary and directional detectors have positive intersecting evidence. Short events use a fixed conservative residual; persistent events use a stronger residual multiplied by the Sigmoid of the smaller logit from two training-only video priors. The training-inferred duration factor continuously interpolates between them. Baseline-neuron agreement separately controls local event expansion. Persistent-event data also fuse the inferred median trajectory with a second scale of width `2w-1`, while short-event data retain the single scale.
 
 ## Data-integrity policy
 

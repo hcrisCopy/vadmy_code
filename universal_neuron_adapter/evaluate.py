@@ -106,17 +106,6 @@ def longest_positive_run(values: np.ndarray) -> int:
     return int(lengths.max()) if len(lengths) else 1
 
 
-def connected_event_maximum(curve: np.ndarray, support: np.ndarray) -> np.ndarray:
-    """Propagate each peak only inside its contiguous neuron-supported event."""
-    expanded = np.asarray(curve, dtype=np.float32).copy()
-    mask = np.asarray(support, dtype=bool)
-    padded = np.concatenate([np.zeros(1, dtype=bool), mask, np.zeros(1, dtype=bool)])
-    changes = np.flatnonzero(padded[1:] != padded[:-1])
-    for start, stop in zip(changes[::2], changes[1::2]):
-        expanded[start:stop] = float(np.max(curve[start:stop]))
-    return expanded
-
-
 def estimate_persistence_width(
     expert_manifest: str,
     expert2_manifest: str,
@@ -329,10 +318,9 @@ def main() -> None:
                 corrected = expit(logit(corrected) + agreement_residual_weight * high_high)
                 triple_high = np.minimum(high_high, np.maximum(standardized3, 0.0))
                 corrected = expit(logit(corrected) + triple_agreement_weight * triple_high)
-            neuron_gate_logit = standardized + standardized2 + normality_gate_weight * standardized3
-            neuron_gate = expit(neuron_gate_logit)
+            neuron_gate = expit(standardized + standardized2 + normality_gate_weight * standardized3)
             if not args.disable_event_gate:
-                expanded = connected_event_maximum(corrected, neuron_gate_logit > 0.0)
+                expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
                 corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
             normal_shift = min(0.0, decision)
             if decision < 0.0 and normality_decision < 0.0:
@@ -384,9 +372,9 @@ def main() -> None:
         "configuration": {
             "correction_weight": correction_weight,
             "neuron_weight": neuron_weight,
-            "event_width": "adaptive connected neuron-support component",
+            "event_width": args.event_width,
             "event_weight": args.event_weight,
-            "event_gate": "sigmoid evidence within connected positive CLS-neuron components",
+            "event_gate": "sigmoid(sum of video-standardized CLS-neuron evidence)",
             "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
             "normality_gate_weight": normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,

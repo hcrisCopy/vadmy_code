@@ -117,15 +117,6 @@ def spectral_consensus_weights(*curves: np.ndarray) -> np.ndarray:
     return weights / max(float(weights.mean()), 1e-6)
 
 
-def spectral_agreement_strength(*curves: np.ndarray) -> float:
-    """Normalize the largest positive-correlation eigenvalue to [0, 1]."""
-    matrix = np.corrcoef(np.stack(curves))
-    matrix = np.maximum(np.nan_to_num(matrix, nan=0.0), 0.0)
-    np.fill_diagonal(matrix, 1.0)
-    largest = float(np.linalg.eigvalsh(matrix)[-1])
-    return float(np.clip((largest - 1.0) / max(len(curves) - 1, 1), 0.0, 1.0))
-
-
 def estimate_persistence_width(
     expert_manifest: str,
     expert2_manifest: str,
@@ -342,9 +333,6 @@ def main() -> None:
             consensus_weights = spectral_consensus_weights(
                 standardized, standardized2, standardized3
             )
-            agreement_strength = spectral_agreement_strength(
-                standardized, standardized2, standardized3
-            )
             neuron_gate = expit(
                 consensus_weights[0] * standardized
                 + consensus_weights[1] * standardized2
@@ -352,8 +340,7 @@ def main() -> None:
             )
             if not args.disable_event_gate:
                 expanded = maximum_filter1d(corrected, args.event_width, mode="nearest")
-                spectral_event_scale = 0.75 + 0.5 * agreement_strength
-                corrected = corrected + args.event_weight * spectral_event_scale * neuron_gate * (expanded - corrected)
+                corrected = corrected + args.event_weight * neuron_gate * (expanded - corrected)
             normal_shift = min(0.0, decision)
             if decision < 0.0 and normality_decision < 0.0:
                 normal_shift += 0.25 * normality_decision
@@ -408,7 +395,6 @@ def main() -> None:
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(sum of video-standardized CLS-neuron evidence)",
             "event_gate_reliability": "principal eigenvector of positive detector agreement",
-            "event_gate_strength": "0.75 + 0.5 times normalized largest agreement eigenvalue",
             "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
             "normality_gate_weight": normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,

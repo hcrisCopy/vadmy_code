@@ -308,13 +308,8 @@ def main() -> None:
             normality_decision = float(normality_video_model.decision_function(np.asarray(normality_video_features(base, neuron, neuron2, blend_normality(neuron3_context, args.normality_smoothing_blend)))[None])[0])
             video_anomaly_gate = float(expit(min(decision, normality_decision)))
             standardized_base = (base - base.mean()) / max(float(base.std()), 1e-6)
-            consensus_weights = spectral_consensus_weights(
-                standardized, standardized2, standardized3
-            )
-            primary_evidence = consensus_weights[0] * standardized
-            directional_evidence = consensus_weights[2] * standardized3
             neuron_consensus = np.minimum(
-                np.maximum(primary_evidence, 0.0), np.maximum(directional_evidence, 0.0)
+                np.maximum(standardized, 0.0), np.maximum(standardized3, 0.0)
             )
             if not args.disable_agreement:
                 residual_scale = (
@@ -327,10 +322,7 @@ def main() -> None:
                 )
                 neuron_conflict = np.minimum(
                     np.maximum(standardized_base, 0.0),
-                    np.minimum(
-                        np.maximum(-primary_evidence, 0.0),
-                        np.maximum(-directional_evidence, 0.0),
-                    ),
+                    np.minimum(np.maximum(-standardized, 0.0), np.maximum(-standardized3, 0.0)),
                 )
                 corrected = expit(logit(corrected) - neuron_conflict_weight * neuron_conflict)
             high_high = np.minimum(np.maximum(standardized_base, 0.0), np.maximum(standardized, 0.0))
@@ -338,6 +330,9 @@ def main() -> None:
                 corrected = expit(logit(corrected) + agreement_residual_weight * high_high)
                 triple_high = np.minimum(high_high, np.maximum(standardized3, 0.0))
                 corrected = expit(logit(corrected) + triple_agreement_weight * triple_high)
+            consensus_weights = spectral_consensus_weights(
+                standardized, standardized2, standardized3
+            )
             neuron_gate = expit(
                 consensus_weights[0] * standardized
                 + consensus_weights[1] * standardized2

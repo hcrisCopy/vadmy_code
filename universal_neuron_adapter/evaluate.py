@@ -107,10 +107,11 @@ def longest_positive_run(values: np.ndarray) -> int:
 
 
 def spectral_consensus_weights(*curves: np.ndarray) -> np.ndarray:
-    """Return mean-one eigenvector-centrality weights from positive agreement."""
-    matrix = np.corrcoef(np.stack(curves))
-    matrix = np.nan_to_num(matrix, nan=0.0, posinf=0.0, neginf=0.0)
-    matrix = np.maximum(matrix, 0.0)
+    """Return mean-one eigenvector weights from positive-response overlap."""
+    positive = np.maximum(np.stack(curves).astype(np.float64), 0.0)
+    norms = np.linalg.norm(positive, axis=1, keepdims=True)
+    normalized = positive / np.maximum(norms, 1e-12)
+    matrix = normalized @ normalized.T
     np.fill_diagonal(matrix, 1.0)
     _, eigenvectors = np.linalg.eigh(matrix)
     weights = np.abs(eigenvectors[:, -1]).astype(np.float32)
@@ -394,7 +395,7 @@ def main() -> None:
             "event_width": args.event_width,
             "event_weight": args.event_weight,
             "event_gate": "sigmoid(sum of video-standardized CLS-neuron evidence)",
-            "event_gate_reliability": "principal eigenvector of positive detector agreement",
+            "event_gate_reliability": "principal eigenvector of positive-response cosine overlap",
             "event_gate_experts": "MIL experts plus weighted baseline-independent normality expert",
             "normality_gate_weight": normality_gate_weight,
             "normality_smoothing_blend": args.normality_smoothing_blend,

@@ -4,7 +4,7 @@ This package implements one score-space adapter shared by LaGoVAD, DeSC, and DSA
 
 ## Method
 
-The adapter combines a conservative learned score correction with three sparse CLS-neuron views. Positive intersection evidence from the primary and directional detectors forms a bounded residual. Conversely, a high current-baseline response is mildly suppressed only when both neuron detectors independently provide negative evidence, removing likely frame-level false positives without consulting another baseline. Training-only video priors and neuron persistence constrain video-level strength and temporal range.
+The adapter combines a conservative learned score correction with three sparse CLS-neuron views. Positive and negative neuron intersections provide bounded snippet-level rescue and conflict suppression. At video level, two training-only priors must agree: negative decisions suppress likely normal videos, while a positive shift is allowed only above the 95th percentile of the paired prior measured on normal training videos. This conformal threshold protects cross-video ordering without test labels or another baseline stream.
 
 ## Data-integrity policy
 

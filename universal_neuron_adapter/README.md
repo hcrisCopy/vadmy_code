@@ -4,7 +4,7 @@ This package implements one score-space adapter shared by LaGoVAD, DeSC, and DSA
 
 ## Method
 
-The adapter combines a conservative learned score correction with three sparse CLS-neuron views. Positive intersection evidence forms a bounded residual, while joint negative evidence suppresses likely false positives. Training-only neuron persistence continuously controls dual-scale temporal aggregation and the final boundary-recovery radius; short-event data retain no terminal dilation. No module consults another baseline stream.
+The adapter combines a conservative learned score correction with three sparse CLS-neuron views. Positive intersection evidence forms a bounded residual, while joint negative evidence suppresses likely false positives. Training-only neuron persistence controls temporal aggregation and boundary recovery. A fixed 1.2 residual extrapolation in log-odds space tests whether the validated neuron correction remains under-applied relative to the current single baseline.
 
 ## Data-integrity policy
 

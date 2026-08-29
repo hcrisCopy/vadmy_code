@@ -106,6 +106,13 @@ def longest_positive_run(values: np.ndarray) -> int:
     return int(lengths.max()) if len(lengths) else 1
 
 
+def read_second_expert_manifest(path: str) -> pd.DataFrame:
+    frame = pd.read_csv(path)
+    if "expert2_score_path" not in frame and "student_score_path" in frame:
+        frame = frame.rename(columns={"student_score_path": "expert2_score_path"})
+    return frame[["key", "expert2_score_path"]]
+
+
 def spectral_consensus_weights(*curves: np.ndarray) -> np.ndarray:
     """Return mean-one eigenvector-centrality weights from positive agreement."""
     matrix = np.corrcoef(np.stack(curves))
@@ -124,7 +131,7 @@ def estimate_persistence_width(
     normality_blend: float,
 ) -> int:
     expert = pd.read_csv(expert_manifest)[["key", "expert_score_path"]]
-    expert2 = pd.read_csv(expert2_manifest)[["key", "expert2_score_path"]]
+    expert2 = read_second_expert_manifest(expert2_manifest)
     expert3 = pd.read_csv(expert3_manifest)[["key", "expert3_score_path"]]
     frame = expert.merge(expert2, on="key", validate="one_to_one").merge(
         expert3, on="key", validate="one_to_one"
@@ -221,7 +228,7 @@ def main() -> None:
 
     baseline_train = pd.read_csv(args.baseline_train_manifest)
     expert_train = pd.read_csv(args.expert_train_manifest)[["key", "expert_score_path"]]
-    expert2_train = pd.read_csv(args.expert2_train_manifest)[["key", "expert2_score_path"]]
+    expert2_train = read_second_expert_manifest(args.expert2_train_manifest)
     expert3_train = pd.read_csv(args.expert3_train_manifest)[["key", "expert3_score_path"]]
     student_train = pd.read_csv(args.student_train_manifest)[["key", "student_score_path"]]
     video_train = baseline_train.merge(expert_train, on="key", validate="one_to_one").merge(
@@ -265,7 +272,7 @@ def main() -> None:
     )
     baseline = pd.read_csv(args.baseline_manifest)
     expert = pd.read_csv(args.expert_manifest)[["key", "expert_score_path"]]
-    expert2 = pd.read_csv(args.expert2_manifest)[["key", "expert2_score_path"]]
+    expert2 = read_second_expert_manifest(args.expert2_manifest)
     expert3 = pd.read_csv(args.expert3_manifest)[["key", "expert3_score_path"]]
     student = pd.read_csv(args.student_manifest)[["key", "student_score_path"]]
     expected_train_keys = set(pd.read_csv(args.expert2_train_manifest)["key"].astype(str))

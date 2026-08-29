@@ -186,6 +186,7 @@ def main() -> None:
     agreement_residual_weight = 0.5 - 0.3 * duration_factor
     triple_agreement_weight = 0.6 + 1.7 * duration_factor
     neuron_consensus_weight = 1.0
+    neuron_conflict_weight = 0.3
     normal_suppression_weight = 2.0 - duration_factor
     context_diverse_weight = 8.0 * duration_factor
     context_normality_weight = duration_factor
@@ -307,6 +308,11 @@ def main() -> None:
                     logit(corrected)
                     + residual_scale * neuron_consensus
                 )
+                neuron_conflict = np.minimum(
+                    np.maximum(standardized_base, 0.0),
+                    np.minimum(np.maximum(-standardized, 0.0), np.maximum(-standardized3, 0.0)),
+                )
+                corrected = expit(logit(corrected) - neuron_conflict_weight * neuron_conflict)
             high_high = np.minimum(np.maximum(standardized_base, 0.0), np.maximum(standardized, 0.0))
             if not args.disable_agreement:
                 corrected = expit(logit(corrected) + agreement_residual_weight * high_high)
@@ -374,6 +380,7 @@ def main() -> None:
             "normality_smoothing_blend": args.normality_smoothing_blend,
             "agreement_residual_weight": agreement_residual_weight,
             "neuron_consensus_weight": neuron_consensus_weight,
+            "neuron_conflict_weight": neuron_conflict_weight,
             "neuron_consensus_context": "duration interpolation from fixed 0.3 to gated unit residual",
             "triple_agreement_weight": triple_agreement_weight,
             "normal_suppression_weight": normal_suppression_weight,

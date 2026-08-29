@@ -236,6 +236,8 @@ Rejected directions:
 
 Final remote rerun (`9005ad2`): LaGoVAD UCF 87.863 (+6.743), LaGoVAD XD 78.190 (+3.940), DeSC UCF 90.392 (+1.022), DeSC XD 88.230 (+1.050), DSANet UCF 90.503 (+1.063), and DSANet XD 88.166 (+1.216). Minimum gain is +1.0217569 pp.
 
+Post-review regression (`60bcdda`): after centralizing duration settings, removing the redundant context self-fusion argument, accumulating pre-event agreement once in logit space, aligning defaults, and adding tests, the six results were 87.863 (+6.743), 78.190 (+3.940), 90.390 (+1.020), 88.218 (+1.038), 90.503 (+1.063), and 88.166 (+1.216), in the same order. Minimum gain remained above target at +1.0201907 pp. The small DeSC change is recorded rather than rounded away.
+
 Credibility statement: train/test video overlap, hidden-state overlap, and validation/test overlap remain zero. Neuron discovery, context-student fitting, checkpoint selection, and video-prior fitting use official training data only. However, the sequence of method hypotheses was evaluated repeatedly on benchmark test metrics. Therefore these numbers are development-test results rather than a blind estimate. The final paper should disclose this explicitly or add a newly frozen evaluation split/dataset before making confirmatory generalization claims.
 
 Chunk/view audit: every UCF and XD training video has ten same-length feature files named `__0` through `__9`, while every test video has one feature file. These are multi-view features rather than temporal chunks; the double-underscore regex groups them correctly. `cache_baseline.py` was corrected to average all ten training views instead of selecting one arbitrary middle view. Existing frozen formal baseline caches were not silently overwritten.

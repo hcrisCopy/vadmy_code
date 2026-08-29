@@ -204,17 +204,17 @@ Only results exceeding the corresponding paper baseline are listed.
 | New-41 (`d514834`) | DSANet | UCF-Crime | AUC | 89.44 | 90.492 | +1.052 |
 | New-41 (`d514834`) | DSANet | XD-Violence | AP | 86.95 | 88.136 | +1.186 |
 
-## Final modular three-detector method (`9005ad2`, seed 234)
+## Final modular three-detector method (`60bcdda`, seed 234)
 
-The final configuration removes the seed-only Top-64 copy and uses the primary sparse detector, the multi-scale context detector, and the deterministic directional-normality detector. The table is the complete remote rerun used by autoresearch run `b8fbedf28e2f4df1bd03f600b0b62478`.
+The final configuration removes the seed-only Top-64 copy and uses the primary sparse detector, the multi-scale context detector, and the deterministic directional-normality detector. The table is the complete remote regression after code-review cleanup; autoresearch run `b8fbedf28e2f4df1bd03f600b0b62478` had already satisfied the target before the behavior-preserving refactor.
 
 | Baseline | Dataset | Metric | Paper baseline | Final | Gain (pp) |
 |---|---|---:|---:|---:|---:|
 | LaGoVAD | UCF-Crime | AUC | 81.120 | 87.863 | +6.743 |
 | LaGoVAD | XD-Violence | AP | 74.250 | 78.190 | +3.940 |
-| DeSC | UCF-Crime | AUC | 89.370 | 90.392 | +1.022 |
-| DeSC | XD-Violence | AP | 87.180 | 88.230 | +1.050 |
+| DeSC | UCF-Crime | AUC | 89.370 | 90.390 | +1.020 |
+| DeSC | XD-Violence | AP | 87.180 | 88.218 | +1.038 |
 | DSANet | UCF-Crime | AUC | 89.440 | 90.503 | +1.063 |
 | DSANet | XD-Violence | AP | 86.950 | 88.166 | +1.216 |
 
-Minimum gain: **+1.0217569 pp**. These are development-test results, because the method structure evolved with repeated benchmark feedback; they are not presented as a blind held-out estimate.
+Minimum gain: **+1.0201907 pp**. These are development-test results, because the method structure evolved with repeated benchmark feedback; they are not presented as a blind held-out estimate.

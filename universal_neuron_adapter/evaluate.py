@@ -177,7 +177,11 @@ def read_context_manifest(path: str) -> pd.DataFrame:
 
 def spectral_consensus_weights(*curves: np.ndarray) -> np.ndarray:
     """Return mean-one eigenvector-centrality weights from positive agreement."""
-    matrix = np.corrcoef(np.stack(curves))
+    # Constant detector curves have undefined Pearson correlation.  They carry
+    # zero off-diagonal agreement after nan_to_num, so suppress only NumPy's
+    # expected divide warning while preserving the established computation.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        matrix = np.corrcoef(np.stack(curves))
     matrix = np.nan_to_num(matrix, nan=0.0, posinf=0.0, neginf=0.0)
     matrix = np.maximum(matrix, 0.0)
     np.fill_diagonal(matrix, 1.0)

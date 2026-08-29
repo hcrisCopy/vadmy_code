@@ -105,7 +105,7 @@ def arrow(
             label,
             ha="center",
             va="bottom",
-            fontsize=7.2,
+            fontsize=8.0,
             color=COLORS["muted"],
             bbox={"facecolor": "white", "edgecolor": "none", "pad": 0.8},
             zorder=4,
@@ -119,7 +119,7 @@ def pill(axis: plt.Axes, x: float, y: float, text: str, face: str) -> None:
         text,
         ha="left",
         va="center",
-        fontsize=7.4,
+        fontsize=8.0,
         fontweight="bold",
         color=COLORS["ink"],
         bbox={"boxstyle": "round,pad=0.28", "facecolor": face, "edgecolor": "none"},
@@ -177,7 +177,7 @@ def detector_rows(axis: plt.Axes, x: float, y: float, width: float, height: floa
             )
         )
         axis.text(x + 0.015, bottom + row_height / 2, symbol, fontsize=8.5, fontweight="bold", va="center")
-        axis.text(x + 0.052, bottom + row_height / 2, name, fontsize=7.7, va="center")
+        axis.text(x + 0.052, bottom + row_height / 2, name, fontsize=8.0, va="center")
 
 
 def render(output: Path) -> None:
@@ -230,8 +230,8 @@ def render(output: Path) -> None:
 
     box(axis, 0.035, 0.20, 0.09, 0.18, COLORS["data"], "Input video", ("snippet sequence",))
     curve_icon(axis, 0.052, 0.215, 0.056, 0.040, COLORS["fusion"])
-    box(axis, 0.155, 0.36, 0.125, 0.11, "#DCE7F3", "Frozen baseline", ("LaGoVAD / DeSC / DSANet",), edge=COLORS["fusion"], body_size=7.4)
-    box(axis, 0.155, 0.15, 0.125, 0.13, "#E8F0F6", "Pre-extracted CLS", ("[T, 12, 768]", "no flow / patch token"), body_size=7.5)
+    box(axis, 0.155, 0.36, 0.125, 0.11, "#DCE7F3", "Frozen baseline", ("LaGoVAD / DeSC / DSANet",), edge=COLORS["fusion"], body_size=8.0)
+    box(axis, 0.155, 0.15, 0.125, 0.13, "#E8F0F6", "Pre-extracted CLS", ("[T, 12, 768]", "no flow / patch token"), body_size=8.0)
     arrow(axis, (0.125, 0.305), (0.155, 0.415), connection="arc3,rad=-0.12")
     arrow(axis, (0.125, 0.275), (0.155, 0.215), connection="arc3,rad=0.12")
 
@@ -252,11 +252,11 @@ def render(output: Path) -> None:
     box(axis, 0.655, 0.17, 0.145, 0.25, "#DCE7F3", "Constrained score fusion", ("baseline-preserving logit", "+ positive agreement", "− conflict & normal prior", "neuron-gated peak support"), edge=COLORS["fusion"], body_size=8.0)
     arrow(axis, (0.43, 0.415), (0.655, 0.36), "single baseline score", connection="arc3,rad=-0.08")
     arrow(axis, (0.62, 0.295), (0.655, 0.295), "g(t)")
-    box(axis, 0.83, 0.18, 0.105, 0.23, "#F9DED7", "Temporal recovery", ("training-width persistence", "local maximum expansion", "0.5-snippet alignment"), edge=COLORS["temporal"], body_size=7.7)
+    box(axis, 0.83, 0.18, 0.105, 0.23, "#F9DED7", "Temporal recovery", ("training-width persistence", "local maximum expansion", "0.5-snippet alignment"), edge=COLORS["temporal"], body_size=8.0)
     arrow(axis, (0.80, 0.295), (0.83, 0.295))
     box(axis, 0.955, 0.20, 0.035, 0.19, "#DDF2EA", "", (), edge=COLORS["output"])
     curve_icon(axis, 0.959, 0.235, 0.027, 0.085, COLORS["output"])
-    axis.text(0.9725, 0.17, "Frame-level\nanomaly score", ha="center", va="top", fontsize=7.4, fontweight="bold", color=COLORS["ink"])
+    axis.text(0.9725, 0.17, "Frame-level\nanomaly score", ha="center", va="top", fontsize=8.0, fontweight="bold", color=COLORS["ink"])
     arrow(axis, (0.935, 0.295), (0.955, 0.295))
 
     arrow(axis, (0.865, 0.675), (0.42, 0.305), "frozen detector bank", dashed=True, color=COLORS["fusion"], connection="arc3,rad=0.18")

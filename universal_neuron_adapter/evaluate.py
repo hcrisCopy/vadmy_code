@@ -175,7 +175,7 @@ def main() -> None:
     parser.add_argument("--normal-suppression-weight", type=float, default=1.0)
     parser.add_argument("--persistence-weight", type=float, default=0.75)
     parser.add_argument("--gaussian-sigma", type=float, default=0.0)
-    parser.add_argument("--advance-snippets", type=int, default=1)
+    parser.add_argument("--advance-snippets", type=float, default=0.5)
     parser.add_argument("--disable-correction", action="store_true")
     parser.add_argument("--disable-agreement", action="store_true")
     parser.add_argument("--disable-event-gate", action="store_true")
@@ -363,10 +363,16 @@ def main() -> None:
                     corrected = corrected + final_dilation_weight * (dilated - corrected)
                 if effective_gaussian_sigma > 0:
                     corrected = gaussian_filter1d(corrected, effective_gaussian_sigma, mode="nearest")
-                if not 0 <= args.advance_snippets < len(corrected):
+                if not 0.0 <= args.advance_snippets < len(corrected):
                     raise ValueError("advance-snippets must be non-negative and shorter than every video")
                 if args.advance_snippets:
-                    corrected = np.concatenate([corrected[args.advance_snippets:], np.repeat(corrected[-1:], args.advance_snippets)])
+                    positions = np.arange(len(corrected), dtype=np.float32)
+                    corrected = np.interp(
+                        positions + args.advance_snippets,
+                        positions,
+                        corrected,
+                        right=float(corrected[-1]),
+                    )
             baseline_curves.append(base)
             corrected_curves.append(corrected)
             curve_path = curve_dir / f"{row.key}.npz"

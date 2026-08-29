@@ -367,12 +367,12 @@ def main() -> None:
                     raise ValueError("advance-snippets must be non-negative and shorter than every video")
                 if args.advance_snippets:
                     positions = np.arange(len(corrected), dtype=np.float32)
-                    corrected = expit(np.interp(
+                    corrected = np.interp(
                         positions + args.advance_snippets,
                         positions,
-                        logit(corrected),
-                        right=float(logit(corrected[-1:])[0]),
-                    ))
+                        corrected,
+                        right=float(corrected[-1]),
+                    )
             baseline_curves.append(base)
             corrected_curves.append(corrected)
             curve_path = curve_dir / f"{row.key}.npz"

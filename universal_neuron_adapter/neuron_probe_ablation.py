@@ -194,8 +194,11 @@ def plot_results(output: Path, controls: pd.DataFrame, layers: pd.DataFrame, cou
             color=colors["ours"] if row.control == "selected" else colors["control"],
         )
     axes[0, 0].set_yticks(positions, control_plot.control)
-    lower_bound = 100 * max(0.0, control_plot["mean"].min() - control_plot["std"].max() - 0.01)
-    upper_bound = 100 * min(1.0, control_plot["mean"].max() + 0.015)
+    observed_low = (control_plot["mean"] - control_plot["std"]).min()
+    observed_high = (control_plot["mean"] + control_plot["std"]).max()
+    observed_span = max(observed_high - observed_low, np.finfo(float).eps)
+    lower_bound = 100 * max(0.0, observed_low - observed_span)
+    upper_bound = 100 * min(1.0, observed_high + observed_span)
     axes[0, 0].set_xlim(lower_bound, upper_bound)
     axes[0, 0].grid(axis="x", alpha=0.25)
     axes[0, 0].set_title("(a) Fixed-budget neuron specificity")

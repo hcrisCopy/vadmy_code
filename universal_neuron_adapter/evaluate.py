@@ -312,10 +312,7 @@ def main() -> None:
                     np.maximum(standardized_base, 0.0),
                     np.minimum(np.maximum(-standardized, 0.0), np.maximum(-standardized3, 0.0)),
                 )
-                conflict_event = maximum_filter1d(
-                    neuron_conflict, persistence_width, mode="nearest"
-                )
-                corrected = expit(logit(corrected) - neuron_conflict_weight * conflict_event)
+                corrected = expit(logit(corrected) - neuron_conflict_weight * neuron_conflict)
             high_high = np.minimum(np.maximum(standardized_base, 0.0), np.maximum(standardized, 0.0))
             if not args.disable_agreement:
                 corrected = expit(logit(corrected) + agreement_residual_weight * high_high)
@@ -384,7 +381,6 @@ def main() -> None:
             "agreement_residual_weight": agreement_residual_weight,
             "neuron_consensus_weight": neuron_consensus_weight,
             "neuron_conflict_weight": neuron_conflict_weight,
-            "neuron_conflict_context": "training-persistence local maximum propagation",
             "neuron_consensus_context": "duration interpolation from fixed 0.3 to gated unit residual",
             "triple_agreement_weight": triple_agreement_weight,
             "normal_suppression_weight": normal_suppression_weight,

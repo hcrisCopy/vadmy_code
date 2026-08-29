@@ -208,28 +208,28 @@ def render(output: Path) -> None:
     )
     axis.text(0.03, 0.935, "A. Training-only neuron discovery (once per dataset)", fontsize=13, fontweight="bold", color=COLORS["ink"])
     pill(axis, 0.79, 0.935, "TRAIN SPLIT ONLY · NO TEST LABELS", "#DDF3E4")
-    axis.text(0.03, 0.515, "B. Single-baseline inference (same rule for all baselines and datasets)", fontsize=13, fontweight="bold", color=COLORS["ink"])
+    axis.text(0.03, 0.515, "B. Universal single-baseline inference", fontsize=13, fontweight="bold", color=COLORS["ink"])
     pill(axis, 0.79, 0.515, "ONE FROZEN BASELINE · SEED 234", "#E2ECF8")
 
     box(axis, 0.035, 0.69, 0.105, 0.17, COLORS["data"], "Training videos", ("video-level labels", "UCF or XD train split"))
-    matrix_icon(axis, 0.056, 0.655, 0.062, 0.035)
     box(axis, 0.165, 0.68, 0.105, 0.19, "#E8F0F6", "CLIP CLS states", ("12 layers × 768 dims", "one coordinate = neuron"))
-    matrix_icon(axis, 0.187, 0.708, 0.061, 0.045)
+    matrix_icon(axis, 0.187, 0.692, 0.061, 0.040)
     arrow(axis, (0.14, 0.775), (0.165, 0.775), "stride 16")
 
     box(axis, 0.305, 0.675, 0.15, 0.20, "#FCE4CF", "1  Primary sparse", ("Top-32 / layer", "MIL abnormal response", "learns which neurons"), edge=COLORS["primary"])
     box(axis, 0.475, 0.675, 0.15, 0.20, "#DDF2EA", "2  Multi-scale context", ("current + Gaussian 1.5 / 4", "linear student", "learns when evidence persists"), edge=COLORS["context"])
     box(axis, 0.645, 0.675, 0.15, 0.20, "#EEE8F7", "3  Directional normality", ("normal μ, σ + direction", "Top-32 / layer", "learns how neurons deviate"), edge=COLORS["normality"])
-    arrow(axis, (0.27, 0.775), (0.305, 0.775))
-    arrow(axis, (0.455, 0.775), (0.475, 0.775), dashed=True)
-    arrow(axis, (0.27, 0.745), (0.645, 0.745), dashed=True, connection="arc3,rad=-0.08")
+    arrow(axis, (0.27, 0.800), (0.305, 0.800))
+    arrow(axis, (0.27, 0.775), (0.475, 0.775), connection="arc3,rad=-0.08")
+    arrow(axis, (0.27, 0.750), (0.645, 0.750), connection="arc3,rad=-0.10")
 
     box(axis, 0.83, 0.675, 0.135, 0.20, "#E6EEF7", "Training statistics", ("detector parameters", "normal-video priors", "event persistence width"), edge=COLORS["fusion"])
-    arrow(axis, (0.795, 0.775), (0.83, 0.775))
-    arrow(axis, (0.625, 0.715), (0.83, 0.715), dashed=True, connection="arc3,rad=0.05")
+    arrow(axis, (0.455, 0.810), (0.83, 0.810), connection="arc3,rad=-0.05")
+    arrow(axis, (0.625, 0.775), (0.83, 0.775), connection="arc3,rad=0")
+    arrow(axis, (0.795, 0.740), (0.83, 0.740), connection="arc3,rad=0")
 
     box(axis, 0.035, 0.20, 0.09, 0.18, COLORS["data"], "Input video", ("snippet sequence",))
-    curve_icon(axis, 0.052, 0.14, 0.056, 0.045, COLORS["fusion"])
+    curve_icon(axis, 0.052, 0.215, 0.056, 0.040, COLORS["fusion"])
     box(axis, 0.155, 0.36, 0.125, 0.11, "#DCE7F3", "Frozen baseline", ("LaGoVAD / DeSC / DSANet",), edge=COLORS["fusion"], body_size=7.4)
     box(axis, 0.155, 0.15, 0.125, 0.13, "#E8F0F6", "Pre-extracted CLS", ("[T, 12, 768]", "no flow / patch token"), body_size=7.5)
     arrow(axis, (0.125, 0.305), (0.155, 0.415), connection="arc3,rad=-0.12")
@@ -259,10 +259,8 @@ def render(output: Path) -> None:
     axis.text(0.9725, 0.17, "Frame-level\nanomaly score", ha="center", va="top", fontsize=7.4, fontweight="bold", color=COLORS["ink"])
     arrow(axis, (0.935, 0.295), (0.955, 0.295))
 
-    arrow(axis, (0.38, 0.675), (0.36, 0.305), "frozen detector", dashed=True, color=COLORS["primary"], connection="arc3,rad=0.06")
-    arrow(axis, (0.55, 0.675), (0.39, 0.305), "frozen detector", dashed=True, color=COLORS["context"], connection="arc3,rad=0.10")
-    arrow(axis, (0.72, 0.675), (0.42, 0.305), "frozen detector", dashed=True, color=COLORS["normality"], connection="arc3,rad=0.12")
-    arrow(axis, (0.895, 0.675), (0.875, 0.41), "training-only calibration", dashed=True, color=COLORS["fusion"])
+    arrow(axis, (0.865, 0.675), (0.42, 0.305), "frozen detector bank", dashed=True, color=COLORS["fusion"], connection="arc3,rad=0.18")
+    arrow(axis, (0.915, 0.675), (0.875, 0.41), dashed=True, color=COLORS["fusion"])
 
     axis.text(
         0.5,

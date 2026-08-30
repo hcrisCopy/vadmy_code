@@ -77,7 +77,7 @@ def expert_mil_loss(logits: torch.Tensor, labels: torch.Tensor, lengths: torch.T
 class ScoreCorrectionHead(nn.Module):
     """Score head used by the first-round CLS-neuron expert."""
 
-    def __init__(self, width: int = 32, identity_init: bool = False) -> None:
+    def __init__(self, width: int = 32) -> None:
         super().__init__()
         self.body = nn.Sequential(
             nn.Conv1d(6, width, 3, padding=1),
@@ -86,16 +86,8 @@ class ScoreCorrectionHead(nn.Module):
             nn.GELU(),
             nn.Conv1d(width, 1, 1),
         )
-        if identity_init:
-            nn.init.zeros_(self.body[-1].weight)
-            nn.init.zeros_(self.body[-1].bias)
 
-    def forward(
-        self,
-        baseline_probability: torch.Tensor,
-        expert_probability: torch.Tensor,
-        lengths: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+    def forward(self, baseline_probability: torch.Tensor, expert_probability: torch.Tensor) -> torch.Tensor:
         baseline = torch.logit(baseline_probability.clamp(1e-5, 1.0 - 1e-5))
         expert = torch.logit(expert_probability.clamp(1e-5, 1.0 - 1e-5))
         base_change = F.pad(baseline[:, 1:] - baseline[:, :-1], (1, 0))
@@ -104,10 +96,7 @@ class ScoreCorrectionHead(nn.Module):
             [baseline, expert, baseline - expert, baseline * torch.tanh(expert), base_change, expert_change],
             dim=1,
         )
-        residual = self.body(features).squeeze(1)
-        if lengths is not None:
-            residual = residual * valid_mask(lengths, residual.shape[1], residual.dtype)
-        return baseline + residual
+        return baseline + self.body(features).squeeze(1)
 
 
 def calibrated_probability(

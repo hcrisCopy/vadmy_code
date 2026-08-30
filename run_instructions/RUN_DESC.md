@@ -190,6 +190,10 @@ done
 python -m universal_neuron_adapter.aggregate_metric --results-root ../vadmy_data/universal_neuron_adapter
 ```
 
+- 一键脚本只运行 DeSC 的 UCF 与 XD 两项实验；默认实验名为 `formal_seed234`，可通过 `EXPERIMENT_NAME` 修改。
+- `aggregate_metric` 现在**自动跳过还没跑的 baseline**（只汇总已存在的指标并打印 `[skip]` 提示），不会再因为缺某几个结果而崩溃。
+- 同名实验会断点续跑并复用数据集级神经元专家；不同代码版本或 seed 禁止混入同一目录。
+
 输出：`$OUT/summary.json`（相对 DeSC 论文基线 89.37% AUC / 87.18% AP 的增益）。
 
 ## 一键运行

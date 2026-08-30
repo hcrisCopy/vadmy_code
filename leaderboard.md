@@ -218,3 +218,11 @@ The final configuration removes the seed-only Top-64 copy and uses the primary s
 | DSANet | XD-Violence | AP | 86.950 | 88.166 | +1.216 |
 
 Minimum gain: **+1.0201907 pp**. These are development-test results, because the method structure evolved with repeated benchmark feedback; they are not presented as a blind held-out estimate.
+
+## Independent-command clean validation (`formal_seed234_clean1`, seed 234)
+
+| Baseline | Dataset | Metric | Executable baseline | Corrected | Gain (pp) |
+|---|---|---:|---:|---:|---:|
+| DSANet | UCF-Crime | AUC | 89.445 | 90.417 | +0.972 |
+
+This is the current clean-from-scratch result at revision `69e55bb`; it is reported separately from the historical six-way development table.

@@ -269,3 +269,9 @@ A small read-only evidence suite was added under `innovation_evidence/`. It reus
 - Innovation 3: relative to positive agreement alone, adding the fixed conflict-suppression term improved all six diagnostics. Additional gains were +0.169/+0.012/+0.008 UCF AUC pp and +0.275/+0.054/+0.105 XD AP pp for LaGoVAD/DeSC/DSANet. This isolates a small but directionally consistent benefit from asymmetric conflict handling.
 
 These are development-test diagnostics, not hyperparameter-selection runs or replacements for the formal six-way evaluation. Artifacts are under `../vadmy_data/innovation_evidence/12db776/`; the negative spectral result is retained rather than filtered from the output.
+
+## 2026-08-30 independent-command clean run (`formal_seed234_clean1`)
+
+The formal entry points were separated into four baseline-specific scripts. Each script now runs only its own UCF-Crime and XD-Violence experiments, while an explicit human-readable `EXPERIMENT_NAME` controls the output directory. Dataset-level neuron/context caches are isolated under that named experiment, and the Git revision plus seed are stored as metadata rather than used as the directory name.
+
+A fresh DSANet UCF run at revision `69e55bb`, seed 234, used 1610 training videos and 290 test videos. The executable frozen baseline AUC was 89.445 and the corrected AUC was 90.417 (+0.972 pp). This removes the 90.06 regression caused by inconsistent artifact scope, but it is 0.086 pp below the historical 90.503 result. No parameter was changed after seeing the test result. Therefore 90.503 remains a historical development result and must not be described as the guaranteed output of the current clean-from-scratch command. The XD continuation was stopped before completion and is not recorded as an experiment result.

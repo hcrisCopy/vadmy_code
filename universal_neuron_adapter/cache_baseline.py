@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
@@ -48,6 +49,17 @@ def infer(adapter, baseline: str, dataset: str, clip: np.ndarray, device: torch.
     return torch.cat(binary_parts).numpy().astype(np.float32), torch.cat(semantic_parts).numpy().astype(np.float32)
 
 
+def select_training_views(paths: list[str], policy: str) -> list[str]:
+    """Reduce feature augmentations to one video-level training curve."""
+    if not paths:
+        raise ValueError("a manifest row must contain at least one feature path")
+    if policy == "fixed":
+        return [paths[len(paths) // 2]]
+    if policy == "mean":
+        return paths
+    raise ValueError(f"unsupported training view policy: {policy}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Cache frozen single-baseline binary and semantic probabilities.")
     parser.add_argument("--baseline", choices=["dsanet", "desc", "lagovad", "vadclip"], required=True)
@@ -60,6 +72,12 @@ def main() -> None:
     parser.add_argument("--split", choices=["train", "test"], required=True)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--training-view-policy",
+        choices=["fixed", "mean"],
+        default="mean",
+        help="How to reduce training-time feature views to one video curve.",
+    )
     args = parser.parse_args()
     output = Path(args.out_dir)
     binary_dir, semantic_dir = output / "scores", output / "semantic_scores"
@@ -71,10 +89,8 @@ def main() -> None:
     with torch.no_grad():
         for row in tqdm(frame.itertuples(index=False), total=len(frame), desc=f"cache {args.baseline} {args.split}"):
             paths = str(row.clip_paths).split("|")
-            # Official training features contain ten same-length spatial views
-            # (`__0` ... `__9`), not temporal chunks.  Infer every view and
-            # average below; selecting one arbitrary middle view is not the
-            # official multi-view protocol.  Test manifests contain one path.
+            if args.split == "train":
+                paths = select_training_views(paths, args.training_view_policy)
             binary_curves, semantic_curves = [], []
             for clip_path in paths:
                 binary, semantic = infer(adapter, args.baseline, args.dataset, np.load(clip_path).astype(np.float32), device)
@@ -87,6 +103,18 @@ def main() -> None:
             np.save(binary_path, binary); np.save(semantic_path, semantic)
             rows.append({"key": str(row.key), "label": str(row.label), "binary_label": int(row.binary_label), "baseline_score_path": str(binary_path), "semantic_score_path": str(semantic_path), "snippets": len(binary)})
     pd.DataFrame(rows).to_csv(output / "baseline_scores.csv", index=False)
+    (output / "cache_protocol.json").write_text(
+        json.dumps(
+            {
+                "baseline": args.baseline,
+                "dataset": args.dataset,
+                "split": args.split,
+                "training_view_policy": args.training_view_policy,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     print(f"wrote {len(rows)} frozen-baseline curves to {output}", flush=True)
 
 

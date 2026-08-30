@@ -287,7 +287,10 @@ def main() -> None:
     checkpoint = torch.load(args.correction_model, map_location="cpu", weights_only=False)
     if checkpoint.get("baseline") != args.baseline or checkpoint.get("dataset") != args.dataset:
         raise ValueError("correction checkpoint baseline/dataset mismatch")
-    model = ScoreCorrectionHead(int(checkpoint["config"]["width"]))
+    model = ScoreCorrectionHead(
+        int(checkpoint["config"]["width"]),
+        identity_init=bool(checkpoint["config"].get("identity_init", False)),
+    )
     model.load_state_dict(checkpoint["model_state_dict"])
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     model.to(device).eval()

@@ -27,8 +27,12 @@ def main() -> None:
     if current.exists():
         root = root / "runs" / current.read_text(encoding="utf-8").strip()
     gains, experiments = [], {}
+    missing = []
     for (baseline, dataset), (metric, paper) in PAPER_BASELINES.items():
         path = root / dataset / baseline / "evaluation" / "metrics.json"
+        if not path.exists():
+            missing.append(f"{baseline}/{dataset}")
+            continue
         payload = json.loads(path.read_text(encoding="utf-8"))
         value = 100.0 * float(payload["corrected"][metric])
         gain = value - paper
@@ -36,6 +40,10 @@ def main() -> None:
             raise ValueError(f"non-finite gain for {baseline}/{dataset}")
         gains.append(gain)
         experiments[f"{baseline}_{dataset}"] = {"metric": metric, "paper": paper, "corrected": value, "gain_pp": gain}
+    if missing:
+        print(f"[skip] not evaluated yet: {', '.join(missing)}", flush=True)
+    if not experiments:
+        raise FileNotFoundError(f"no evaluation metrics found under {root}; run a baseline pipeline first")
     summary = {"minimum_gain_pp": min(gains), "experiments": experiments}
     (root / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False), flush=True)

@@ -4,10 +4,15 @@
 # 说明：可重复执行；fit_* 均带 --resume，中断后重跑即可续跑。
 set -euo pipefail
 export TOKENIZERS_PARALLELISM=false
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
 
-RUN_KEY="$(git rev-parse --short HEAD)"
-OUT="../vadmy_data/universal_neuron_adapter/runs/$RUN_KEY"
-mkdir -p "$OUT"
+SEED=234
+EXPERIMENT_NAME="${EXPERIMENT_NAME:-formal_seed234}"
+ROOT="../vadmy_data/universal_neuron_adapter"
+OUT="$ROOT/runs/$EXPERIMENT_NAME"
+python -m universal_neuron_adapter.experiment \
+  --name "$EXPERIMENT_NAME" --out-dir "$OUT" --seed "$SEED"
+printf '%s\n' "$EXPERIMENT_NAME" > "$ROOT/current_run.txt"
 exec > >(tee -a "$OUT/run_lagovad.log") 2>&1
 echo "run output root: $OUT"
 
@@ -27,8 +32,8 @@ python -m universal_neuron_adapter.data --dataset xd \
 
 for dataset in ucf xd; do
   data="$OUT/$dataset/data"
-  normality="../vadmy_data/universal_neuron_adapter/normality_expert_cache/$dataset/top32_signed_v1"
-  context="../vadmy_data/universal_neuron_adapter/context_student_cache/$dataset/top32_multiscale_seed234"
+  normality="$OUT/$dataset/normality_expert"
+  context="$OUT/$dataset/context_student"
   primary="$OUT/$dataset/expert"
   base="$OUT/$dataset/lagovad"
 

@@ -5,6 +5,9 @@
 set -euo pipefail
 export TOKENIZERS_PARALLELISM=false
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
+# Formal runs use the CLIP weights already cached on the server.
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 
 SEED=234
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-formal_seed234}"

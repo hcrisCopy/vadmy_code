@@ -38,26 +38,12 @@ bash universal_neuron_adapter/commands/run_extract_hidden_shards.sh \
 
 The extractor reproduces the existing `[T, 12, 768]` float16 files by walking the 12 CLIP ViT-B/16 visual blocks and saving each block's CLS token. Outputs must remain under `../vadmy_data`; existing files under `../vad_data` are read-only inputs.
 
-## Supplementary experiments
+## Official detection metric
 
 Run only on the remote server in `conda activate dsanet`:
 
 ```bash
-bash universal_neuron_adapter/commands/run_supplementary_experiments.sh
 bash universal_neuron_adapter/commands/run_detection_map.sh
-bash universal_neuron_adapter/commands/run_seed_study.sh
-bash universal_neuron_adapter/commands/run_neuron_controls.sh
-bash universal_neuron_adapter/commands/run_robustness_efficiency.sh
-bash universal_neuron_adapter/commands/run_neuron_visualization.sh
-bash universal_neuron_adapter/commands/run_interpretability_ablations.sh
 ```
 
-The supplementary runner performs the split audit, a cumulative component ablation across all six settings, a 200-repeat exact paired video bootstrap over the official frame metric, and focused heatmap/timeline figures. The detection runner executes the official DSANet detection-mAP function and preserves DSANet's conditional abnormal-class distribution when replacing total anomaly mass. The seed study retrains all stochastic adapter components for seeds 234, 3407, and 2026. The neuron controls compare removal of selected neurons with five size-matched random removals.
-
-The robustness runner perturbs event width (33/41/49) and score advance (0/1/2) one factor at a time. These test-set measurements are post-hoc robustness checks only and never select the formal setting. It also records cached-score adapter wall time, throughput, and peak CUDA allocation, then renders one focused gain heatmap.
-
-All results, logs, checkpoints, cached curves, figures, and reports are written below `../vadmy_data/universal_neuron_adapter`.
-
-The neuron-visualization command renders a paper-ready interpretability figure and one anomaly-response heatmap per dataset. Each dataset figure separates the primary sparse, multi-scale context, and directional normality views, ordered by training-only abnormal-versus-normal response effect. An exact 12-layer by 768-dimension coordinate heatmap is retained for supplementary inspection. PNG/PDF figures, source CSV tables, self-contained captions, and seed/data-provenance metadata are written under `../vadmy_data/universal_neuron_adapter/figures/detected_neurons`. Panel (c) uses training videos only; panel (d) is an explicitly labeled post-hoc neuron-removal control.
-
-The interpretability-ablation command follows a protocol frozen before test inspection. It adds fixed-budget random controls, equal-budget layer localization, neuron-count sensitivity, directional activation interventions, and discovery-data efficiency. It writes source tables and vector/PNG figures below `../vadmy_data/universal_neuron_adapter/interpretability_ablations/<commit>`; see `INTERPRETABILITY_ABLATIONS.md` for the exact scope.
+This executes the unchanged official DSANet detection-mAP function. Outputs remain below `../vadmy_data/universal_neuron_adapter`.

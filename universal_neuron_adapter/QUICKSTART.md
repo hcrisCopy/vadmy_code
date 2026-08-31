@@ -16,23 +16,22 @@ bash universal_neuron_adapter/commands/run_extract_hidden_shards.sh \
 
 Output: `[T,12,768]` float16 CLS hidden states and manifests under `../vadmy_data/hidden_extract`.
 
-## 2. Run the six formal evaluations
+## 2. Run one formal baseline
 
 ```bash
-bash universal_neuron_adapter/commands/run_all.sh
+EXPERIMENT_NAME=formal_seed234 bash run_instructions/run_lagovad.sh
 ```
 
-Output: per-video curves and metrics under `../vadmy_data/universal_neuron_adapter/runs/<git-short-sha>`, plus the six-way summary in `summary.json`.
+Replace `run_lagovad.sh` with `run_desc.sh`, `run_dsanet.sh`, or `run_vadclip.sh` for another baseline. Each command evaluates UCF-Crime and XD-Violence independently. Reuse the same experiment name to reuse dataset-level neuron experts. Output: per-video curves and metrics under `../vadmy_data/universal_neuron_adapter/runs/<experiment-name>`.
 
-## 3. Run checks and figures
+## 3. Run checks
 
 ```bash
 python -m universal_neuron_adapter.validate_constraints
 python -m pip install -r universal_neuron_adapter/requirements-dev.txt
 python -m pytest -q universal_neuron_adapter/tests
-bash universal_neuron_adapter/commands/run_neuron_visualization.sh --clean
 ```
 
-Output: constraint/test reports in the terminal and figures under `../vadmy_data/universal_neuron_adapter/figures/detected_neurons`.
+Output: constraint and test reports in the terminal.
 
 The split audit must report zero official train/test key overlap, zero hidden-state overlap, and zero validation/test overlap before a result is used.

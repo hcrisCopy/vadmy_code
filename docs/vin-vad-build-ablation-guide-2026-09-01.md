@@ -129,6 +129,28 @@ query 只能包含位置编码；key/value 必须排除 `G_t` 和 padding。`L_c
 
 B1 有效的唯一含义是：上下文确实能预测正常神经元响应。这里不看检测 AUC，也不加入异常视频局部伪标签。
 
+#### B1 正式结果（DSANet，2026-09-02）
+
+| Dataset | held-out conditional NLL | global Gaussian NLL | 相对改善 | 最优 epoch | train/val 正常视频 |
+|---|---:|---:|---:|---:|---:|
+| UCF-Crime | -1.243614 | -1.166209 | 6.64% | 10 | 720 / 80 |
+| XD-Violence | -1.306811 | -1.130192 | 15.63% | 10 | 1841 / 205 |
+
+正式配置使用 1091728 个可训练参数，batch size 8，最多 10 epochs，seed 42。
+训练时每个正常视频每轮抽取一个由 `seed + epoch + video key` 决定的窗口；
+验证集每个视频固定取一个中心窗口，最多 256 个 snippet。训练与验证按视频拆分，
+全程只读官方训练集正常视频，`test_split_used=false`。泄漏、padding、梯度隔离、
+sigma 数值边界和短序列 guard 共 5 项测试全部通过。
+
+B1 结论：**通过，但只证明正常神经元响应存在可学习的上下文结构。** 两个数据集
+都在 held-out 正常视频上优于逐神经元全局高斯，因此可以进入 B2；本阶段结束时先
+停下汇报。不要为 B1 增加检测 AUC、异常伪标签或更多 predictor 结构消融，这些都
+不能回答审稿人的核心问题。后续真正决定论文是否成立的是 C0--C4：方向性 evidence
+能否在固定 host 上提供增量检测信息。
+
+远程产物位于 `../vadmy_data/vin_vad/dsanet/b1/<dataset>/`；正式命令和查看方式见
+`run_instructions/RUN_VIN_VAD_B1_DSANET.md`。
+
 ### B2：方向违背与稀疏 correction field
 
 在 `violation_field.py` 实现：
@@ -405,7 +427,7 @@ A4 确实优于 A0 和两个单分支后，再补三个必要结构消融：
 
 ```text
 [ ] B0 数据审计、host identity、统一 evaluator
-[ ] B1 leakage/padding/gradient/NLL 测试
+[x] B1 leakage/padding/gradient/NLL 测试（DSANet；UCF/XD 均通过）
 [ ] B2 residual/entmax/running-stat 测试
 [ ] B3 identity/sign/zero-mean/bound/branch-independence 测试
 [ ] B4 单 optimizer 训练与完整 checkpoint

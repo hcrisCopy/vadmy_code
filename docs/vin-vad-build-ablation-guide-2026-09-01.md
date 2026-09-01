@@ -1,58 +1,44 @@
-# ViN-VAD 项目搭建与核心消融指南
+# CVA-VAD v9 项目搭建与 ICLR 核心实验指南
 
-> 配套方案：`docs/ws-vad-ultimate-v6-2026-08-31.md`
+> 配套方案：`docs/cva-vad-final-v9-iclr-2026-09-01.md`
 >
-> 目标不是把模块都跑一遍，而是用最短证据链证明：**异常应建模为上下文违背；视频弱标签应通过事件模型归因；神经元标签是经过验证的功能解释。**
+> 只做三条证据链：contextual residual 是否是真增量信息；单侧跨视频审计和视频内重排各自解决什么；神经元 field 是否真实驱动校正。
 
-## 1. 论文故事只看三条证据链
-
-| 论文主张 | 审稿人真正要看的证据 | 不通过时怎么写 |
-|---|---|---|
-| 异常是 contextual violation，不是 activation peak | raw activation、global residual、contextual residual 的直接对照；只换上下文时 residual 和 posterior 随之改变 | 若 contextual 不优于 global/raw，删除“contextual violation”主张 |
-| OR-chain 比 top-k 更符合弱标签事件语义 | 相同 emission 下，exact OR、persistence、length calibration 分别带来什么 | 若只改善曲线平滑而不改善定位/长度偏差，降级为时序建模模块 |
-| tag 是 verified explanation | held-out semantic fidelity + readout erase + backbone patch controls | 任何一项不通过，只叫 descriptor，不叫 verified explanation |
-
-三条停止规则：
-
-1. Event chain 不成立，不做 violation branch。
-2. Full violation 不优于 raw/global/absolute 对照，不做 tag。
-3. Patching 不强于匹配控制，不讲神经元因果解释。
-
-## 2. 项目边界
-
-输入固定为：
+## 1. 输入与红线
 
 \[
-H\in\mathbb R^{B\times T\times12\times768},\qquad
-y\in\{0,1\}^{B},\qquad
+H\in\mathbb R^{B\times T\times12\times768},\quad
+S^h\in(0,1)^{B\times T},\quad
+y\in\{0,1\}^{B},\quad
 M\in\{0,1\}^{B\times T}.
 \]
 
-- `H`：冻结 CLIP ViT-B/16 每隔 16 帧采样得到的 12 层 CLS 状态；
+- `H`：冻结 CLIP 12 层 CLS；神经元为 `(layer, dim)`；
+- `S_h`：baseline 正式 detection score；
 - `y`：视频级标签；
-- `M`：有效 snippet mask。
+- `M=1`：真实有效 snippet，`M=0`：padding。不是异常 mask；
+- `G_t`：预测 `t` 时隐藏的目标保护区间。
 
-输出只有 `video_prob`、`snippet_prob` 和机制诊断量。
+红线：
 
-硬约束：
+- host 与 CLIP 永久冻结，但不是阶段性反复冻结；
+- 不训练新 detector 替代 host；
+- 不使用 host top-k 发现伪标签神经元字典；
+- 不使用 exact OR、event chain、median/max/dilation/smoothing/advance；
+- 不使用 Kneedle 固定字典或数据集名分支；
+- 文本、tag 与 intervention 不进入检测分数；
+- 测试集不决定任何阈值、预算、field 或 checkpoint。
 
-- 不读取已有 VAD detector 分数，不做伪标签，不让文本参与检测。
-- 不做 smoothing、膨胀、前移或测试后校准。
-- UCF-Crime、XD-Violence 使用官方 train/test，不造 validation split。
-- 所有消融固定相同 TCN、训练轮数、默认 seed、evaluator 和 checkpoint 规则。
-- 当前输入是稀疏采样的层级视觉状态，不写成原生运动特征。
-
-推荐独立目录：
+## 2. 最小代码结构
 
 ```text
 vin_vad/
 ├── data.py
-├── base_tcn.py
-├── event_chain.py
 ├── context_predictor.py
 ├── violation_field.py
-├── model.py
+├── host_auditor.py
 ├── losses.py
+├── model.py
 ├── train.py
 ├── evaluate.py
 ├── interventions.py
@@ -60,285 +46,232 @@ vin_vad/
 └── tests/
 ```
 
-旧工程只复用数据读取和官方 evaluator，不复用旧 fusion、expert、score correction 或后处理。
+`base_tcn.py` 和 `event_chain.py` 只保留 P1 失败复现，不进入 v9 import graph。
 
-## 3. 模块搭建顺序
+## 3. P0：先锁死数据、host 与 evaluator
 
-### P0：先锁死数据和 evaluator
-
-只做三件事：
-
-1. 检查 `hidden.shape == [T,12,768]`，保存真实 `frame_indices`、视频长度和 mask。
-2. 所有模型使用同一个 snippet-to-frame 映射，尾段按真实帧数截断。
-3. 人工构造一条 snippet 曲线，确认展开后的帧位置、长度和 GT 完全对齐。
-
-**DSANet 正式口径写死：** 每个视频的有效 snippet 数以 DSANet 官方 CLIP 特征为准，不能仅由原视频
-`num_frames` 反推。官方文件实际同时存在 `floor(num_frames / 16)` 和 `ceil(num_frames / 16)` 两种长度；
-现有 hidden cache 固定按 `range(0, num_frames, 16)` 提取，因此有些视频会比官方特征多一个尾 snippet。
-数据层必须逐视频裁到官方特征长度。测试展开长度固定为 `valid_snippets * 16`，所有测试视频之和必须与
-官方 GT 逐点等长；禁止把全部 hidden 直接 `repeat(16)` 后再靠全局截断凑长度，因为这会让后续视频错位。
-
-依据不是经验判断：VadCLIP 的 `list/make_gt_ucf.py` 与 `list/make_gt_xd.py` 直接按每个 `__0.npy` 的
-`fea.shape[0] * 16` 生成 GT；DSANet 与 VadCLIP 的 `process_split` 实现相同，仓库内对应 UCF/XD GT
-文件也逐字节一致。`__0`–`__9` 来自 VadCLIP 的十种空间 crop，同一视频的时间长度必须一致且只计一次。
-
-`raw_num_frames` 与真实 `frame_indices` 仍需保存，供训练尾段边界和机制可视化使用。训练集也按 DSANet
-实际特征长度保留 `floor` 或 `ceil` 个 snippet；若保留不完整尾 snippet，其右边界使用真实
-`num_frames`。测试 AUC/AP 则一律服从官方 evaluator 的有效帧域，不擅自重造 GT。
-
-当前 XD hidden cache 缺 4 个训练视频。P0 允许用显式参数跳过这些训练项，并把完整 key 列表写入
-`audit.json`；提取日志显示原因是原始 video root 没有匹配到这 4 个视频，不是 hidden 解码失败。测试视频
-不允许缺失。论文的数据实现细节需如实披露这一点，不能写成“训练集无缺失”。
-
-DSANet 的 P0 正式命令：
-
-```bash
-bash run_instructions/run_vin_vad_p0_dsanet.sh
-```
-
-输出：`../vadmy_data/vin_vad/dsanet/p0/<dataset>/audit.json`、`train.csv`、`test.csv` 和
-`alignment_probe.npz`。中断后直接重跑会续审；仅在确认要清空旧 P0 产物时运行
-`CLEAN=1 bash run_instructions/run_vin_vad_p0_dsanet.sh`。
-
-必须通过：改变 padding 内容或 batch padding 长度，loss 和有效位置输出不变。
-
-### P1：基础 TCN 与 event chain
-
-先做最终层 CLS + 三层 residual TCN：
-
-\[
-a_{1:T}=b_\theta(\operatorname{LN}(h_{1:T,L,:})).
-\]
-
-先接 top-k MIL，再替换成 OR event chain。不要同时加入 violation。
-
-event chain 必须先过单元测试：
-
-- 对 \(T\le12\) 枚举全部 \(2^T\) 序列，`logZ0/logZ1` 和 snippet marginal 与 DP 一致；
-- emission、\(\rho\)、\(\kappa\) 梯度有限且无 NaN；
-- padding 不改变有效位置结果；
-- 固定同一组 emissions，孤立峰、连续中等证据和不同视频长度产生符合设计的 posterior。
-
-通过标准：E0→E1→E2→E3 的变化能分别解释 exact OR、事件持续性和长度校准，而不是只让曲线更平滑。
-
-**正式训练口径写死：**
-
-- E0–E3 共用宽度 512、kernel 3、dilation 1/2/4 的三层 residual TCN，dropout 0.1；
-- 训练时沿用 DSANet 的均匀分桶平均，将长视频压到 256 snippets；测试保持完整时间长度；
-- seed 234、10 epochs、AdamW、weight decay 0.01；UCF 使用 batch 64/类、lr 7e-5，XD 使用
-  batch 96/类、lr 1e-5，这些是 DSANet 官方训练参数，不是按结果调参；
-- 最终 epoch 是唯一正式 checkpoint，不用测试集选 epoch；E0–E3 都不使用 smoothing 或测试后校准；
-- E1 的独立状态先验、E2 的 constant onset、E3 的 length-calibrated onset 均从“256 snippets
-  期望约一个 onset”初始化；E2/E3 persistence 统一从 0.9 初始化并参与学习。
-
-DSANet 的 P1 正式命令：
-
-```bash
-bash run_instructions/run_vin_vad_p1_dsanet.sh
-```
-
-输出：`../vadmy_data/vin_vad/dsanet/p1/summary.csv`、`fixed_emission.json`，以及
-`<dataset>/<E0-E3>/train_summary.json`、`history.json`、`model_final.pt`、`evaluation/metrics.json`、
-`evaluation/per_video.csv` 和逐视频 `curves/`。直接重跑会按 epoch/视频复用；确认要清空 P1 后运行
-`CLEAN=1 bash run_instructions/run_vin_vad_p1_dsanet.sh`。
-
-审稿人只看三个判断：E1 是否优于 E0；E2 是否在定位指标和碎片数上优于 E1；E3 是否在不损害
-frame AUC/AP 的前提下降低正常视频分数与长度的相关性。若 E3 只让曲线更顺、不改善这三点，event
-story 不成立，按停止规则不进入 P2。
-
-**P1 正式执行记录（2026-09-01，DSANet，seed 234）：** 已完成。11 项 event-chain/TCN 单元测试及
-1 项数据分桶测试全部通过；UCF-Crime 评测 290 个视频、1,109,888 帧，XD-Violence 评测 800 个视频、
-2,331,296 帧。下表均为最终 epoch、无 smoothing、无测试后校准的结果。
-
-| 数据集 | 变体 | 正式定位指标 | 正常视频分数-长度相关性 | 异常视频平均正段数@0.5 |
-|---|---:|---:|---:|---:|
-| UCF | E0 | AUC 83.44 | 0.248 | 3.786 |
-| UCF | E1 | AUC 81.30 | 0.408 | 1.879 |
-| UCF | E2 | AUC 81.34 | 0.562 | 0.893 |
-| UCF | E3 | AUC 79.94 | 0.281 | 0.786 |
-| XD | E0 | AP 73.84 | -0.107 | 5.368 |
-| XD | E1 | AP 74.71 | 0.340 | 0.206 |
-| XD | E2 | AP 64.50 | 0.474 | 0.724 |
-| XD | E3 | AP 62.38 | -0.099 | 0.668 |
-
-**P1 判断：NO-GO。** E1 只在 XD 提升 0.87 AP，在 UCF 下降 2.14 AUC；E2 的持续性减少了 UCF
-碎片，但没有改善 UCF 定位，并使 XD AP 下降 10.21；E3 能把长度相关性拉回，却进一步损害两个数据集的
-正式定位指标。当前 event story 不成立，停止进入 P2/P3/V1–V5。下一步应先由作者决定是修改 event
-likelihood/训练目标后重做 P1，还是放弃 event chain 主线；不要用更多 violation 消融掩盖基础链失败。
-
-远程产物根目录：`../vadmy_data/vin_vad/dsanet/p1`。总表看 `summary.csv`，固定 emission 机制检查看
-`fixed_emission.json`，单模型训练和逐视频结果看 `<dataset>/<variant>/train_summary.json` 与
-`<dataset>/<variant>/evaluation/`。
-
-### P2：normal-context predictor
-
-实现两层 masked cross-attention。query 只有位置编码，任何计算路径都不能读取目标保护区间 \(G_t\)。只有正常训练视频进入 \(\mathcal L_{ctx}\)。
+时间长度服从 baseline 官方 feature，不由原视频帧数单独推算。hidden 多出的尾 snippet 逐视频裁掉；`__0`--`__9` 是空间 views，不是时间块；XD 缺失的 4 个训练 hidden 写入 `audit.json`，测试视频不允许缺失。
 
 必须通过：
 
-- 随机改写 \(G_t\) 内输入，目标位置的 \(\mu_t,\sigma_t\) 逐点不变；
-- 改写 padding，预测不变；
-- bag loss 对 \(\mu,\sigma\) 无梯度，context loss 有梯度；
-- \(\sigma\) 不整体膨胀，normal residual 没有明显失控。
+1. `kappa_cross=kappa_within=0` 时，输出与 host 逐点相等；
+2. 每个视频 `H.shape[0] == S_h.shape[0] == M.sum()`；
+3. padding 内容和 batch 最大长度不影响有效输出；
+4. frame expansion 后与官方 GT 总长度和逐视频边界一致；
+5. host-only 复现 executable baseline；
+6. evaluator 同时产出 pooled、Cross、Macro Within 和 normal false-alarm 指标。
 
-怎么看有效：冻结模型后，在 test normal subset 上，conditional NLL 优于 global per-neuron mean/scale。这个结果只用于机制分析，不用于选 checkpoint。
+P0 不过，不开始训练。
 
-### P3：directional violation field
+## 4. P1：Masked Contextual Violation Field
 
-严格按最终方案实现：
+### 4.1 先实现无泄漏 predictor
+
+只用正常视频训练 Gaussian conditional NLL。query 只有位置编码，key/value 排除 `G_t` 和 padding。
+
+结构使用共享 masked temporal encoder + 低秩 layer-specific heads；禁止为每个坐标建立独立预测网络。
+
+单元测试：
+
+1. 改写 `G_t` 内 hidden，目标 `mu/sigma` 不变；
+2. 改 padding，目标预测不变；
+3. `L_ctx` 对 predictor 有梯度；`L_ws` 经 stop-gradient 后对 `mu/sigma` 路径无梯度；
+4. `sigma` 有下界且没有整体膨胀；
+5. normal conditional NLL 优于 global mean/scale。
+
+### 4.2 联合学习稀疏方向 field
 
 \[
-r=\frac{x-\operatorname{sg}(\mu)}{\operatorname{sg}(\sigma)+\epsilon},\qquad
-v^+=\operatorname{ReLU}(r-\delta),\quad
+r=(x-\operatorname{sg}(\mu))/(\operatorname{sg}(\sigma)+\epsilon),
+\]
+
+\[
+v^+=\operatorname{ReLU}(r-\delta),\qquad
 v^-=\operatorname{ReLU}(-r-\delta),
 \]
 
 \[
 \pi=\operatorname{entmax}_{1.5}(\omega),\qquad
-e_t=\sum_u\pi_uv_{t,u},\qquad
-\eta_t=a_t+\operatorname{softplus}(\beta)\tanh(\bar e_t).
+a_t=\sum_{u,q}\pi_{u,q}v_{t,u,q}.
 \]
 
-只记录五个诊断量：`beta`、entmax 非零数、\(N_{eff}\)、各层权重、正常/异常的 \(\bar e_t\) 分布。
+`pi` 与 auditor 一次联合训练，不提前选 top-K。记录 `pi` 非零数、有效 field 大小、层级质量和正常/异常 `e_t` 分布即可。
 
-必须通过：
+normal snippets 的 batch median/MAD 只作 stop-gradient 标定并更新 running values；推理时固定。`tau_N` 由 normal-video `z_v` running reservoir 的固定分位规则得到，不使用测试集。
 
-- `pi >= 0` 且 `sum(pi) == 1`；
-- 去掉 violation 后严格退化为同一个 TCN + E3；
-- \(\beta\) 没有塌到 0；
-- V4 优于 raw activation、global residual 和 absolute residual。
+## 5. P2：Asymmetric Two-Axis Host Auditor
 
-### P4：统一训练
-
-目标只有：
+### 5.1 跨视频单侧审计
 
 \[
-\mathcal L=\mathcal L_{bag}+\lambda_{ctx}\mathcal L_{ctx}.
+h_v=P_k(S^h_v),\qquad
+q_v=P_k(e_v),
 \]
 
-一次前向、一次反向、一个 optimizer。固定训练轮数并统一使用同一 checkpoint 规则。不要为不同消融挑各自最好看的 epoch。
+\[
+z_v=(q_v-m_q^N)/(1.4826\operatorname{MAD}_q^N+\epsilon),
+\]
 
-训练失败只检查：posterior 是否全 1、\(\sigma\) 是否膨胀、\(\beta\) 是否为 0、\(N_{eff}\) 是否退化。不要先加新 loss。
+\[
+n_v=\sigma(\tau_N-z_v),
+\]
 
-### P5：最后才做 tag 和 intervention
+\[
+\Delta_v^{cross}=-\alpha_v\kappa_v\,h_v n_v,\qquad \kappa_v\in[0,1].
+\]
 
-只有 V4 已经成立才开始：
+它必须恒小于等于 0，只在 host 高、normal support 强时明显。
 
-1. 按训练集上的 \(\pi_u\mathbb E[v_u]\) 固定选 top-K units/fields。
-2. 开放词表模型只提出候选 actor/action/scene/temporal-relation。
-3. 人工标注独立 probe set；按视频切 discovery/held-out。
-4. 搜索有限深度组合 tag，held-out 上计算 fidelity。
-5. 做 readout erase。
-6. 重放 CLIP 做 normal-donor activation patch。
-7. 与同层随机坐标、幅值匹配未选中坐标、随机正常 donor 比较。
+### 5.2 视频内零均值重排
 
-必须报告 top-K 的全部结果和通过比例，不能只挑成功案例。
+\[
+u_{v,t}=\alpha_t\kappa_t\tanh(e_{v,t}),\qquad \kappa_t\in[0,1],
+\]
 
-## 4. 核心消融：只跑这张表
+\[
+\Delta_{v,t}^{within}=u_{v,t}-\operatorname{MaskedMean}(u_v).
+\]
 
-| ID | 模型 | 证明什么 |
+零均值发生在 logit correction 上，不等价于 sigmoid 后视频平均概率严格不变；A3 仍需同时报告 Cross 与 Within，确认它实际改变了哪一轴。
+
+### 5.3 最终输出与目标
+
+\[
+S^{corr}=\sigma(\operatorname{logit}(S^h)+\Delta^{cross}+\Delta^{within}),
+\]
+
+\[
+\mathcal L=\mathcal L_{asym\text{-}MIL}
++\lambda_{ctx}\mathcal L_{ctx}
++\lambda_\rho\max(0,\mathcal C-\rho).
+\]
+
+单元测试：
+
+1. 两个 `kappa=0` 时严格等于 host，且 projected-gradient 参数在 0 处梯度非零；
+2. `Delta_cross<=0`，同一视频所有位置相同；
+3. `MaskedMean(Delta_within)==0`；
+4. `abs(Delta_cross)<=alpha_v`，`abs(Delta_within)<=2*alpha_t`；
+5. 删除 cross branch 不改变 within branch，反之亦然；
+6. padding 不进入 pooling、中心化、running stats 和 loss。
+
+## 6. P3：先跑最小生死实验
+
+不要一开始跑全表。按下面顺序：
+
+### Gate 1：context 是否成立
+
+| ID | 证据 | 必须回答 |
 |---|---|---|
-| E0 | final-layer TCN + top-k MIL | 常规弱监督归因基线 |
-| E1 | final-layer TCN + independent exact OR | 对全部合法实例分配求和是否优于 top-k |
-| E2 | E1 + Markov persistence，constant onset | 连续事件先验是否有用 |
-| E3 | E2 + length-calibrated onset | 长视频先验偏差是否被解决 |
-| V1 | E3 + raw directional activation field | activation 本身是否已经足够 |
-| V2 | E3 + global directional normal residual | 正常锚有用，但没有上下文时能做到哪里 |
-| V3 | E3 + contextual absolute residual | 上下文有用，但方向性是否必要 |
-| V4 | E3 + contextual directional violation field | Full ViN-VAD |
-| V5 | V4，entmax 换 dense softmax | 稀疏 field 是否必要 |
+| C0 | raw directional activation | 高激活是否足够 |
+| C1 | global directional normal z-score / DFM | 边际正常偏离是否足够 |
+| C2 | contextual absolute residual | 上下文是否有效 |
+| C3 | contextual directional residual | 方向是否必要 |
+| C4 | global-context controller | masked conditional 是否优于 SteerVAD-style 近邻 |
 
-对照口径写死：V1 对 layer-normalized \(x\) 直接取正/负 ReLU，V2 的 mean/scale 只来自训练集正常视频，V3 使用 \(\operatorname{ReLU}(|r|-\delta)\)。V1–V5 复用同一个 TCN、event chain、readout/fusion 和 evaluator。报告参数量即可，不添加无语义的“参数匹配网络”。
+C3 不优于 C1/C4，ICLR 主故事停止。
 
-主比较关系：
+### Gate 2：两轴校正是否成立
 
-- Event story：E0 → E1 → E2 → E3。
-- Violation vs activation：V1 vs V4。
-- Context：V2 vs V4。
-- Direction：V3 vs V4。
-- Sparse field：V5 vs V4。
+先跑 A0、A2、A3、A4：
 
-只有当论文明确强调“中间层比最终层重要”时，再补 `V4-final-layer-only`。否则不做。
+| ID | 模型 | 看什么 |
+|---|---|---|
+| A0 | frozen Host | 正式起点 |
+| A2 | contextual field + cross-only | pooled/Cross/normal FPR |
+| A3 | contextual field + within-only | Macro Within |
+| A4 | cross + within | 总体互补与 +1 目标 |
 
-单 seed、相同预算即可。若某个核心差值非常小或训练明显不稳定，只补 Full 与该直接对照，不重跑整张表。
+A4 有效后再补：
 
-## 5. 三项真正把故事讲实的机制实验
+| ID | 模型 | 消融目的 |
+|---|---|---|
+| A1 | symmetric single residual | 两轴非对称设计是否必要 |
+| A5 | A4 去 budget | correction budget 是否保护 host |
+| A6 | cross branch 改成双向 | 单侧正常抑制是否符合旧实验信息 |
+| A7 | entmax 改 softmax | sparse field 是否必要 |
 
-### 5.1 Context-matched intervention
+先跑 UCF/XD × DSANet/DeSC；主线成立后只加一个第三 host。
 
-保持目标 snippet 不变，只替换保护区间外的上下文。donor 预先按长度、目标位置和可见 actor/action 匹配，不能按模型输出挑。
+## 7. P4：最危险近邻必须同口径比较
 
-报告：
+同一 host、hidden、loss、budget 和 evaluator 下，只替换 evidence/controller：
+
+1. BN-WVAD-style marginal DFM；
+2. RPC-style normal prototype deviation；
+3. SteerVAD-style global-context controller；
+4. CVA-VAD masked contextual directional field。
+
+不能用各论文公开数字代替这个直接对照。CVA-VAD 不优于这些近邻时，不能靠写作放大新颖性。
+
+## 8. P5：最后做 Intervention-Verified Fields
+
+解释贡献：
 
 \[
-\Delta\mu,\quad\Delta r,\quad\Delta e,\quad\Delta s.
+C_{t,u,q}=v_{t,u,q}\frac{\partial(\Delta^{cross}+\Delta_t^{within})}{\partial v_{t,u,q}}.
 \]
 
-再画一组正常/异常 context-matched pair：raw activation 相近，但正常预测区间、directional violation 和 posterior 不同。
+只在 A4 成立后执行：
 
-这是“contextual”最重要的证据。纯 temporal shuffle 只作为辅助压力测试，因为它可能制造分布外输入。
+1. 训练完成后按 `abs(C)` 固定 top correction fields；
+2. context replacement：固定目标 `x_t`，替换匹配 donor context；
+3. readout erase；
+4. 重放 CLIP 做 matched-normal activation patch；
+5. 同层随机、贡献匹配未选中、随机 donor 三类控制；
+6. 独立 probe set 做组合 tag held-out fidelity；
+7. top fields 全部报告，不挑成功案例。
 
-### 5.2 Fixed-emission event experiment
+跨 host 只做两个协议：
 
-输入完全相同的 emissions，只替换 independent OR、constant-onset chain 和 length-calibrated chain。
+- source context predictor + field 固定，target 只拟合 `kappa_cross/kappa_within`；
+- 完全零拟合作为压力测试，不作为必须成功的主 claim。
 
-必须展示：
+## 9. 指标和结论绑定
 
-- 孤立高峰与连续中等证据得到不同事件后验；
-- 复制成更长序列后，E3 的视频异常先验不会仅因长度上升；
-- 在真实测试视频上，E3 相比 E0/E1 降低正常视频分数与视频长度的相关性，并减少碎片化。
+| 指标 | 对应 claim |
+|---|---|
+| pooled AUC/AP | 总体性能与 +1 目标 |
+| Cross-AUC / video-constant AP | 视频级可靠性校准 |
+| Macro Within-AUC | 视频内部时间定位 |
+| normal FPR@固定 TPR、normal top-score | 误报抑制 |
+| mean abs correction、gain-budget curve | host-preserving 程度 |
+| context replacement 链式变化 | contextual mechanism |
+| erase/patch vs controls | neuron functional contribution |
 
-合成 emissions 只验证算法行为，不能当检测性能。
+直白判定：
 
-### 5.3 Verified neuron intervention
+- A2 涨 pooled、A3 不涨 Within：只讲 reliability calibration；
+- A3 涨 Within：才讲 temporal localization；
+- A4 不优于 A0：停止解释实验，不加后处理救分；
+- C3 不优于 C1：退化为普通 normal deviation，ICLR 新颖性不足；
+- patch 不强于贡献匹配控制：tag 只是 descriptor；
+- 第二 host 失败：不讲 host-agnostic。
 
-每个展示的 unit/field 同时给出：
+## 10. 论文只需要三表三图
 
-- compositional tag 与最佳 atomic tag 的 held-out fidelity；
-- tag 对应位置和非对应位置的 readout erase effect；
-- normal-donor backbone patch effect；
-- 同层随机、幅值匹配、随机 donor 三类控制。
+三表：
 
-只有目标 patch 稳定强于控制，才能写“该 field functionally contributes to the detected violation”。不能写“这是偷窃神经元”。
+1. 主结果：host、pooled、Cross、Within、normal FPR；
+2. C0--C4 与 A0--A7 核心消融；
+3. tag fidelity、erase、patch、匹配控制和跨 host transfer。
 
-## 6. 怎么判断三项创新成立
+三图：
 
-### Event inference 成立
+1. Figure 1：强 host 高分但内部 normal support 强，auditor 抑制误报；另一例内部 contextual violation 强，within branch 定位事件；
+2. 方法图：normal expectation → directional field → cross/within correction → verified field；
+3. 机制图：实际响应、预测区间、violation、两项 correction、最终 score，加 patch 对照。
 
-- E3 相比 E0 在官方 frame-level AUC/AP 上有实质改善，且不是靠后处理得到；
-- E2 优于 E1，说明 persistence 有用；
-- E3 相比 E2 降低正常视频分数与长度的相关性；
-- posterior 没有靠占满整段视频作弊。
+不做七张装饰图、事件窗扫描、所有层遍历、所有预算笛卡尔积或额外 smoothing baseline。
 
-### Contextual violation 成立
+## 11. ICLR 交付闸门
 
-- V4 优于 E3、V1、V2、V3；
-- \(\beta\) 不接近 0；
-- context-matched swap 会沿着 \(\mu\rightarrow r\rightarrow e\rightarrow s\) 改变结果；
-- UCF-Crime 与 XD-Violence 的关键比较方向基本一致。若只在一个数据集成立，就收缩泛化表述。
+提交前至少具备：
 
-### Verified tags 成立
-
-- compositional fidelity 在 held-out probe 上优于 atomic tag；
-- erase 对 tag 对应位置影响更大；
-- backbone patch 强于三类控制；
-- 移除所有文本模块后 detector 输出逐点不变。
-
-## 7. 论文最终只需要这些结果
-
-1. **主结果表**：UCF-Crime AUC、XD-Violence AP。外部数字若 backbone/采样不同，明确标出，不据此声称纯方法优势。
-2. **核心消融表**：E0–E3、V1–V5。
-3. **机制主图**：raw response、normal prediction interval、directional violation、event posterior 四条轨迹，加 context-matched pair。
-4. **解释验证表/图**：held-out fidelity、erase、patch 与控制、top-K 验证成功率。
-
-不需要：所有模块笛卡尔积、每层遍历、guard radius 大表、\(\delta\) 大表、多 seed 全重跑、额外 smoothing baseline、装饰性神经元截图。
-
-## 8. 最短执行顺序
-
-1. P0 数据/evaluator。
-2. E0–E3；event story 不成立就停。
-3. predictor 泄漏与梯度测试。
-4. V1–V5；V4 不成立就停。
-5. context-matched intervention 和机制主图。
-6. 最后做 probe、tag、erase、patch。
-7. 汇总四张表/图，按实际证据强度写 claim。
+1. G0 数据与 host identity 全通过；
+2. C3 明确优于 C1/C4；
+3. A4 优于 A0，且知道增益来自 Cross 还是 Within；
+4. 两个数据集、两个 host 的完整结果；
+5. 至少一组受控 patch/erase 结果；
+6. 文档、代码、公式、数字和引用由作者逐项核实；
+7. 按 ICLR 2027 要求在论文与提交表单披露 AI 用途。

@@ -1,5 +1,7 @@
 # P1 失败根因与 ViN-VAD 模块收缩建议
 
+> 后续决策：本报告提出的 HP-CVA 已进一步收敛为“contextual violation field + video/within 分层选择性校正”，正式方案见 [ViN-VAD v7](ws-vad-ultimate-v7-2026-09-01.md)。本文件保留 P1 失败证据，不再作为最终公式。
+
 > 日期：2026-09-01
 > 结论先行：P1 的 NO-GO 判断正确，但它只否定了“用 exact-OR/Markov chain 从视频标签直接学定位”这条路线，没有否定“上下文违背神经元”动机。下一版应删除 OR-chain 核心贡献，保留正式 baseline 的检测分数，把 contextual violation 做成有界、可审计的残差证据，而不是重新训练一个替代 DSANet 的检测器。
 

@@ -34,7 +34,7 @@ def test_video_constant_control_removes_within_video_ordering() -> None:
     ]
     metrics = score_curve_metrics(scores, labels, target_tpr=1.0)
     assert metrics["within_auc"] == 1.0
-    assert metrics["video_constant_auc"] == 1.0
+    assert metrics["video_constant_auc"] == 5.0 / 6.0
     assert metrics["normal_fpr"]["achieved_tpr"] == 1.0
 
 

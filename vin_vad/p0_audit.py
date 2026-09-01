@@ -44,13 +44,18 @@ def feature_rows(path: str) -> list[dict[str, object]]:
         labels = set(group["label"].astype(str))
         if len(labels) != 1:
             raise ValueError(f"{key}: inconsistent labels {sorted(labels)}")
-        snippets = 0
+        crop_lengths: list[int] = []
         for feature_path in group["path"].astype(str):
             feature = np.load(feature_path, mmap_mode="r", allow_pickle=False)
             if feature.ndim != 2:
                 raise ValueError(f"{feature_path}: expected [T,D], got {feature.shape}")
-            snippets += int(feature.shape[0])
-        rows.append({"key": str(key), "label": next(iter(labels)), "feature_snippets": snippets})
+            crop_lengths.append(int(feature.shape[0]))
+        # DSANet's __0..__9 files are spatial crops of one timeline, not
+        # consecutive temporal chunks. Their temporal lengths must agree and
+        # are counted once when defining the evaluator domain.
+        if len(set(crop_lengths)) != 1:
+            raise ValueError(f"{key}: DSANet crop lengths differ: {crop_lengths}")
+        rows.append({"key": str(key), "label": next(iter(labels)), "feature_snippets": crop_lengths[0]})
     return rows
 
 

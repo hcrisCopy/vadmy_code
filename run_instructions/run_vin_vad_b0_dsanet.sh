@@ -3,6 +3,7 @@ set -euo pipefail
 
 OUT=../vadmy_data/vin_vad/dsanet/b0
 SEED=42
+export OMP_NUM_THREADS=8
 CLEAN_ARGS=()
 if [[ "${CLEAN:-0}" == "1" ]]; then
   CLEAN_ARGS=(--clean)

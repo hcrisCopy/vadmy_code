@@ -97,6 +97,17 @@ vin_vad/
 
 任何一项失败都先修数据，不开始 B1。
 
+#### B0 正式结果（DSANet，2026-09-02）
+
+| Dataset | 官方主指标 | Cross-AUC | Within-AUC | Macro Within-AUC | video-constant 对照 | normal frame FPR@95% TPR | identity error |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| UCF-Crime | AUC 89.445 | 89.506 | 73.675 | 69.913 | AUC 85.371 | 10.199% | 0 |
+| XD-Violence | AP 86.951 | 95.408 | 85.468 | 79.845 | AP 77.424 | 1.474% | 0 |
+
+B0 结论：**通过，可以进入 B1，但本阶段结束时先停下汇报。** UCF 1610/290 个训练/测试视频与 1,109,888 帧 GT 对齐；XD 3950/800 个可用训练/测试视频与 2,331,296 帧 GT 对齐。XD 训练集缺 4 个 hidden，已写入 `audit.json` 并跳过；测试集没有缺失。两套数据的 pooled AUC 分解误差均为 0，host score 与 identity correction 逐点完全相同。
+
+不要横向比较两个数据集的 FPR 数值：95% TPR 对应的阈值和正样本分布不同。B0 只把它们锁为各自数据集后续 A0–A6 的固定参照。
+
 ### B1：无泄漏的正常上下文预测器
 
 在 `context_predictor.py` 实现共享 masked temporal encoder 和低秩 layer-specific heads：

@@ -68,7 +68,14 @@ def feature_rows(path: str) -> list[dict[str, object]]:
         # are counted once when defining the evaluator domain.
         if len(set(crop_lengths)) != 1:
             raise ValueError(f"{key}: DSANet crop lengths differ: {crop_lengths}")
-        rows.append({"key": str(key), "label": next(iter(labels)), "feature_snippets": crop_lengths[0]})
+        rows.append(
+            {
+                "key": str(key),
+                "label": next(iter(labels)),
+                "feature_snippets": crop_lengths[0],
+                "clip_paths": "|".join(group["path"].astype(str)),
+            }
+        )
     return rows
 
 
@@ -173,6 +180,7 @@ def audit_split(
                 "key": key,
                 "label": str(feature_row["label"]),
                 "binary_label": int(not is_normal_label(dataset, str(feature_row["label"]))),
+                "clip_paths": str(feature_row["clip_paths"]),
                 "hidden_path": hidden_path,
                 "raw_hidden_snippets": int(raw_hidden_snippets),
                 "valid_snippets": valid_snippets,

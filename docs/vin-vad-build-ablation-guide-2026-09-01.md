@@ -1,93 +1,135 @@
-# CVA-VAD v9 项目搭建与 ICLR 核心实验指南
+# CVA-VAD v9 搭建与核心实验指南
 
-> 配套方案：`docs/cva-vad-final-v9-iclr-2026-09-01.md`
+> 唯一方法依据：`docs/cva-vad-final-v9-iclr-2026-09-01.md`
 >
-> 只做三条证据链：contextual residual 是否是真增量信息；单侧跨视频审计和视频内重排各自解决什么；神经元 field 是否真实驱动校正。
+> 本指南只回答四件事：先写什么、每个模块如何验收、哪些实验决定 claim 是否成立、结果出来后论文能说什么。
 
-## 1. 输入与红线
+## 1. 先锁定论文要证明的三件事
+
+| Claim | 方法对象 | 必须由什么证据证明 |
+|---|---|---|
+| C1：上下文条件的方向违背是 host 标量分数之外的增量信息 | Masked Contextual Violation Field | contextual directional residual 优于 raw activation、global deviation、absolute residual 和 global-context control；context replacement 能改变残差链 |
+| C2：冻结 host 应被审计，而不是被替换；跨视频误报抑制与视频内定位必须分开 | Asymmetric Two-Axis Host Auditing | cross-only 改善 Cross/正常误报，within-only 改善 Within，二者组合优于单分支；单侧与预算设计优于对应替代项 |
+| C3：被命名的神经元 field 确实驱动了具体校正 | Intervention-Verified Correction Fields | selected field 的 erase/patch effect 强于等预算匹配控制；删除 tag 代码不改变检测输出 |
+
+整篇论文只有一条链：
 
 \[
-H\in\mathbb R^{B\times T\times12\times768},\quad
-S^h\in(0,1)^{B\times T},\quad
-y\in\{0,1\}^{B},\quad
-M\in\{0,1\}^{B\times T}.
+\text{normal context expectation}
+\rightarrow \text{directional violation}
+\rightarrow \text{host correction}
+\rightarrow \text{intervention verification}.
 \]
 
-- `H`：冻结 CLIP 12 层 CLS；神经元为 `(layer, dim)`；
-- `S_h`：baseline 正式 detection score；
-- `y`：视频级标签；
-- `M=1`：真实有效 snippet，`M=0`：padding。不是异常 mask；
-- `G_t`：预测 `t` 时隐藏的目标保护区间。
+任何代码或实验若不服务这条链，不进入主项目。
 
-红线：
+## 2. 固定输入、输出和训练边界
 
-- host 与 CLIP 永久冻结，但不是阶段性反复冻结；
-- 不训练新 detector 替代 host；
-- 不使用 host top-k 发现伪标签神经元字典；
-- 不使用 exact OR、event chain、median/max/dilation/smoothing/advance；
-- 不使用 Kneedle 固定字典或数据集名分支；
-- 文本、tag 与 intervention 不进入检测分数；
-- 测试集不决定任何阈值、预算、field 或 checkpoint。
+```text
+输入
+H      [B,T,12,768]  冻结 CLIP ViT-B/16 每层 CLS
+S_host [B,T]         baseline 官方 evaluator 使用的 snippet score
+y      [B]           视频级标签，0 正常，1 异常
+M      [B,T]         有效位置 mask；1=真实 snippet，0=padding
 
-## 2. 最小代码结构
+输出
+S_corr [B,T]         校正后的 snippet score
+```
+
+`M` 只处理变长序列和 padding，不是异常区域标注。`G_t` 是预测位置 `t` 时不可见的时间保护区间，也不是监督标签。
+
+训练边界：
+
+- CLIP 和 host 全程冻结；训练对象只有 context predictor、field 权重 `omega`、`kappa_cross`、`kappa_within`；
+- 一个训练过程、一个 optimizer；`L_ctx` 更新 predictor，`L_ws` 通过 stop-gradient 的 `mu/sigma` 更新 field 与 auditor；
+- 正常 running median/MAD 和 `tau_N` 只由训练集正常视频更新，验证和测试时固定；
+- tag、文本模型和 intervention 都在检测模型训练完成后运行，不能反馈到检测分数；
+- 不接回旧方案的 detector、event chain、exact OR、平滑、膨胀、提前量、Kneedle 或 host top-k 神经元伪标签。
+
+## 3. 代码按六个可验收单元搭建
+
+建议在现有 `vin_vad/` 上实现：
 
 ```text
 vin_vad/
-├── data.py
-├── context_predictor.py
-├── violation_field.py
-├── host_auditor.py
-├── losses.py
-├── model.py
-├── train.py
-├── evaluate.py
-├── interventions.py
-├── tags.py
+├── data.py                 # 对齐 H、S_host、y、M
+├── context_predictor.py    # masked conditional Gaussian
+├── violation_field.py      # directional residual、entmax field、normal 标定
+├── host_auditor.py         # cross / within 两轴校正
+├── losses.py               # asymmetric MIL、L_ctx、correction budget
+├── model.py                # 唯一前向链
+├── train.py                # 单 optimizer 与 projected update
+├── evaluate.py             # pooled / Cross / Within / normal FPR
+├── interventions.py        # replacement、erase、activation patch
+├── tags.py                 # 训练后 field 命名与 held-out fidelity
 └── tests/
 ```
 
-`base_tcn.py` 和 `event_chain.py` 只保留 P1 失败复现，不进入 v9 import graph。
+旧 `base_tcn.py`、`fixed_emission.py`、`event_chain.py` 只用于复现失败方案，不允许被 `model.py` 导入。
 
-## 3. P0：先锁死数据、host 与 evaluator
+### B0：数据与 host identity
 
-时间长度服从 baseline 官方 feature，不由原视频帧数单独推算。hidden 多出的尾 snippet 逐视频裁掉；`__0`--`__9` 是空间 views，不是时间块；XD 缺失的 4 个训练 hidden 写入 `audit.json`，测试视频不允许缺失。
+先完成 `data.py` 和 `evaluate.py`，此时不写新模型。
 
-必须通过：
+必须实现：
 
-1. `kappa_cross=kappa_within=0` 时，输出与 host 逐点相等；
-2. 每个视频 `H.shape[0] == S_h.shape[0] == M.sum()`；
-3. padding 内容和 batch 最大长度不影响有效输出；
-4. frame expansion 后与官方 GT 总长度和逐视频边界一致；
-5. host-only 复现 executable baseline；
-6. evaluator 同时产出 pooled、Cross、Macro Within 和 normal false-alarm 指标。
+1. 逐视频读取并裁齐 `H` 与正式 `S_host`；时间长度以 baseline 官方 feature 为准；
+2. 明确区分空间 view 与时间 snippet；
+3. 缺失、重复、长度不一致写入 `audit.json`，测试视频出现异常直接报错；
+4. evaluator 一次输出 pooled、Cross、Macro Within、normal FPR 和 normal top-score；
+5. 保存逐视频 score，而不是只保存最终 AUC。
 
-P0 不过，不开始训练。
+单元测试与验收：
 
-## 4. P1：Masked Contextual Violation Field
+- `S_corr=S_host` 时，复现 baseline evaluator；
+- `H.shape[0] == S_host.shape[0] == M.sum()` 对每个视频成立；
+- 随意改变 padding 数值或 batch 内最长视频，不改变任何有效位置输出；
+- frame expansion 后，预测长度和每个视频边界与官方 GT 完全一致。
 
-### 4.1 先实现无泄漏 predictor
-
-只用正常视频训练 Gaussian conditional NLL。query 只有位置编码，key/value 排除 `G_t` 和 padding。
-
-结构使用共享 masked temporal encoder + 低秩 layer-specific heads；禁止为每个坐标建立独立预测网络。
-
-单元测试：
-
-1. 改写 `G_t` 内 hidden，目标 `mu/sigma` 不变；
-2. 改 padding，目标预测不变；
-3. `L_ctx` 对 predictor 有梯度；`L_ws` 经 stop-gradient 后对 `mu/sigma` 路径无梯度；
-4. `sigma` 有下界且没有整体膨胀；
-5. normal conditional NLL 优于 global mean/scale。
-
-### 4.2 联合学习稀疏方向 field
+评估口径从 B0 起锁死：UCF 主指标是官方 pooled AUC，XD 主指标是官方 pooled AP；两者都额外报告 pooled AUC 的精确视频身份分解
 
 \[
-r=(x-\operatorname{sg}(\mu))/(\operatorname{sg}(\sigma)+\epsilon),
+\operatorname{PooledAUC}=w\operatorname{WithinAUC}+(1-w)\operatorname{CrossAUC},
+\quad w=\frac{\sum_v a_vn_v}{(\sum_v a_v)(\sum_v n_v)}.
+\]
+
+同时报告每个 mixed-label 视频等权的 Macro Within-AUC、video-mean constant 对照，以及 normal-video frame FPR@95% TPR。Cross/Within 只分解 AUC；不要伪造一个“Cross-AP”。XD 的 AP 通过 video-constant AP 判断其收益是否主要来自视频级排序。
+
+任何一项失败都先修数据，不开始 B1。
+
+### B1：无泄漏的正常上下文预测器
+
+在 `context_predictor.py` 实现共享 masked temporal encoder 和低秩 layer-specific heads：
+
+\[
+(\mu_{t,u},\log\sigma_{t,u})
+=g_\psi(H_{\{j:M_j=1,j\notin G_t\}}).
+\]
+
+query 只能包含位置编码；key/value 必须排除 `G_t` 和 padding。`L_ctx` 只在正常视频有效位置计算 Gaussian NLL。
+
+必须测试：
+
+1. **泄漏测试**：只改写 `G_t` 内的 hidden，目标位置 `mu/sigma` 逐点不变；
+2. **padding 测试**：只改 padding，预测不变；
+3. **梯度测试**：`L_ctx` 能更新 predictor；`L_ws` 不能经 `mu/sigma` 更新 predictor；
+4. **尺度测试**：`sigma` 有数值下界，无 NaN/Inf；
+5. **预测测试**：在正常验证视频上，conditional NLL 优于逐神经元 global mean/scale。
+
+B1 有效的唯一含义是：上下文确实能预测正常神经元响应。这里不看检测 AUC，也不加入异常视频局部伪标签。
+
+### B2：方向违背与稀疏 correction field
+
+在 `violation_field.py` 实现：
+
+\[
+r_{t,u}=\frac{x_{t,u}-\operatorname{sg}(\mu_{t,u})}
+{\operatorname{sg}(\sigma_{t,u})+\epsilon},
 \]
 
 \[
-v^+=\operatorname{ReLU}(r-\delta),\qquad
-v^-=\operatorname{ReLU}(-r-\delta),
+v_{t,u,+}=\operatorname{ReLU}(r_{t,u}-\delta),\qquad
+v_{t,u,-}=\operatorname{ReLU}(-r_{t,u}-\delta),
 \]
 
 \[
@@ -95,183 +137,286 @@ v^-=\operatorname{ReLU}(-r-\delta),
 a_t=\sum_{u,q}\pi_{u,q}v_{t,u,q}.
 \]
 
-`pi` 与 auditor 一次联合训练，不提前选 top-K。记录 `pi` 非零数、有效 field 大小、层级质量和正常/异常 `e_t` 分布即可。
+只用训练集正常 snippet 的 running median/MAD 得到标准化 evidence `e_t`。`pi` 从同值 `omega` 初始化，在校正目标下联合学习，不提前固定 top-K。
 
-normal snippets 的 batch median/MAD 只作 stop-gradient 标定并更新 running values；推理时固定。`tau_N` 由 normal-video `z_v` running reservoir 的固定分位规则得到，不使用测试集。
+必须测试：
 
-## 5. P2：Asymmetric Two-Axis Host Auditor
+- 正负方向不会对同一个非零残差同时激活；
+- `pi>=0` 且 `sum(pi)=1`；
+- normal running statistics 不读取异常视频、padding、验证集或测试集；
+- 保存 `r`、`v`、`pi`、`e` 后可逐项复算 auditor 输出；
+- 所有 evidence 共享同一输入/输出接口和 auditor 配置；C0–C4 分别训练，但只允许改变表中指定的 evidence/controller。
 
-### 5.1 跨视频单侧审计
+B2 不能靠“异常视频的 `e` 更大”验收。它是否提供增量检测信息，只由后面的 C0–C4 决定。
+
+### B3：两轴 host auditor
+
+在 `host_auditor.py` 独立实现两个分支。
+
+Cross-video branch：
 
 \[
-h_v=P_k(S^h_v),\qquad
-q_v=P_k(e_v),
+h_v=P_k(S_v^{host}),\quad q_v=P_k(e_v),
 \]
 
 \[
-z_v=(q_v-m_q^N)/(1.4826\operatorname{MAD}_q^N+\epsilon),
-\]
-
-\[
+z_v=\frac{q_v-m_q^N}{1.4826\operatorname{MAD}_q^N+\epsilon},\qquad
 n_v=\sigma(\tau_N-z_v),
 \]
 
 \[
-\Delta_v^{cross}=-\alpha_v\kappa_v\,h_v n_v,\qquad \kappa_v\in[0,1].
+\Delta_v^{cross}=-\alpha_v\kappa_v h_v n_v\le 0.
 \]
 
-它必须恒小于等于 0，只在 host 高、normal support 强时明显。
-
-### 5.2 视频内零均值重排
+Within-video branch：
 
 \[
-u_{v,t}=\alpha_t\kappa_t\tanh(e_{v,t}),\qquad \kappa_t\in[0,1],
+u_{v,t}=\alpha_t\kappa_t\tanh(e_{v,t}),
 \]
 
 \[
 \Delta_{v,t}^{within}=u_{v,t}-\operatorname{MaskedMean}(u_v).
 \]
 
-零均值发生在 logit correction 上，不等价于 sigmoid 后视频平均概率严格不变；A3 仍需同时报告 Cross 与 Within，确认它实际改变了哪一轴。
-
-### 5.3 最终输出与目标
+最终只在 logit space 相加：
 
 \[
-S^{corr}=\sigma(\operatorname{logit}(S^h)+\Delta^{cross}+\Delta^{within}),
+S^{corr}_{v,t}=\sigma\!\left(
+\operatorname{logit}(S^{host}_{v,t})+
+\Delta_v^{cross}+\Delta_{v,t}^{within}
+\right).
 \]
 
+`kappa_cross` 和 `kappa_within` 初始化为 0；每次 optimizer step 后投影到 `[0,1]`。
+
+必须测试：
+
+1. 两个 `kappa=0` 时，输出与 host 逐点相等，且参数在 0 处梯度非零；
+2. `Delta_cross<=0`，并且在同一视频所有有效位置取同一值；
+3. `MaskedMean(Delta_within)=0`；
+4. `abs(Delta_cross)<=alpha_v`，`abs(Delta_within)<=2*alpha_t`；
+5. 关闭一个 branch 不改变另一个 branch 的数值；
+6. padding 不进入 pooling、中心化和校正预算。
+
+不要用“zero-mean 所以只改善定位”作为验收。sigmoid 后并不严格保持视频平均概率；必须通过 A2/A3 的 Cross/Within 指标判断真实作用。
+
+### B4：统一训练目标
+
+在 `losses.py` 和 `train.py` 实现：
+
 \[
-\mathcal L=\mathcal L_{asym\text{-}MIL}
+\mathcal L
+=\mathcal L_{asym\text{-}MIL}
 +\lambda_{ctx}\mathcal L_{ctx}
 +\lambda_\rho\max(0,\mathcal C-\rho).
 \]
 
-单元测试：
+- 正常 bag：所有有效 snippet 都是 dense negative；
+- 异常 bag：只有视频级标签，使用 top-k positive MIL；
+- correction budget 同时约束 cross 常数偏移和 within 平均绝对改动；
+- 每个 checkpoint 保存 predictor、`omega`、两个 `kappa`、normal running statistics、配置和数据 manifest。
 
-1. 两个 `kappa=0` 时严格等于 host，且 projected-gradient 参数在 0 处梯度非零；
-2. `Delta_cross<=0`，同一视频所有位置相同；
-3. `MaskedMean(Delta_within)==0`；
-4. `abs(Delta_cross)<=alpha_v`，`abs(Delta_within)<=2*alpha_t`；
-5. 删除 cross branch 不改变 within branch，反之亦然；
-6. padding 不进入 pooling、中心化、running stats 和 loss。
+训练日志只保留能诊断方法的量：三项 loss、两个 `kappa`、平均绝对 correction、budget violation、field support size、正常/异常视频 evidence 摘要。不要为旧模块继续加日志。
 
-## 6. P3：先跑最小生死实验
+### B5：干预和 tag
 
-不要一开始跑全表。按下面顺序：
-
-### Gate 1：context 是否成立
-
-| ID | 证据 | 必须回答 |
-|---|---|---|
-| C0 | raw directional activation | 高激活是否足够 |
-| C1 | global directional normal z-score / DFM | 边际正常偏离是否足够 |
-| C2 | contextual absolute residual | 上下文是否有效 |
-| C3 | contextual directional residual | 方向是否必要 |
-| C4 | global-context controller | masked conditional 是否优于 SteerVAD-style 近邻 |
-
-C3 不优于 C1/C4，ICLR 主故事停止。
-
-### Gate 2：两轴校正是否成立
-
-先跑 A0、A2、A3、A4：
-
-| ID | 模型 | 看什么 |
-|---|---|---|
-| A0 | frozen Host | 正式起点 |
-| A2 | contextual field + cross-only | pooled/Cross/normal FPR |
-| A3 | contextual field + within-only | Macro Within |
-| A4 | cross + within | 总体互补与 +1 目标 |
-
-A4 有效后再补：
-
-| ID | 模型 | 消融目的 |
-|---|---|---|
-| A1 | symmetric single residual | 两轴非对称设计是否必要 |
-| A5 | A4 去 budget | correction budget 是否保护 host |
-| A6 | cross branch 改成双向 | 单侧正常抑制是否符合旧实验信息 |
-| A7 | entmax 改 softmax | sparse field 是否必要 |
-
-先跑 UCF/XD × DSANet/DeSC；主线成立后只加一个第三 host。
-
-## 7. P4：最危险近邻必须同口径比较
-
-同一 host、hidden、loss、budget 和 evaluator 下，只替换 evidence/controller：
-
-1. BN-WVAD-style marginal DFM；
-2. RPC-style normal prototype deviation；
-3. SteerVAD-style global-context controller；
-4. CVA-VAD masked contextual directional field。
-
-不能用各论文公开数字代替这个直接对照。CVA-VAD 不优于这些近邻时，不能靠写作放大新颖性。
-
-## 8. P5：最后做 Intervention-Verified Fields
-
-解释贡献：
+仅在完整检测模型确定后实现。贡献定义为：
 
 \[
-C_{t,u,q}=v_{t,u,q}\frac{\partial(\Delta^{cross}+\Delta_t^{within})}{\partial v_{t,u,q}}.
+C_{t,u,q}=v_{t,u,q}
+\frac{\partial(\Delta^{cross}+\Delta_t^{within})}
+{\partial v_{t,u,q}}.
 \]
 
-只在 A4 成立后执行：
+`interventions.py` 必须提供四种等预算操作：
 
-1. 训练完成后按 `abs(C)` 固定 top correction fields；
-2. context replacement：固定目标 `x_t`，替换匹配 donor context；
-3. readout erase；
-4. 重放 CLIP 做 matched-normal activation patch；
-5. 同层随机、贡献匹配未选中、随机 donor 三类控制；
-6. 独立 probe set 做组合 tag held-out fidelity；
-7. top fields 全部报告，不挑成功案例。
+- selected field erase；
+- 同层随机 field erase；
+- 贡献幅值匹配但未选中 field erase；
+- matched-normal activation patch 与随机 donor patch。
 
-跨 host 只做两个协议：
+context replacement 必须固定目标 `x_t`，只替换上下文，并保存 `mu -> r -> e -> Delta -> S_corr` 的整条变化。`tags.py` 只给通过干预的 field 生成组合 tag；删除整个文件后，`S_corr` 必须逐点不变。
 
-- source context predictor + field 固定，target 只拟合 `kappa_cross/kappa_within`；
-- 完全零拟合作为压力测试，不作为必须成功的主 claim。
+## 4. 最小实验顺序
 
-## 9. 指标和结论绑定
+不要先跑完整消融表。下面每一关决定下一关是否值得做。
 
-| 指标 | 对应 claim |
+### E0：身份与评估口径
+
+| ID | 设置 | 必须确认 |
+|---|---|---|
+| A0 | frozen host 原始输出 | baseline 分数、时间对齐、pooled/Cross/Within/normal FPR 全部可信 |
+
+E0 通过后保存不可改动的 host score cache 和 evaluator 版本。后续所有方法共享它们。
+
+### E1：创新一的生死对照
+
+固定同一个 host auditor、loss、budget、训练数据和 evaluator，只替换 evidence：
+
+| ID | Evidence | 它排除什么解释 |
+|---|---|---|
+| C0 | raw directional activation | 不是简单挑高激活维度 |
+| C1 | global directional normal z-score / DFM | 不是普通边际正常偏离 |
+| C2 | masked contextual absolute residual | 方向拆分确有必要 |
+| C3 | masked contextual directional residual | 完整创新一 |
+| C4 | global-context controller | 不是任意 context encoder 都能做到 |
+
+C3 必须同时满足：
+
+1. 正常验证视频 conditional NLL 优于 global baseline；
+2. detection 指标优于 C0、C1、C2、C4；
+3. context replacement 在目标 raw activation 不变时，能稳定改变 `mu/r/e/correction`。
+
+若只满足第 2 条，可能只是更复杂的 readout；若只满足第 1 条，predictor 更准但没有提供检测增量。两者都不能支撑 C1 claim。
+
+### E2：创新二的职责分解
+
+先只跑四项：
+
+| ID | 设置 | 主看指标 | 可以得出的结论 |
+|---|---|---|---|
+| A0 | frozen host | 所有指标 | 正式起点 |
+| A2 | C3 field + cross only | Cross、normal FPR、normal top-score | 是否真正抑制正常误报 |
+| A3 | C3 field + within only | Macro Within，同时检查 Cross | 是否真正改善视频内定位 |
+| A4 | cross + within | pooled、Cross、Within、平均改动 | 两轴是否互补 |
+
+结果解释必须按下面写：
+
+- A2 改善 Cross/normal FPR：可以讲 normal-support audit；
+- A3 改善 Within：可以讲 temporal redistribution；
+- A3 只改善 Cross：不能把 zero-mean 公式写成定位贡献；
+- A4 不优于最好单分支：两轴不互补，删除无效分支；
+- A4 的收益只来自 A2：论文收缩为可靠性校准，不声称改善时间定位。
+
+A4 确实优于 A0 和两个单分支后，再补三个必要结构消融：
+
+| ID | 改动 | 回答的 reviewer 问题 |
+|---|---|---|
+| A1 | symmetric single residual | 为什么不是普通 residual fusion |
+| A5 | A4 去 correction budget | budget 是否限制破坏 strong host |
+| A6 | cross 改为双向校正 | 为什么 cross 只允许正常支撑下压分 |
+
+`entmax -> softmax` 只在论文强调“稀疏 field”时补做；它不决定两轴 auditor 是否成立。
+
+### E3：最近方法的同口径控制
+
+这是新颖性实验，不是普通 baseline 表。固定 A0 host、hidden、loss、budget 和 evaluator，只替换 evidence/controller：
+
+| Control | 对照目的 |
 |---|---|
-| pooled AUC/AP | 总体性能与 +1 目标 |
-| Cross-AUC / video-constant AP | 视频级可靠性校准 |
-| Macro Within-AUC | 视频内部时间定位 |
-| normal FPR@固定 TPR、normal top-score | 误报抑制 |
-| mean abs correction、gain-budget curve | host-preserving 程度 |
-| context replacement 链式变化 | contextual mechanism |
-| erase/patch vs controls | neuron functional contribution |
+| BN-WVAD-style marginal DFM | 排除“只是正常均值偏离” |
+| RPC-style normal prototype deviation | 排除“只是冻结模型后校准” |
+| SteerVAD-style global-context controller | 排除“只是加一个 context 模块” |
+| CVA-VAD C3 field + A4 auditor | 完整方法 |
 
-直白判定：
+公开论文数字不能替代这个实验，因为 backbone、host、输入与 evaluator 均不同。
 
-- A2 涨 pooled、A3 不涨 Within：只讲 reliability calibration；
-- A3 涨 Within：才讲 temporal localization；
-- A4 不优于 A0：停止解释实验，不加后处理救分；
-- C3 不优于 C1：退化为普通 normal deviation，ICLR 新颖性不足；
-- patch 不强于贡献匹配控制：tag 只是 descriptor；
-- 第二 host 失败：不讲 host-agnostic。
+### E4：创新三的功能验证
 
-## 10. 论文只需要三表三图
+只做能区分“功能单元”和“相关维度”的实验：
 
-三表：
+| ID | 实验 | 必须比较 |
+|---|---|---|
+| I1 | context replacement | matched context donor vs random donor |
+| I2 | readout erase | selected vs same-layer random vs contribution-matched non-selected |
+| I3 | CLIP activation patch | selected matched-normal patch vs 等预算 controls |
+| I4 | held-out tag fidelity | 全部预先固定的 top fields，不挑案例 |
 
-1. 主结果：host、pooled、Cross、Within、normal FPR；
-2. C0--C4 与 A0--A7 核心消融；
-3. tag fidelity、erase、patch、匹配控制和跨 host transfer。
+关键量不是 heatmap 漂不漂亮，而是 `abs(Delta change)`、目标/非目标位置差异，以及 selected-control effect gap。I2/I3 不强于贡献匹配控制时，只能把 tag 称为描述，不能称为功能解释。
 
-三图：
+### E5：最小泛化验证
 
-1. Figure 1：强 host 高分但内部 normal support 强，auditor 抑制误报；另一例内部 contextual violation 强，within branch 定位事件；
-2. 方法图：normal expectation → directional field → cross/within correction → verified field；
-3. 机制图：实际响应、预测区间、violation、两项 correction、最终 score，加 patch 对照。
+主实验先完成 UCF-Crime、XD-Violence 和两个已接入 host。不要先扩成多 host 笛卡尔积。
 
-不做七张装饰图、事件窗扫描、所有层遍历、所有预算笛卡尔积或额外 smoothing baseline。
+跨 host 只验证两个问题：
 
-## 11. ICLR 交付闸门
+1. source context predictor 与 field 固定，target 只学习两个 `kappa`；
+2. 完全零拟合 transfer 作为压力测试。
 
-提交前至少具备：
+第一项成立才可以声称 correction field 可迁移；第二项失败不影响主方法，但必须如实报告。
 
-1. G0 数据与 host identity 全通过；
-2. C3 明确优于 C1/C4；
-3. A4 优于 A0，且知道增益来自 Cross 还是 Within；
-4. 两个数据集、两个 host 的完整结果；
-5. 至少一组受控 patch/erase 结果；
-6. 文档、代码、公式、数字和引用由作者逐项核实；
-7. 按 ICLR 2027 要求在论文与提交表单披露 AI 用途。
+## 5. Reviewer 最可能问什么，哪一个实验回答
+
+| Reviewer 质疑 | 唯一核心回答 |
+|---|---|
+| 只是把 BN-WVAD 的 DFM 换成 CLIP hidden | C1 vs C3，同 readout；再加 context replacement |
+| 更强的 context 网络带来提升，并非 conditional violation | C3 vs C4；目标泄漏测试；正常 conditional NLL |
+| 只是 frozen detector 后做 calibration | A1 vs A4；A3 的 Within；I2/I3 神经元干预 |
+| pooled AUC 只是把正常视频整体压低 | A2/A3 分解与 Cross/Within/normal FPR |
+| 两个 branch 是人为拼接 | A2、A3、A4 的职责和互补性 |
+| 单侧抑制和 budget 是拍脑袋 | A5、A6；同时报告平均 correction |
+| 所谓解释只是相关 heatmap | contribution-matched control、readout erase、activation patch |
+| 只对一个 host 有效 | 第二 host 和 source-field -> target-host transfer |
+| 文本偷偷参与检测 | 删除 `tags.py` 后逐点 identity test |
+
+## 6. 指标不能混着解释
+
+| 指标 | 只允许支撑什么 |
+|---|---|
+| pooled AUC/AP | 总体排序性能，不单独证明时间定位 |
+| Cross-AUC / video-constant AP | 视频级 normal-support audit |
+| Macro Within-AUC | 异常视频内部时间排序 |
+| normal FPR@固定 TPR、normal top-score | 正常误报抑制 |
+| mean absolute correction、gain-budget curve | 对 frozen host 的改动幅度与收益关系 |
+| conditional NLL、replacement chain | 上下文条件预期机制 |
+| erase/patch effect gap | 神经元 field 的功能特异性 |
+| held-out tag fidelity | tag 能否稳定描述已验证 field，不证明检测能力 |
+
+禁止用 pooled AUC 上升直接写“定位更准”，也禁止用零均值公式代替 Macro Within 实验。
+
+## 7. 论文最终只需要的结果
+
+### 表 1：主结果
+
+每个 dataset-host 组合只列：Host、完整方法、pooled、Cross、Within、normal FPR、平均绝对 correction。
+
+### 表 2：机制与结构消融
+
+上半部分 C0–C4；下半部分 A0、A2、A3、A4、A1、A5、A6。每一行对应一个明确 claim，不再增加旧模块。
+
+### 表 3：解释与迁移
+
+列 context replacement、erase、patch、三类控制、tag fidelity、source-to-target transfer。
+
+### 图 1：动机例子
+
+一个正常误报案例展示 host 高分但 normal support 强，因此 cross branch 下压；一个异常视频展示 contextual violation 如何经 within branch 改变时间排序。
+
+### 图 2：方法总图
+
+只画四步：masked normal expectation -> directional field -> cross/within correction -> intervention-verified field。
+
+### 图 3：机制证据
+
+同一视频对齐展示 raw activation、预测区间、directional violation、两项 correction、最终 score，并加入 selected 与 matched-control patch 结果。
+
+## 8. 实际执行清单
+
+```text
+[ ] B0 数据审计、host identity、统一 evaluator
+[ ] B1 leakage/padding/gradient/NLL 测试
+[ ] B2 residual/entmax/running-stat 测试
+[ ] B3 identity/sign/zero-mean/bound/branch-independence 测试
+[ ] B4 单 optimizer 训练与完整 checkpoint
+[ ] E1 C0-C4，决定 contextual-directional claim
+[ ] E2 A0/A2/A3/A4，决定 cross/within 两条职责
+[ ] E2 成立后补 A1/A5/A6
+[ ] E3 三个最近邻同口径控制
+[ ] E4 replacement/erase/patch/匹配控制
+[ ] E5 第二 host 与最小 transfer
+[ ] 最后才做 tag 和论文可视化
+```
+
+停止增加实验的标准很简单：三条 claim 都已经有一个直接对照、一个机制量和一个失败可解释的结果。不要做事件窗口扫描、所有层组合、预算笛卡尔积、额外 smoothing、装饰性 heatmap，或把旧方案模块逐个接回来。
+
+## 9. 结果出来后的诚实收缩规则
+
+- C3 不优于 C1/C4：不能讲 context-conditional correction neurons；
+- A2 有效、A3 无效：保留 cross audit，论文只讲正常误报审计；
+- A3 有效、A2 无效：删除 cross branch，论文只讲 context-driven temporal redistribution；
+- A4 不优于单分支：不讲 two-axis synergy；
+- erase/patch 不强于匹配控制：保留 attribution 可视化，删除 functional neuron claim；
+- 第二 host 不成立：不讲 host-agnostic；
+- tag fidelity 不成立：删除语义 tag，不影响检测模型。
+
+这些不是额外补救路线，而是每项创新在实验上不成立时必须同步缩小的论文表述。

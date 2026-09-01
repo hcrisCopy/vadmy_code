@@ -116,7 +116,9 @@ def main() -> None:
         collate_fn=collate_final_layer,
     )
     model = EventAblationModel(args.variant, width=args.width, dropout=args.dropout).to(device)
-    model.load_state_dict(torch.load(args.checkpoint, map_location=device))
+    model.load_state_dict(
+        torch.load(args.checkpoint, map_location=device, weights_only=True)
+    )
     model.eval()
     rows = []
     frame_curves = []

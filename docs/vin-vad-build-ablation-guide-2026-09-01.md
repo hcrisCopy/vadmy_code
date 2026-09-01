@@ -146,6 +146,30 @@ bash run_instructions/run_vin_vad_p1_dsanet.sh
 frame AUC/AP 的前提下降低正常视频分数与长度的相关性。若 E3 只让曲线更顺、不改善这三点，event
 story 不成立，按停止规则不进入 P2。
 
+**P1 正式执行记录（2026-09-01，DSANet，seed 234）：** 已完成。11 项 event-chain/TCN 单元测试及
+1 项数据分桶测试全部通过；UCF-Crime 评测 290 个视频、1,109,888 帧，XD-Violence 评测 800 个视频、
+2,331,296 帧。下表均为最终 epoch、无 smoothing、无测试后校准的结果。
+
+| 数据集 | 变体 | 正式定位指标 | 正常视频分数-长度相关性 | 异常视频平均正段数@0.5 |
+|---|---:|---:|---:|---:|
+| UCF | E0 | AUC 83.44 | 0.248 | 3.786 |
+| UCF | E1 | AUC 81.30 | 0.408 | 1.879 |
+| UCF | E2 | AUC 81.34 | 0.562 | 0.893 |
+| UCF | E3 | AUC 79.94 | 0.281 | 0.786 |
+| XD | E0 | AP 73.84 | -0.107 | 5.368 |
+| XD | E1 | AP 74.71 | 0.340 | 0.206 |
+| XD | E2 | AP 64.50 | 0.474 | 0.724 |
+| XD | E3 | AP 62.38 | -0.099 | 0.668 |
+
+**P1 判断：NO-GO。** E1 只在 XD 提升 0.87 AP，在 UCF 下降 2.14 AUC；E2 的持续性减少了 UCF
+碎片，但没有改善 UCF 定位，并使 XD AP 下降 10.21；E3 能把长度相关性拉回，却进一步损害两个数据集的
+正式定位指标。当前 event story 不成立，停止进入 P2/P3/V1–V5。下一步应先由作者决定是修改 event
+likelihood/训练目标后重做 P1，还是放弃 event chain 主线；不要用更多 violation 消融掩盖基础链失败。
+
+远程产物根目录：`../vadmy_data/vin_vad/dsanet/p1`。总表看 `summary.csv`，固定 emission 机制检查看
+`fixed_emission.json`，单模型训练和逐视频结果看 `<dataset>/<variant>/train_summary.json` 与
+`<dataset>/<variant>/evaluation/`。
+
 ### P2：normal-context predictor
 
 实现两层 masked cross-attention。query 只有位置编码，任何计算路径都不能读取目标保护区间 \(G_t\)。只有正常训练视频进入 \(\mathcal L_{ctx}\)。

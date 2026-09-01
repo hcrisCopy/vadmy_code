@@ -21,6 +21,13 @@ def test_expand_rejects_invalid_frame_indices() -> None:
         expand_snippet_scores(np.asarray([0.1, 0.2]), np.asarray([0, 0]), frame_count=16)
 
 
+def test_expand_truncates_training_tail_at_real_frame_count() -> None:
+    scores = np.asarray([0.1, 0.2, 0.9], dtype=np.float32)
+    expanded = expand_snippet_scores(scores, np.asarray([0, 16, 32]), frame_count=37)
+    assert len(expanded) == 37
+    np.testing.assert_array_equal(expanded[32:], np.full(5, 0.9, dtype=np.float32))
+
+
 def test_padding_content_does_not_change_masked_result() -> None:
     mask = torch.tensor([[True, True, False, False]])
     first = masked_mean(torch.tensor([[1.0, 3.0, 0.0, 0.0]]), mask)

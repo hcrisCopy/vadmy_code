@@ -72,14 +72,15 @@ vin_vad/
 2. 所有模型使用同一个 snippet-to-frame 映射，尾段按真实帧数截断。
 3. 人工构造一条 snippet 曲线，确认展开后的帧位置、长度和 GT 完全对齐。
 
-**DSANet 正式口径写死：** 测试集的官方 CLIP 特征和 GT 只覆盖完整的 16 帧 snippet，即每个视频使用
-`floor(num_frames / 16)` 个 snippet。现有 hidden cache 用 `range(0, num_frames, 16)` 提取，测试时可能多出
-一个不完整尾 snippet；该尾项必须在数据层裁掉，不能送入模型，也不能进入 evaluator。这里测试集的
-“真实评测帧数”指 `valid_snippets * 16`；原视频余下不足 16 帧不在官方 GT 中。禁止把 hidden 直接
-`repeat(16)` 后再靠全局截断凑 GT 长度，因为这会把后续视频整体错位。
+**DSANet 正式口径写死：** 每个视频的有效 snippet 数以 DSANet 官方 CLIP 特征为准，不能仅由原视频
+`num_frames` 反推。官方文件实际同时存在 `floor(num_frames / 16)` 和 `ceil(num_frames / 16)` 两种长度；
+现有 hidden cache 固定按 `range(0, num_frames, 16)` 提取，因此有些视频会比官方特征多一个尾 snippet。
+数据层必须逐视频裁到官方特征长度。测试展开长度固定为 `valid_snippets * 16`，所有测试视频之和必须与
+官方 GT 逐点等长；禁止把全部 hidden 直接 `repeat(16)` 后再靠全局截断凑长度，因为这会让后续视频错位。
 
-训练集按 DSANet 实际特征长度保留 `floor` 或 `ceil` 个 snippet；若保留不完整尾 snippet，其右边界使用
-真实 `num_frames`，mask 仍只覆盖真实 snippet。不能为了和测试集形式一致而擅自丢掉 DSANet 训练输入。
+`raw_num_frames` 与真实 `frame_indices` 仍需保存，供训练尾段边界和机制可视化使用。训练集也按 DSANet
+实际特征长度保留 `floor` 或 `ceil` 个 snippet；若保留不完整尾 snippet，其右边界使用真实
+`num_frames`。测试 AUC/AP 则一律服从官方 evaluator 的有效帧域，不擅自重造 GT。
 
 DSANet 的 P0 正式命令：
 

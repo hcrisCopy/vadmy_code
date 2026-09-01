@@ -145,14 +145,9 @@ def audit_split(
             valid_snippets = int(feature_row["feature_snippets"])
             floor_snippets = num_frames // frames_per_snippet
             ceil_snippets = (num_frames + frames_per_snippet - 1) // frames_per_snippet
-            if split == "test" and valid_snippets != floor_snippets:
+            if valid_snippets not in {floor_snippets, ceil_snippets}:
                 raise ValueError(
-                    f"{key}: DSANet test has {valid_snippets} snippets but its GT domain requires "
-                    f"floor(num_frames/stride)={floor_snippets}"
-                )
-            if split == "train" and valid_snippets not in {floor_snippets, ceil_snippets}:
-                raise ValueError(
-                    f"{key}: DSANet train has {valid_snippets} snippets; expected floor/ceil "
+                    f"{key}: DSANet has {valid_snippets} snippets; expected floor/ceil "
                     f"count {floor_snippets}/{ceil_snippets}"
                 )
             if valid_snippets > raw_hidden_snippets:
@@ -169,7 +164,11 @@ def audit_split(
                 "valid_snippets": valid_snippets,
                 "dropped_tail_snippets": int(raw_hidden_snippets - valid_snippets),
                 "raw_num_frames": num_frames,
-                "evaluation_frames": min(num_frames, valid_snippets * frames_per_snippet),
+                "evaluation_frames": (
+                    valid_snippets * frames_per_snippet
+                    if split == "test"
+                    else min(num_frames, valid_snippets * frames_per_snippet)
+                ),
                 "stride": stride,
                 "first_frame_index": int(valid_indices[0]),
                 "last_frame_index": int(valid_indices[-1]),

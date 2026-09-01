@@ -250,6 +250,7 @@ def main() -> None:
     config.pop("clean")
     config.pop("resume")
     config["source_manifest_sha256"] = file_sha256(args.source_manifest)
+    config["validation_window_policy"] = "one_fixed_center_window_per_video"
     config_path = output / "config.json"
     if config_path.exists() and json.loads(config_path.read_text(encoding="utf-8")) != config:
         raise RuntimeError("B1 configuration changed; rerun with --clean")
@@ -272,7 +273,10 @@ def main() -> None:
         seed=args.seed,
     )
     validation_dataset = NormalContextWindowDataset(
-        str(validation_manifest), args.maximum_length, args.window_overlap
+        str(validation_manifest),
+        args.maximum_length,
+        args.window_overlap,
+        exhaustive=False,
     )
     generator = torch.Generator().manual_seed(args.seed)
     loader_arguments = {

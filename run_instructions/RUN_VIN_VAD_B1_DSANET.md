@@ -19,8 +19,9 @@ bash run_instructions/run_vin_vad_b1_dsanet.sh
 ```
 
 正式配置使用 batch size 8。训练时每个正常视频每轮抽取一个由
-`seed + epoch + video key` 决定的可复现窗口；验证仍覆盖全部窗口。
-这样减少重复磁盘读取，不改变 B1 的验收口径。
+`seed + epoch + video key` 决定的可复现窗口；每个 held-out 正常验证视频
+使用一个固定中心窗口（最多 256 个目标片段）。这样避免重复解压同一视频，
+同时保持视频级独立划分和固定验收口径。
 
 中断后执行同一条命令，会从最近一个 epoch 继续。需要清空 B1 后重跑：
 

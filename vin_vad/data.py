@@ -88,6 +88,7 @@ class NormalContextWindowDataset(torch.utils.data.Dataset):
         overlap: int,
         training: bool = False,
         seed: int = 0,
+        exhaustive: bool = True,
     ) -> None:
         frame = pd.read_csv(manifest)
         required = {"key", "binary_label", "hidden_path", "valid_snippets"}
@@ -103,6 +104,7 @@ class NormalContextWindowDataset(torch.utils.data.Dataset):
         self.overlap = int(overlap)
         self.training = bool(training)
         self.seed = int(seed)
+        self.exhaustive = bool(exhaustive)
         self.epoch = 0
         self.windows: list[tuple[int, int, int]] = []
         stride = maximum_length - overlap
@@ -112,6 +114,10 @@ class NormalContextWindowDataset(torch.utils.data.Dataset):
                 continue
             if self.training:
                 self.windows.append((row_index, 0, min(length, maximum_length)))
+                continue
+            if not self.exhaustive:
+                start = max(0, (length - maximum_length) // 2)
+                self.windows.append((row_index, start, min(length, start + maximum_length)))
                 continue
             starts = list(range(0, max(1, length - overlap), stride))
             if starts and starts[-1] + maximum_length < length:

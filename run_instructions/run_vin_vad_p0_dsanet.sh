@@ -29,6 +29,7 @@ python -m vin_vad.p0_audit \
   --gt-path baseline/DSANet/list/gt.npy \
   --out-dir "$OUT/xd" \
   --frames-per-snippet 16 \
+  --skip-missing-train-hidden \
   "${CLEAN_ARGS[@]}"
 
 python - <<'PY'

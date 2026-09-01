@@ -78,9 +78,17 @@ vin_vad/
 数据层必须逐视频裁到官方特征长度。测试展开长度固定为 `valid_snippets * 16`，所有测试视频之和必须与
 官方 GT 逐点等长；禁止把全部 hidden 直接 `repeat(16)` 后再靠全局截断凑长度，因为这会让后续视频错位。
 
+依据不是经验判断：VadCLIP 的 `list/make_gt_ucf.py` 与 `list/make_gt_xd.py` 直接按每个 `__0.npy` 的
+`fea.shape[0] * 16` 生成 GT；DSANet 与 VadCLIP 的 `process_split` 实现相同，仓库内对应 UCF/XD GT
+文件也逐字节一致。`__0`–`__9` 来自 VadCLIP 的十种空间 crop，同一视频的时间长度必须一致且只计一次。
+
 `raw_num_frames` 与真实 `frame_indices` 仍需保存，供训练尾段边界和机制可视化使用。训练集也按 DSANet
 实际特征长度保留 `floor` 或 `ceil` 个 snippet；若保留不完整尾 snippet，其右边界使用真实
 `num_frames`。测试 AUC/AP 则一律服从官方 evaluator 的有效帧域，不擅自重造 GT。
+
+当前 XD hidden cache 缺 4 个训练视频。P0 允许用显式参数跳过这些训练项，并把完整 key 列表写入
+`audit.json`；提取日志显示原因是原始 video root 没有匹配到这 4 个视频，不是 hidden 解码失败。测试视频
+不允许缺失。论文的数据实现细节需如实披露这一点，不能写成“训练集无缺失”。
 
 DSANet 的 P0 正式命令：
 

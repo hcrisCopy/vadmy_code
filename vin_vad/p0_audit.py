@@ -85,7 +85,8 @@ def audit_split(
     hidden_manifest: str,
     frames_per_snippet: int,
     output: Path,
-) -> list[dict[str, object]]:
+    skip_missing_train_hidden: bool,
+) -> tuple[list[dict[str, object]], list[str]]:
     expected = feature_rows(dsanet_csv)
     expected_by_key = {str(row["key"]): row for row in expected}
     hidden = pd.read_csv(hidden_manifest)
@@ -99,10 +100,23 @@ def audit_split(
     hidden_by_key = hidden.set_index("key", drop=False)
     missing_hidden = [row["key"] for row in expected if row["key"] not in hidden_by_key.index]
     extra_hidden = [key for key in hidden_by_key.index if key not in expected_by_key]
-    if missing_hidden or extra_hidden:
+    if missing_hidden and not (split == "train" and skip_missing_train_hidden):
         raise RuntimeError(
             f"{split}: hidden/DSANet keys differ; missing={missing_hidden[:5]}, extra={extra_hidden[:5]}"
         )
+    if extra_hidden:
+        raise RuntimeError(f"{split}: hidden manifest has unexpected keys: {extra_hidden[:5]}")
+    if missing_hidden:
+        print(f"[WARN] {dataset}/{split}: skip {len(missing_hidden)} videos without hidden states", flush=True)
+        expected = [row for row in expected if row["key"] not in set(missing_hidden)]
+
+    final_path = output / f"{split}.csv"
+    if final_path.exists():
+        rows = pd.read_csv(final_path).to_dict(orient="records")
+        if [str(row["key"]) for row in rows] != [str(row["key"]) for row in expected]:
+            raise RuntimeError(f"{split}: completed manifest keys changed; rerun with --clean")
+        print(f"reusing completed {dataset}/{split} audit: {final_path}", flush=True)
+        return rows, [str(key) for key in missing_hidden]
 
     partial = output / f"{split}.partial.jsonl"
     rows = read_partial(partial)
@@ -179,9 +193,9 @@ def audit_split(
             rows.append(result)
     if len(rows) != len(expected):
         raise RuntimeError(f"{split}: audited {len(rows)}/{len(expected)} videos")
-    pd.DataFrame(rows).to_csv(output / f"{split}.csv", index=False)
+    pd.DataFrame(rows).to_csv(final_path, index=False)
     partial.unlink()
-    return rows
+    return rows, [str(key) for key in missing_hidden]
 
 
 def save_alignment_probe(test_rows: list[dict[str, object]], gt: np.ndarray, output: Path) -> dict[str, object]:
@@ -235,6 +249,7 @@ def main() -> None:
     parser.add_argument("--gt-path", required=True)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--frames-per-snippet", type=int, default=16)
+    parser.add_argument("--skip-missing-train-hidden", action="store_true")
     parser.add_argument("--clean", action="store_true")
     args = parser.parse_args()
 
@@ -256,6 +271,7 @@ def main() -> None:
             )
         },
         "frames_per_snippet": args.frames_per_snippet,
+        "skip_missing_train_hidden": args.skip_missing_train_hidden,
     }
     signature_path = output / "signature.json"
     if signature_path.exists() and json.loads(signature_path.read_text(encoding="utf-8")) != signature:
@@ -267,11 +283,23 @@ def main() -> None:
         print(audit_path.read_text(encoding="utf-8"), flush=True)
         return
 
-    train_rows = audit_split(
-        args.dataset, "train", args.train_csv, args.train_hidden_manifest, args.frames_per_snippet, output
+    train_rows, missing_train_hidden = audit_split(
+        args.dataset,
+        "train",
+        args.train_csv,
+        args.train_hidden_manifest,
+        args.frames_per_snippet,
+        output,
+        args.skip_missing_train_hidden,
     )
-    test_rows = audit_split(
-        args.dataset, "test", args.test_csv, args.test_hidden_manifest, args.frames_per_snippet, output
+    test_rows, missing_test_hidden = audit_split(
+        args.dataset,
+        "test",
+        args.test_csv,
+        args.test_hidden_manifest,
+        args.frames_per_snippet,
+        output,
+        False,
     )
     train_keys = {str(row["key"]) for row in train_rows}
     test_keys = {str(row["key"]) for row in test_rows}
@@ -291,6 +319,8 @@ def main() -> None:
         "train_videos": len(train_rows),
         "test_videos": len(test_rows),
         "train_test_key_overlap": 0,
+        "missing_train_hidden": missing_train_hidden,
+        "missing_test_hidden": missing_test_hidden,
         "test_gt_frames": len(gt),
         "test_evaluation_frames": evaluation_frames,
         "train_tail_snippets_dropped": sum(int(row["dropped_tail_snippets"]) for row in train_rows),

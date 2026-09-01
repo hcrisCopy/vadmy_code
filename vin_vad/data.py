@@ -99,3 +99,67 @@ def collate_aligned_hidden(items: list[dict[str, object]]) -> dict[str, object]:
         "labels": torch.tensor([int(item["label"]) for item in items], dtype=torch.float32),
         "evaluation_frames": torch.tensor([int(item["evaluation_frames"]) for item in items], dtype=torch.long),
     }
+
+
+def uniform_temporal_average(features: np.ndarray, target_length: int) -> np.ndarray:
+    """Match DSANet's training-time uniform bin averaging."""
+    features = np.asarray(features, dtype=np.float32)
+    if len(features) <= target_length:
+        return features
+    boundaries = np.linspace(0, len(features), target_length + 1, dtype=np.int32)
+    output = np.empty((target_length, features.shape[1]), dtype=np.float32)
+    for index in range(target_length):
+        left, right = int(boundaries[index]), int(boundaries[index + 1])
+        output[index] = features[left:right].mean(axis=0) if left != right else features[left]
+    return output
+
+
+class FinalLayerDataset(torch.utils.data.Dataset):
+    def __init__(self, manifest: str, training: bool, maximum_length: int = 256) -> None:
+        self.frame = pd.read_csv(manifest)
+        self.training = bool(training)
+        self.maximum_length = int(maximum_length)
+        required = {"key", "binary_label", "feature_path", "frame_indices_path", "evaluation_frames"}
+        missing = required - set(self.frame.columns)
+        if missing:
+            raise ValueError(f"{manifest}: missing columns {sorted(missing)}")
+
+    def __len__(self) -> int:
+        return len(self.frame)
+
+    def __getitem__(self, index: int) -> dict[str, object]:
+        row = self.frame.iloc[index]
+        features = np.load(str(row.feature_path), mmap_mode="r", allow_pickle=False)
+        if features.ndim != 2 or features.shape[1] != 768:
+            raise ValueError(f"{row.feature_path}: expected [T,768], got {features.shape}")
+        if self.training:
+            features = uniform_temporal_average(features, self.maximum_length)
+        else:
+            features = np.asarray(features, dtype=np.float32)
+        return {
+            "key": str(row.key),
+            "features": torch.from_numpy(np.asarray(features, dtype=np.float32).copy()),
+            "label": int(row.binary_label),
+            "frame_indices_path": str(row.frame_indices_path),
+            "evaluation_frames": int(row.evaluation_frames),
+        }
+
+
+def collate_final_layer(items: list[dict[str, object]]) -> dict[str, object]:
+    lengths = torch.tensor([len(item["features"]) for item in items], dtype=torch.long)
+    maximum = int(lengths.max())
+    features = torch.zeros(len(items), maximum, 768, dtype=torch.float32)
+    mask = torch.zeros(len(items), maximum, dtype=torch.bool)
+    for index, item in enumerate(items):
+        length = int(lengths[index])
+        features[index, :length] = item["features"]
+        mask[index, :length] = True
+    return {
+        "keys": [str(item["key"]) for item in items],
+        "features": features,
+        "mask": mask,
+        "lengths": lengths,
+        "labels": torch.tensor([int(item["label"]) for item in items], dtype=torch.float32),
+        "frame_indices_paths": [str(item["frame_indices_path"]) for item in items],
+        "evaluation_frames": torch.tensor([int(item["evaluation_frames"]) for item in items], dtype=torch.long),
+    }

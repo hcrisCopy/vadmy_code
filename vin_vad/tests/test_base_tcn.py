@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 
 from vin_vad.base_tcn import BaseTCN
+from vin_vad.data import uniform_temporal_average
 from vin_vad.losses import bag_loss
 from vin_vad.model import EventAblationModel
 
@@ -36,3 +37,12 @@ def test_every_ablation_has_finite_loss_and_one_optimizer() -> None:
         loss.backward()
         optimizer.step()
         assert torch.isfinite(loss)
+
+
+def test_uniform_temporal_average_matches_dsanet_bins() -> None:
+    features = torch.arange(10, dtype=torch.float32).numpy()[:, None]
+    reduced = uniform_temporal_average(features, 4).reshape(-1)
+    torch.testing.assert_close(
+        torch.from_numpy(reduced),
+        torch.tensor([0.5, 3.0, 5.5, 8.0]),
+    )

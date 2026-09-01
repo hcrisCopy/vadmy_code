@@ -121,6 +121,31 @@ event chain 必须先过单元测试：
 
 通过标准：E0→E1→E2→E3 的变化能分别解释 exact OR、事件持续性和长度校准，而不是只让曲线更平滑。
 
+**正式训练口径写死：**
+
+- E0–E3 共用宽度 512、kernel 3、dilation 1/2/4 的三层 residual TCN，dropout 0.1；
+- 训练时沿用 DSANet 的均匀分桶平均，将长视频压到 256 snippets；测试保持完整时间长度；
+- seed 234、10 epochs、AdamW、weight decay 0.01；UCF 使用 batch 64/类、lr 7e-5，XD 使用
+  batch 96/类、lr 1e-5，这些是 DSANet 官方训练参数，不是按结果调参；
+- 最终 epoch 是唯一正式 checkpoint，不用测试集选 epoch；E0–E3 都不使用 smoothing 或测试后校准；
+- E1 的独立状态先验、E2 的 constant onset、E3 的 length-calibrated onset 均从“256 snippets
+  期望约一个 onset”初始化；E2/E3 persistence 统一从 0.9 初始化并参与学习。
+
+DSANet 的 P1 正式命令：
+
+```bash
+bash run_instructions/run_vin_vad_p1_dsanet.sh
+```
+
+输出：`../vadmy_data/vin_vad/dsanet/p1/summary.csv`、`fixed_emission.json`，以及
+`<dataset>/<E0-E3>/train_summary.json`、`history.json`、`model_final.pt`、`evaluation/metrics.json`、
+`evaluation/per_video.csv` 和逐视频 `curves/`。直接重跑会按 epoch/视频复用；确认要清空 P1 后运行
+`CLEAN=1 bash run_instructions/run_vin_vad_p1_dsanet.sh`。
+
+审稿人只看三个判断：E1 是否优于 E0；E2 是否在定位指标和碎片数上优于 E1；E3 是否在不损害
+frame AUC/AP 的前提下降低正常视频分数与长度的相关性。若 E3 只让曲线更顺、不改善这三点，event
+story 不成立，按停止规则不进入 P2。
+
 ### P2：normal-context predictor
 
 实现两层 masked cross-attention。query 只有位置编码，任何计算路径都不能读取目标保护区间 \(G_t\)。只有正常训练视频进入 \(\mathcal L_{ctx}\)。

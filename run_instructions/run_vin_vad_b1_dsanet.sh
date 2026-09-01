@@ -19,7 +19,7 @@ for dataset in ucf xd; do
     --out-dir "$OUT/$dataset" \
     --epochs 10 \
     --patience 3 \
-    --batch-size 2 \
+    --batch-size 8 \
     --lr 0.0003 \
     --weight-decay 0.0001 \
     --maximum-length 256 \

@@ -81,7 +81,14 @@ class AlignedHiddenDataset(torch.utils.data.Dataset):
 class NormalContextWindowDataset(torch.utils.data.Dataset):
     """Normal-only, alignment-preserving windows for context prediction."""
 
-    def __init__(self, manifest: str, maximum_length: int, overlap: int) -> None:
+    def __init__(
+        self,
+        manifest: str,
+        maximum_length: int,
+        overlap: int,
+        training: bool = False,
+        seed: int = 0,
+    ) -> None:
         frame = pd.read_csv(manifest)
         required = {"key", "binary_label", "hidden_path", "valid_snippets"}
         missing = required - set(frame.columns)
@@ -94,11 +101,17 @@ class NormalContextWindowDataset(torch.utils.data.Dataset):
         self.frame = frame.reset_index(drop=True)
         self.maximum_length = int(maximum_length)
         self.overlap = int(overlap)
+        self.training = bool(training)
+        self.seed = int(seed)
+        self.epoch = 0
         self.windows: list[tuple[int, int, int]] = []
         stride = maximum_length - overlap
         for row_index, row in self.frame.iterrows():
             length = int(row.valid_snippets)
             if length < 2:
+                continue
+            if self.training:
+                self.windows.append((row_index, 0, min(length, maximum_length)))
                 continue
             starts = list(range(0, max(1, length - overlap), stride))
             if starts and starts[-1] + maximum_length < length:
@@ -108,12 +121,25 @@ class NormalContextWindowDataset(torch.utils.data.Dataset):
                 if end - start >= 2:
                     self.windows.append((row_index, start, end))
 
+    def set_epoch(self, epoch: int) -> None:
+        """Select a reproducible fresh crop for every training video."""
+        self.epoch = int(epoch)
+
     def __len__(self) -> int:
         return len(self.windows)
 
     def __getitem__(self, index: int) -> dict[str, object]:
         row_index, start, end = self.windows[index]
         row = self.frame.iloc[row_index]
+        if self.training:
+            length = int(row.valid_snippets)
+            if length > self.maximum_length:
+                token = f"{self.seed}:{self.epoch}:{row.key}".encode("utf-8")
+                digest = hashlib.sha256(token).digest()
+                start = int.from_bytes(digest[:8], "little") % (
+                    length - self.maximum_length + 1
+                )
+                end = start + self.maximum_length
         with np.load(str(row.hidden_path), allow_pickle=False) as archive:
             hidden = np.asarray(archive["hidden"][start:end], dtype=np.float32)
         return {

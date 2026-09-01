@@ -265,7 +265,11 @@ def main() -> None:
     )
     global_mean_np, global_sigma_np = fit_global_statistics(train_manifest, output)
     train_dataset = NormalContextWindowDataset(
-        str(train_manifest), args.maximum_length, args.window_overlap
+        str(train_manifest),
+        args.maximum_length,
+        args.window_overlap,
+        training=True,
+        seed=args.seed,
     )
     validation_dataset = NormalContextWindowDataset(
         str(validation_manifest), args.maximum_length, args.window_overlap
@@ -308,6 +312,7 @@ def main() -> None:
         stale_epochs = int(checkpoint["stale_epochs"])
 
     for epoch in range(start_epoch, args.epochs):
+        train_dataset.set_epoch(epoch)
         model.train()
         train_sum = 0.0
         batches = 0

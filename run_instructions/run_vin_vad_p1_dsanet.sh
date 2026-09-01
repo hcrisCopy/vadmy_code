@@ -2,6 +2,7 @@
 set -euo pipefail
 
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
+export OMP_NUM_THREADS=4
 OUT=../vadmy_data/vin_vad/dsanet/p1
 CLEAN_ARGS=()
 if [[ "${CLEAN:-0}" == "1" ]]; then

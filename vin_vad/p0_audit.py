@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import shutil
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,18 @@ def file_sha256(path: str) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def npz_array_header(path: str, array_name: str) -> tuple[tuple[int, ...], np.dtype]:
+    """Read an array shape/dtype from NPZ without decompressing its payload."""
+    member = f"{array_name}.npy"
+    with zipfile.ZipFile(path) as archive:
+        if member not in archive.namelist():
+            raise ValueError(f"{path}: missing array {array_name}")
+        with archive.open(member) as handle:
+            version = np.lib.format.read_magic(handle)
+            shape, _, dtype = np.lib.format._read_array_header(handle, version)
+    return tuple(int(value) for value in shape), np.dtype(dtype)
 
 
 def ensure_output_path(path: Path) -> None:
@@ -102,19 +115,22 @@ def audit_split(
                 continue
             manifest_row = hidden_by_key.loc[key]
             hidden_path = str(manifest_row.hidden_path)
+            hidden_shape, hidden_dtype = npz_array_header(hidden_path, "hidden")
             with np.load(hidden_path, allow_pickle=False) as archive:
                 required_arrays = {"hidden", "frame_indices", "num_frames", "stride", "layers"}
                 absent = required_arrays - set(archive.files)
                 if absent:
                     raise ValueError(f"{hidden_path}: missing arrays {sorted(absent)}")
-                states = np.asarray(archive["hidden"])
                 frame_indices = np.asarray(archive["frame_indices"], dtype=np.int64)
                 num_frames = int(archive["num_frames"])
                 stride = int(archive["stride"])
                 layers = np.asarray(archive["layers"], dtype=np.int64)
-            if states.ndim != 3 or states.shape[1:] != (12, 768):
-                raise ValueError(f"{hidden_path}: expected [T,12,768], got {states.shape}")
-            if len(frame_indices) != len(states):
+            if len(hidden_shape) != 3 or hidden_shape[1:] != (12, 768):
+                raise ValueError(f"{hidden_path}: expected [T,12,768], got {hidden_shape}")
+            if hidden_dtype not in {np.dtype(np.float16), np.dtype(np.float32)}:
+                raise ValueError(f"{hidden_path}: expected float16/float32 hidden, got {hidden_dtype}")
+            raw_hidden_snippets = hidden_shape[0]
+            if len(frame_indices) != raw_hidden_snippets:
                 raise ValueError(f"{hidden_path}: hidden/frame_indices length mismatch")
             if stride != frames_per_snippet or int(manifest_row.stride) != frames_per_snippet:
                 raise ValueError(f"{key}: expected stride {frames_per_snippet}, got {stride}")
@@ -139,7 +155,7 @@ def audit_split(
                     f"{key}: DSANet train has {valid_snippets} snippets; expected floor/ceil "
                     f"count {floor_snippets}/{ceil_snippets}"
                 )
-            if valid_snippets > len(states):
+            if valid_snippets > raw_hidden_snippets:
                 raise ValueError(f"{key}: DSANet needs more snippets than hidden states contain")
             valid_indices = frame_indices[:valid_snippets]
             result = {
@@ -149,9 +165,9 @@ def audit_split(
                 "label": str(feature_row["label"]),
                 "binary_label": int(not is_normal_label(dataset, str(feature_row["label"]))),
                 "hidden_path": hidden_path,
-                "raw_hidden_snippets": int(len(states)),
+                "raw_hidden_snippets": int(raw_hidden_snippets),
                 "valid_snippets": valid_snippets,
-                "dropped_tail_snippets": int(len(states) - valid_snippets),
+                "dropped_tail_snippets": int(raw_hidden_snippets - valid_snippets),
                 "raw_num_frames": num_frames,
                 "evaluation_frames": min(num_frames, valid_snippets * frames_per_snippet),
                 "stride": stride,

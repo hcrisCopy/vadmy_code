@@ -5,6 +5,15 @@ import pytest
 import torch
 
 from vin_vad.evaluate import expand_snippet_scores, masked_mean
+from vin_vad.p0_audit import npz_array_header
+
+
+def test_npz_header_reads_shape_without_loading_payload(tmp_path) -> None:
+    path = tmp_path / "hidden.npz"
+    np.savez_compressed(path, hidden=np.zeros((3, 12, 768), dtype=np.float16))
+    shape, dtype = npz_array_header(str(path), "hidden")
+    assert shape == (3, 12, 768)
+    assert dtype == np.dtype(np.float16)
 
 
 def test_expand_snippet_scores_uses_audited_boundaries() -> None:

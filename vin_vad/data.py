@@ -78,6 +78,69 @@ class AlignedHiddenDataset(torch.utils.data.Dataset):
         return load_aligned_hidden(self.frame.iloc[index])
 
 
+class NormalContextWindowDataset(torch.utils.data.Dataset):
+    """Normal-only, alignment-preserving windows for context prediction."""
+
+    def __init__(self, manifest: str, maximum_length: int, overlap: int) -> None:
+        frame = pd.read_csv(manifest)
+        required = {"key", "binary_label", "hidden_path", "valid_snippets"}
+        missing = required - set(frame.columns)
+        if missing:
+            raise ValueError(f"{manifest}: missing columns {sorted(missing)}")
+        if maximum_length < 2 or not 0 <= overlap < maximum_length:
+            raise ValueError("maximum_length must be >=2 and overlap in [0, maximum_length)")
+        if (frame["binary_label"].astype(int) != 0).any():
+            raise ValueError("context predictor manifests must contain normal videos only")
+        self.frame = frame.reset_index(drop=True)
+        self.maximum_length = int(maximum_length)
+        self.overlap = int(overlap)
+        self.windows: list[tuple[int, int, int]] = []
+        stride = maximum_length - overlap
+        for row_index, row in self.frame.iterrows():
+            length = int(row.valid_snippets)
+            if length < 2:
+                continue
+            starts = list(range(0, max(1, length - overlap), stride))
+            if starts and starts[-1] + maximum_length < length:
+                starts.append(length - maximum_length)
+            for start in starts:
+                end = min(length, start + maximum_length)
+                if end - start >= 2:
+                    self.windows.append((row_index, start, end))
+
+    def __len__(self) -> int:
+        return len(self.windows)
+
+    def __getitem__(self, index: int) -> dict[str, object]:
+        row_index, start, end = self.windows[index]
+        row = self.frame.iloc[row_index]
+        with np.load(str(row.hidden_path), allow_pickle=False) as archive:
+            hidden = np.asarray(archive["hidden"][start:end], dtype=np.float32)
+        return {
+            "key": str(row.key),
+            "start": start,
+            "hidden": torch.from_numpy(hidden.copy()),
+        }
+
+
+def collate_context_windows(items: list[dict[str, object]]) -> dict[str, object]:
+    lengths = torch.tensor([len(item["hidden"]) for item in items], dtype=torch.long)
+    maximum = int(lengths.max())
+    hidden = torch.zeros(len(items), maximum, 12, 768, dtype=torch.float32)
+    mask = torch.zeros(len(items), maximum, dtype=torch.bool)
+    for index, item in enumerate(items):
+        length = int(lengths[index])
+        hidden[index, :length] = item["hidden"]
+        mask[index, :length] = True
+    return {
+        "keys": [str(item["key"]) for item in items],
+        "starts": torch.tensor([int(item["start"]) for item in items]),
+        "hidden": hidden,
+        "mask": mask,
+        "lengths": lengths,
+    }
+
+
 def collate_aligned_hidden(items: list[dict[str, object]]) -> dict[str, object]:
     """Right-pad hidden states while keeping the validity mask authoritative."""
     lengths = torch.tensor([len(item["hidden"]) for item in items], dtype=torch.long)

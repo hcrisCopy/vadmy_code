@@ -96,7 +96,7 @@ z^e_{v,1:T}=f_\theta([\pi_1a_{:,1},\ldots,\pi_{12}a_{:,12}]),
 \qquad e_{v,t}=\sigma(z^e_{v,t}).
 \]
 
-`f_theta` 只使用三个固定 dilation 的 Conv1D 残差块；它负责替代 Universal 的 max/median/Gaussian/advance，不作为单独创新。禁止在推理后再做任何滤波。
+`f_theta` 固定复用 Universal 已验证的最小时序结构：`Conv1D(k=3,d=1,12→64) → GELU → Conv1D(k=3,d=2,64→64) → GELU → Conv1D(1×1,64→1)`。它负责替代 Universal 的 max/median/Gaussian/advance，不作为单独创新，也不做结构搜索。禁止在推理后再做任何滤波。
 
 ### 6.2 透明的视频状态头
 
@@ -310,3 +310,5 @@ S_u=\frac{A_uG_uC_u}{N_u+\varepsilon}.
 | activation intervention | 单词 tag → 多义组合 temporal tag | 推理期 max/median/Gaussian/advance |
 
 完整调研与证据边界见 `docs/wsvad-neuron-research-2026-09-02.md`。
+
+正式搭建顺序、固定超参数、分阶段生死门和最小充分消融见 `docs/witness-vad-build-ablation-guide-2026-09-02.md`。

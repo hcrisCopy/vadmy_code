@@ -1,7 +1,7 @@
 # WITNESS-VAD v10：用弱标签证人神经元审计冻结的视频异常检测器
 
 > 目标会议：ICLR 2027。
-> 状态：F0、F1 已通过，下一步为 F2 训练、续跑与确定性。CVA-VAD v9 的 contextual-directional evidence 已由 E1 判定 no-go。
+> 状态：F0--F2 已通过，下一步为 F3 性能生死门。CVA-VAD v9 的 contextual-directional evidence 已由 E1 判定 no-go。
 > 硬目标：同一权重、同一 evaluator 的 paired executable baseline 上，DSANet/UCF frame AUC 与 DSANet/XD frame AP 均至少 `+1.0 pp`。
 
 ## 1. 一句话主张

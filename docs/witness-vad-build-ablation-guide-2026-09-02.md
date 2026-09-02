@@ -8,7 +8,7 @@
 >
 > **边界**：只在本仓库写代码；训练、测试和结果分析都在远程服务器执行；产物统一写到 ../vadmy_data。
 >
-> **当前进度**：v9 的 B0--E1 已归档；v10 的 F0、F1 已通过，当前按阶段约定停在 F2 开始前。
+> **当前进度**：v9 的 B0--E1 已归档；v10 的 F0--F2 已通过，当前按阶段约定停在 F3 开始前。
 
 ---
 
@@ -330,6 +330,9 @@ bash run_instructions/run_witness_vad_f1_dsanet.sh --resume
 
 ## 7. F2：训练、续跑与确定性
 
+F2 只在 UCF 训练清单上做一次小规模工程验证。续跑和确定性是数据集无关的代码契约，
+不在 XD 重复浪费算力；UCF/XD 的完整训练和指标统一留到 F3。
+
 ### 必须实现
 
 - tqdm 显示 epoch、batch、总 loss 与各子 loss。
@@ -359,6 +362,33 @@ bash run_instructions/run_witness_vad_f2_dsanet.sh
 ### 阶段汇报
 
 停下来报告：续跑是否成功、checkpoint 位置、显存和单 epoch 时间、确定性误差。
+
+### F2 已完成记录（2026-09-02）
+
+正式通过命令：
+
+~~~bash
+bash run_instructions/run_witness_vad_f2_dsanet.sh --resume
+~~~
+
+- 14 个单元测试全部通过，失败 0 项。
+- 使用 UCF 真实训练清单中固定的 8 支正常、8 支异常视频，batch size 8、seed 42；
+  不读取测试清单、测试 GT，也不按测试指标挑 checkpoint。
+- 连续训练跑 2 个 epoch；另一条 run 在 epoch 1 计划中断并从 `last.pt` 恢复到 epoch 2。
+- 两条 run 的首轮总 loss 都是 `2.1401556730`，相对误差为 0。
+- epoch 1 结束学习率与 epoch 2 恢复学习率都是 `1.5e-4`，连续性误差为 0。
+- 连续训练与续跑训练的最终参数最大绝对误差为 0；checkpoint 完整包含 model、optimizer、
+  scheduler、epoch、history 以及 Python/NumPy/PyTorch/CUDA RNG 状态。
+- 峰值显存 `164.0 MiB`，平均每个 smoke epoch `1.30 s`。
+- 首次续跑准确暴露了 RNG tensor 被 `map_location=cuda` 搬错设备的问题；修复后直接从已保存的
+  epoch 1 恢复成功，没有重新训练首轮。
+- **裁决：PASS，训练、续跑和确定性契约成立，允许进入 F3；本轮按约定停在 F3 开始前。**
+
+远程结果：
+
+~~~text
+../vadmy_data/witness_vad/dsanet/f2_train_contract/
+~~~
 
 ---
 

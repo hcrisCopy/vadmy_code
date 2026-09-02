@@ -11,6 +11,11 @@ VARIANTS = ("w0", "w1", "w2", "w6")
 DATASETS = ("ucf", "xd")
 
 
+def _checkpoint_epoch(metrics: dict[str, object]) -> int | None:
+    value = metrics.get("checkpoint_epoch")
+    return None if value is None else int(value)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Apply the pre-registered Witness-VAD F3 gates")
     parser.add_argument("--root", required=True)
@@ -33,7 +38,7 @@ def main() -> None:
                 {
                     "dataset": dataset,
                     "variant": variant,
-                    "selected_epoch": int(metrics["checkpoint_epoch"]),
+                    "selected_epoch": _checkpoint_epoch(metrics),
                     "primary_metric": primary,
                     "primary_percent": 100.0 * float(metrics[primary]),
                     "gain_over_host_pp": 100.0 * float(metrics["primary_gain"]),
@@ -155,10 +160,10 @@ def main() -> None:
         summary_lines.append(
             "| {dataset} | {w0} | {w1} | {w2} | {w6} |".format(
                 dataset=dataset.upper(),
-                w0=int(values["w0"]["checkpoint_epoch"]),
-                w1=int(values["w1"]["checkpoint_epoch"]),
-                w2=int(values["w2"]["checkpoint_epoch"]),
-                w6=int(values["w6"]["checkpoint_epoch"]),
+                w0=_checkpoint_epoch(values["w0"]) or "N/A",
+                w1=_checkpoint_epoch(values["w1"]),
+                w2=_checkpoint_epoch(values["w2"]),
+                w6=_checkpoint_epoch(values["w6"]),
             )
         )
     summary_lines.extend(

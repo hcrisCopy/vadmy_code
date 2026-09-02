@@ -462,7 +462,7 @@ bash run_instructions/run_witness_vad_f3_dsanet.sh --clean
 | UCF AUC | 89.445 | 89.449 | 89.451 | 89.476 | +0.032 | +0.027 | +0.007 |
 | XD AP | 86.951 | 86.979 | 87.420 | 87.452 | +0.501 | +0.473 | +0.469 |
 
-best epoch：UCF 的 W0/W1/W2/W6 为 20/3/2/20；XD 为 20/20/16/19。
+W0 是固定 host，不选择 epoch；W1/W2/W6 的 best epoch 在 UCF 为 3/2/20，在 XD 为 20/16/19。
 
 - **裁决：NO-GO。** W6 在两个数据集都没有达到 `+1.0 pp`，UCF 也没有达到 W6-W1 `+0.2 pp`；因此不得进入 F4。
 - UCF 的 W6 主要改善跨视频排序与正常误报，异常视频内 AUC/AP 反而略降，不能宣称定位更好。W2 虽使 Macro-Within-AUC 提升约 `0.322 pp`，但主 AUC 只提升 `0.007 pp`。

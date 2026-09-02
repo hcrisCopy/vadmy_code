@@ -313,6 +313,28 @@ B4 只回答“整个训练图是否真实连通且可恢复”。它不报告 d
 B4 正式命令、断点恢复和产物查看见
 `run_instructions/RUN_VIN_VAD_B4_DSANET.md`。
 
+#### B4 正式结果（DSANet，2026-09-02）
+
+| Dataset | 单 optimizer | `kappa_cross` | `kappa_within` | 平均 correction | field support | q reservoir |
+|---|---:|---:|---:|---:|---:|---:|
+| UCF-Crime | 1 | 0 | 0.082782 | 0.006456 | 10,145 / 18,432 | 4,096 |
+| XD-Violence | 1 | 0 | 0.291791 | 0.031845 | 1,301 / 18,432 | 4,096 |
+
+两个数据集都固定训练 10 epochs，没有读取 validation/test 指标或选 checkpoint。两项
+`kappa` 在零点和训练中都收到非零梯度；normal activation statistics 分别更新
+1,090/2,611 次，normal-q statistics 分别更新 1,000/2,380 次。最终 checkpoint 已核对，
+同时包含 predictor、`omega`、两个 `kappa`、normal activation/q 统计与 reservoir、
+optimizer、scheduler、配置、manifest 哈希和全部随机状态。21 项 B1--B4 单元测试通过。
+
+B4 结论：**结构验收通过，但 two-axis claim 出现明确风险。** 两个数据集的 field 和
+within 分支都真实更新，且平均改动远低于 `rho=0.1`；cross 虽有非零梯度，最终都被
+投影回 0。因此 B4 只能证明单次联合训练可运行、可恢复、可审计，不能证明 cross 有效
+或两轴互补。下一阶段仍先做 E1 C0--C4；进入 E2 后必须分别训练 A2/A3/A4。若 A2 的
+cross-only 仍收缩到 0 或不改善 Cross/normal FPR，就删除 cross claim，不为保住故事
+而增加额外 loss、强制非零 gate 或参数搜索。本阶段结束时先停下汇报。
+
+远程产物位于 `../vadmy_data/vin_vad/dsanet/b4/<dataset>/`。
+
 ### B5：干预和 tag
 
 仅在完整检测模型确定后实现。贡献定义为：
@@ -492,7 +514,7 @@ A4 确实优于 A0 和两个单分支后，再补三个必要结构消融：
 [x] B1 leakage/padding/gradient/NLL 测试（DSANet；UCF/XD 均通过）
 [x] B2 residual/entmax/running-stat 测试（DSANet；UCF/XD 均通过）
 [x] B3 identity/sign/zero-mean/bound/branch-independence 测试（DSANet；UCF/XD 均通过）
-[ ] B4 单 optimizer 训练与完整 checkpoint
+[x] B4 单 optimizer 训练与完整 checkpoint（DSANet；UCF/XD 结构通过，cross gate 均收缩为 0）
 [ ] E1 C0-C4，决定 contextual-directional claim
 [ ] E2 A0/A2/A3/A4，决定 cross/within 两条职责
 [ ] E2 成立后补 A1/A5/A6

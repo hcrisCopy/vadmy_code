@@ -60,7 +60,7 @@ for dataset in ucf xd; do
     --target-tpr 0.95 \
     --device cuda
 
-  for variant in w1 w2 w6; do
+  for variant in w6; do
     python -m vin_vad.train_witness \
       --dataset "$dataset" \
       --variant "$variant" \
@@ -72,6 +72,7 @@ for dataset in ucf xd; do
       --maximum-length 256 \
       --videos-per-class 0 \
       --num-workers 4 \
+      --cache-training-data \
       --active-neurons 32 \
       --temporal-width 64 \
       --eta-normal 1.0 \

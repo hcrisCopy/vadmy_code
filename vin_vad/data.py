@@ -220,6 +220,7 @@ class AuditorTrainingDataset(torch.utils.data.Dataset):
     def __init__(self, manifest: str, maximum_length: int) -> None:
         self.frame = pd.read_csv(manifest)
         self.maximum_length = int(maximum_length)
+        self._cache: list[dict[str, object]] | None = None
         required = {
             "key",
             "binary_label",
@@ -236,7 +237,7 @@ class AuditorTrainingDataset(torch.utils.data.Dataset):
     def __len__(self) -> int:
         return len(self.frame)
 
-    def __getitem__(self, index: int) -> dict[str, object]:
+    def _load_item(self, index: int) -> dict[str, object]:
         row = self.frame.iloc[index]
         length = int(row.valid_snippets)
         with np.load(str(row.hidden_path), allow_pickle=False) as archive:
@@ -263,6 +264,23 @@ class AuditorTrainingDataset(torch.utils.data.Dataset):
             "host_score": torch.from_numpy(host_score.copy()),
             "label": int(row.binary_label),
         }
+
+    def preload(self, indices: object) -> None:
+        """Read each compressed archive once; DataLoader fork workers share this cache."""
+        if self._cache is not None:
+            return
+        cache: list[dict[str, object] | None] = [None] * len(self)
+        for index in indices:
+            position = int(index)
+            cache[position] = self._load_item(position)
+        if any(item is None for item in cache):
+            raise ValueError("preload indices must cover the complete training dataset")
+        self._cache = [item for item in cache if item is not None]
+
+    def __getitem__(self, index: int) -> dict[str, object]:
+        if self._cache is not None:
+            return self._cache[index]
+        return self._load_item(index)
 
 
 class HostScoreTrainingDataset(torch.utils.data.Dataset):

@@ -65,6 +65,7 @@ def comparable_configuration(config: dict[str, object]) -> dict[str, object]:
     comparable = {key: value for key, value in config.items() if key != "git_commit"}
     comparable.setdefault("variant", "w6")
     comparable.setdefault("num_workers", 0)
+    comparable.setdefault("cache_training_data", False)
     comparable.setdefault("retain_epoch_checkpoints", False)
     return comparable
 
@@ -165,6 +166,7 @@ def main() -> None:
     parser.add_argument("--maximum-length", type=int, required=True)
     parser.add_argument("--videos-per-class", type=int, default=0)
     parser.add_argument("--num-workers", type=int, required=True)
+    parser.add_argument("--cache-training-data", action="store_true")
     parser.add_argument("--active-neurons", type=int, required=True)
     parser.add_argument("--temporal-width", type=int, required=True)
     parser.add_argument("--eta-normal", type=float, required=True)
@@ -234,6 +236,14 @@ def main() -> None:
         if args.variant == "w1"
         else AuditorTrainingDataset(str(manifest), maximum_length=args.maximum_length)
     )
+    if args.cache_training_data and isinstance(dataset, AuditorTrainingDataset):
+        dataset.preload(
+            tqdm(
+                range(len(dataset)),
+                desc=f"{args.dataset} preload hidden states",
+                unit="video",
+            )
+        )
     normal_indices, abnormal_indices = balanced_indices(
         dataset.frame, args.videos_per_class
     )

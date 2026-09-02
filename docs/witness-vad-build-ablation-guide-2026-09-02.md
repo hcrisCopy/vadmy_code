@@ -8,7 +8,7 @@
 >
 > **边界**：只在本仓库写代码；训练、测试和结果分析都在远程服务器执行；产物统一写到 ../vadmy_data。
 >
-> **当前进度**：v9 的 B0--E1 已归档；v10 的 F0 已通过，当前停在 F1 开始前。
+> **当前进度**：v9 的 B0--E1 已归档；v10 的 F0、F1 已通过，当前按阶段约定停在 F2 开始前。
 
 ---
 
@@ -297,6 +297,34 @@ bash run_instructions/run_witness_vad_f1_dsanet.sh
 ### 阶段汇报
 
 停下来报告：测试数量、失败项、梯度是否覆盖所有模块、远程产物路径。
+
+### F1 已完成记录（2026-09-02）
+
+正式通过命令：
+
+~~~bash
+bash run_instructions/run_witness_vad_f1_dsanet.sh --resume
+~~~
+
+- 10 个单元测试全部通过，失败 0 项。
+- UCF/XD 的真实 B0 训练清单均抽查一支正常、一支异常视频；hidden `[T,12,768]`
+  与 host score 长度完全对齐。
+- 每层恰有 32 个 active neuron；signed weight、tag mask、padding 隔离均通过。
+- `eta_N=eta_A=0` 的 host 恒等误差为 0；正常分支最大增量为 `-0.1897`，没有正向加分；
+  异常分支视频内均值绝对误差为 `6.40e-10`，不能充当全局偏置。
+- video、host-residual witness MIL、final MIL、dense normal、sparse 五项损失都能回传到
+  witness 参数。联合损失对 gate、signed weight、层权重、temporal readout、video head、
+  local head、`eta_N`、`eta_A` 八组参数的梯度均非零。
+- 只有一个 `AdamW`、一次 forward/backward/step；总训练参数 33,339。
+- 首次远程运行发现优化一步后的零强度路径有 `5.96e-8` 浮点往返误差；已改成显式 bitwise
+  host identity 并增加回归测试，复跑通过。
+- **裁决：PASS，结构和梯度闭环成立，允许进入 F2；本轮按约定停在 F2 开始前。**
+
+远程结果：
+
+~~~text
+../vadmy_data/witness_vad/dsanet/f1_smoke/
+~~~
 
 ---
 

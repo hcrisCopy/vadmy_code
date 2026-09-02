@@ -68,7 +68,7 @@ class WitnessVAD(nn.Module):
 
 
 class HostVideoOnlyVAD(nn.Module):
-    """W1: host-level state supplies a uniform signed log-odds prior."""
+    """W1: host-level state may only apply a uniform non-positive shift."""
 
     def __init__(self, eta_normal: float = 1.0) -> None:
         super().__init__()
@@ -80,7 +80,7 @@ class HostVideoOnlyVAD(nn.Module):
         video_logit = self.video_head(summary).squeeze(1)
         video_probability = torch.sigmoid(video_logit)
         eta_normal = F.softplus(self.raw_eta_normal)
-        delta = eta_normal * video_logit
+        delta = eta_normal * torch.minimum(video_logit, torch.zeros_like(video_logit))
         delta = delta.unsqueeze(1).expand_as(host_score).masked_fill(~validity, 0.0)
         clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         corrected = host_score + torch.sigmoid(torch.logit(clipped) + delta) - clipped

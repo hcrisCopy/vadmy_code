@@ -98,10 +98,7 @@ class WitnessRouter(nn.Module):
             if eta_anomaly_override is None
             else host_score.new_tensor(eta_anomaly_override)
         )
-        # The video state is a learned prior over whether this bag contains an
-        # anomaly.  Adding its signed log-odds calibrates the cross-video ranking:
-        # normal-looking videos move down and abnormal-looking videos move up.
-        delta_normal_video = eta_normal * video_logit
+        delta_normal_video = eta_normal * torch.minimum(video_logit, torch.zeros_like(video_logit))
         delta_normal = delta_normal_video.unsqueeze(1).expand_as(host_score)
 
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)

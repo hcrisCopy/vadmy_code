@@ -112,12 +112,36 @@ def gradient_audit(model: WitnessVAD, device: torch.device) -> dict[str, object]
         model.expert.neurons.sparsity_surrogate(),
     )
     losses["total"].backward()
+    def gradient_sum(parameters: list[torch.nn.Parameter]) -> float:
+        return float(
+            sum(
+                parameter.grad.abs().sum().item()
+                for parameter in parameters
+                if parameter.grad is not None
+            )
+        )
+
+    joint_groups = {
+        "gate": [model.expert.neurons.gate_logits],
+        "signed_weight": [model.expert.neurons.signed_weights],
+        "layer_weight": [model.expert.neurons.layer_logits],
+        "temporal_readout": list(model.expert.temporal.parameters()),
+        "video_head": list(model.router.video_head.parameters()),
+        "local_head": list(model.router.local_head.parameters()),
+        "eta_normal": [model.router.raw_eta_normal],
+        "eta_anomaly": [model.router.raw_eta_anomaly],
+    }
+    joint_gradient = {
+        name: gradient_sum(parameters) for name, parameters in joint_groups.items()
+    }
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
     optimizer.step()
     identity = model(hidden, host, validity, eta_normal_override=0.0, eta_anomaly_override=0.0)
     return {
         "components": components,
         "all_components_reach_witness": all(bool(row["pass"]) for row in components.values()),
+        "joint_gradient_by_module": joint_gradient,
+        "all_modules_receive_joint_gradient": all(value > 0.0 for value in joint_gradient.values()),
         "single_optimizer": optimizer.__class__.__name__,
         "joint_step_finite": bool(torch.isfinite(losses["total"]).item()),
         "identity_max_abs_error": float((identity["corrected_score"][validity] - host[validity]).abs().max()),
@@ -165,6 +189,7 @@ def main() -> None:
     active_ok = gradients["active_neurons_per_layer"] == [args.active_neurons] * 12
     status = "pass" if (
         gradients["all_components_reach_witness"]
+        and gradients["all_modules_receive_joint_gradient"]
         and gradients["joint_step_finite"]
         and gradients["identity_max_abs_error"] == 0.0
         and gradients["normal_max_delta"] <= 0.0
@@ -180,6 +205,7 @@ def main() -> None:
         "real_b0_datasets_checked": 2,
         **{key: gradients[key] for key in (
             "all_components_reach_witness",
+            "all_modules_receive_joint_gradient",
             "joint_step_finite",
             "identity_max_abs_error",
             "normal_max_delta",
@@ -197,6 +223,7 @@ def main() -> None:
 - Identity: max absolute error at eta_N=eta_A=0 is `{gradients['identity_max_abs_error']:.3e}`.
 - Route constraints: normal maximum delta `{gradients['normal_max_delta']:.3e}`; anomaly video-mean absolute delta `{gradients['anomaly_mean_abs']:.3e}`.
 - Gradient coverage: all five objective components reach witness parameters = `{gradients['all_components_reach_witness']}`.
+- Joint-gradient coverage: every trainable module receives gradient = `{gradients['all_modules_receive_joint_gradient']}`.
 - Real-data contract: UCF and XD B0 manifests each checked with one normal and one abnormal video.
 
 Read `test_report.txt` for unit tests and `gradient_report.json` for per-loss gradients.

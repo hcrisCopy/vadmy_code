@@ -262,14 +262,14 @@ bash run_instructions/run_witness_vad_f0_dsanet.sh --clean
 4. 实现 10 维 video summary 与单一 route q。
 5. 实现 routed residual：
    - 正常路由只允许 uniform suppression。
-   - 异常路由只允许 neuron-derived local correction。
+   - 异常路由只允许视频内零均值的 neuron-derived local correction，不能退化成第二个全局偏置。
 6. 实现 video loss、host-residual-weighted neuron MIL、final MIL、normal dense loss、sparsity loss。
 7. 合并成一次 forward、一次 backward、一个 optimizer。
 
 ### 必过测试
 
 - η_N=η_A=0 时 s_corr 与 s_host 完全一致。
-- normal route 不能产生正增量；anomaly route 不能产生全局常数偏移。
+- normal route 不能产生正增量；anomaly route 在每个视频上必须严格零均值，不能产生全局常数偏移。
 - padding 不进入 pooling、top-k、smoothness 和指标。
 - 每层 active neuron 数恰为 32，signed 权重可导。
 - 每个 loss 都能把非零梯度传回 witness 参数。

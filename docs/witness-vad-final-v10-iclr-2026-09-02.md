@@ -134,7 +134,8 @@ q_v=\sigma(w_q^\top\Phi_v+b_q).
 视频判为 anomaly-like 时，神经元证据才获得局部修正权：
 
 \[
-\delta_{v,t}^+=q_v\eta_A\tanh r_\psi(s^h_{v,t},e_{v,t}),
+u_{v,t}=\tanh r_\psi(s^h_{v,t},e_{v,t}),\qquad
+\delta_{v,t}^+=q_v\eta_A\left(u_{v,t}-\frac{1}{T_v}\sum_j u_{v,j}\right),
 \qquad \eta_A=\operatorname{softplus}(\tilde\eta_A)>0.
 \]
 
@@ -146,7 +147,7 @@ s^{corr}_{v,t}=\sigma\left(
 \right).
 \]
 
-这不是 v9 的两个独立 global kappa。`q_v` 有直接视频标签监督；两条行为由同一 bag-state 路由，`eta` 不做零点投影。
+异常分支显式做视频内零均值，因此它不能偷偷退化成第二个全局偏置；跨视频下压只能由正常分支完成，局部重排只能由神经元分支完成。这不是 v9 的两个独立 global kappa。`q_v` 有直接视频标签监督；两条行为由同一 bag-state 路由，`eta` 不做零点投影。
 
 ### 6.4 Host-residual witness weighting
 

@@ -1,0 +1,127 @@
+from __future__ import annotations
+
+import math
+
+import torch
+from torch import nn
+
+
+def masked_mean(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
+    denominator = validity.sum(dim=1).clamp_min(1).to(values.dtype)
+    return (values * validity.to(values.dtype)).sum(dim=1) / denominator
+
+
+def masked_summary(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
+    rows = []
+    for value, mask in zip(values, validity):
+        valid = value[mask]
+        if valid.numel() == 0:
+            raise ValueError("every video needs at least one valid snippet")
+        count = min(valid.numel(), max(1, math.ceil(0.1 * valid.numel())))
+        rows.append(
+            torch.stack(
+                [valid.mean(), valid.std(unbiased=False), torch.topk(valid, count).values.mean(), valid.max()]
+            )
+        )
+    return torch.stack(rows)
+
+
+def masked_correlation(first: torch.Tensor, second: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
+    outputs = []
+    for left, right, mask in zip(first, second, validity):
+        left = left[mask]
+        right = right[mask]
+        left_centered = left - left.mean()
+        right_centered = right - right.mean()
+        denominator = torch.sqrt(
+            left_centered.square().sum() * right_centered.square().sum()
+        ).clamp_min(1e-6)
+        outputs.append((left_centered * right_centered).sum() / denominator)
+    return torch.stack(outputs)
+
+
+def video_summary(host_score: torch.Tensor, evidence: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
+    if host_score.shape != evidence.shape or validity.shape != host_score.shape:
+        raise ValueError("host_score, evidence and validity must share [B,T]")
+    host = masked_summary(host_score, validity)
+    neuron = masked_summary(evidence, validity)
+    correlation = masked_correlation(host_score, evidence, validity).unsqueeze(1)
+    disagreement = masked_mean((host_score - evidence).abs(), validity).unsqueeze(1)
+    return torch.cat([host, neuron, correlation, disagreement], dim=1)
+
+
+def inverse_softplus(value: float) -> float:
+    if value <= 0.0:
+        raise ValueError("softplus target must be positive")
+    return math.log(math.expm1(value))
+
+
+class WitnessRouter(nn.Module):
+    """One video state routes global suppression and local witness correction."""
+
+    def __init__(self, eta_normal: float = 1.0, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
+        super().__init__()
+        self.video_head = nn.Linear(10, 1)
+        self.local_head = nn.Sequential(
+            nn.Conv1d(4, local_width, kernel_size=1),
+            nn.GELU(),
+            nn.Conv1d(local_width, 1, kernel_size=1),
+        )
+        self.raw_eta_normal = nn.Parameter(torch.tensor(inverse_softplus(eta_normal)))
+        self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
+
+    def forward(
+        self,
+        host_score: torch.Tensor,
+        evidence: torch.Tensor,
+        validity: torch.Tensor,
+        eta_normal_override: float | None = None,
+        eta_anomaly_override: float | None = None,
+    ) -> dict[str, torch.Tensor]:
+        summary = video_summary(host_score, evidence, validity)
+        video_logit = self.video_head(summary).squeeze(1)
+        video_probability = torch.sigmoid(video_logit)
+        eta_normal = (
+            torch.nn.functional.softplus(self.raw_eta_normal)
+            if eta_normal_override is None
+            else host_score.new_tensor(eta_normal_override)
+        )
+        eta_anomaly = (
+            torch.nn.functional.softplus(self.raw_eta_anomaly)
+            if eta_anomaly_override is None
+            else host_score.new_tensor(eta_anomaly_override)
+        )
+        delta_normal_video = eta_normal * torch.minimum(video_logit, torch.zeros_like(video_logit))
+        delta_normal = delta_normal_video.unsqueeze(1).expand_as(host_score)
+
+        host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
+        evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
+        local_input = torch.stack(
+            [host_clipped, evidence_clipped, host_clipped - evidence_clipped, host_clipped * evidence_clipped],
+            dim=1,
+        )
+        local_raw = torch.tanh(self.local_head(local_input).squeeze(1))
+        local_raw = local_raw.masked_fill(~validity, 0.0)
+        # The anomaly branch is structurally unable to hide a video-wide bias.
+        local_shape = local_raw - masked_mean(local_raw, validity).unsqueeze(1)
+        local_shape = local_shape.masked_fill(~validity, 0.0)
+        delta_anomaly = video_probability.unsqueeze(1) * eta_anomaly * local_shape
+        delta_anomaly = delta_anomaly.masked_fill(~validity, 0.0)
+        delta_normal = delta_normal.masked_fill(~validity, 0.0)
+
+        host_logit = torch.logit(host_clipped)
+        base = torch.sigmoid(host_logit)
+        shifted = torch.sigmoid(host_logit + delta_normal + delta_anomaly)
+        corrected = host_score + shifted - base
+        corrected = corrected.clamp(0.0, 1.0).masked_fill(~validity, 0.0)
+        return {
+            "summary": summary,
+            "video_logit": video_logit,
+            "video_probability": video_probability,
+            "eta_normal": eta_normal,
+            "eta_anomaly": eta_anomaly,
+            "delta_normal": delta_normal,
+            "delta_anomaly": delta_anomaly,
+            "local_shape": local_shape,
+            "corrected_score": corrected,
+        }

@@ -116,7 +116,8 @@ tests/
   test_witness_losses.py
   test_witness_intervention.py
 run_instructions/
-  RUN_WITNESS_VAD_DSANET.md
+  RUN_WITNESS_VAD_F0_DSANET.md
+  RUN_WITNESS_VAD_DSANET.md  # F1--F5 完成后生成总入口
   run_witness_vad_f0_dsanet.sh
   run_witness_vad_f1_dsanet.sh
   run_witness_vad_f2_dsanet.sh
@@ -184,6 +185,7 @@ clean 只能删除该阶段精确目录，脚本必须先打印绝对路径并�
 ### 目的
 
 不猜 Universal 为什么涨点，直接量出信息来源。只跑缓存推理，不重新训练。
+F0 沿用历史 Universal 的 seed 234；它不是 v10 训练。F1 之后的新模块仍固定 seed 42。
 
 ### 比较
 
@@ -193,13 +195,16 @@ clean 只能删除该阶段精确目录，脚本必须先打印绝对路径并�
 | U1 | Universal full | 已知涨点复现 |
 | U2 | 去视频级 suppression | 增益是否主要来自整体压低正常视频 |
 | U3 | 去 neuron-derived local correction | 神经元是否真的提供定位信息 |
-| U4 | 去 temporal encoder | 时序上下文是否必要 |
+| U4 | 去手工 temporal rules | 旧方案涨点是否依赖 median/Gaussian/dilation/advance |
 
 ### 执行
 
 ~~~bash
 bash run_instructions/run_witness_vad_f0_dsanet.sh
 ~~~
+
+完整参数与续跑、清理命令见
+run_instructions/RUN_WITNESS_VAD_F0_DSANET.md。
 
 ### 看哪里
 

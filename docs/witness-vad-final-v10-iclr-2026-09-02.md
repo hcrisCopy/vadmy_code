@@ -248,7 +248,7 @@ S_u=\frac{A_uG_uC_u}{N_u+\varepsilon}.
 | U0 | Host | paired 起点 |
 | U1 | Universal full | 复核目标上限 |
 | U2 | U1 去 video suppression | 视频级判别贡献 |
-| U3 | U1 去 neuron evidence | 神经元信息贡献 |
+| U3 | U1 去局部 neuron correction | 神经元对时间定位的贡献 |
 | U4 | U1 去 temporal rules | 手工时间规则贡献 |
 
 只在现有缓存上跑，不重新训练，不增加组合。

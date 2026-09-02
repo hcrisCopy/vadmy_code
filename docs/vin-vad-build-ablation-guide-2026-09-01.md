@@ -188,6 +188,24 @@ EMA，正式 momentum 固定为 0.05，不做数据集级扫描。B2 的 `omega`
 禁止在 B2 根据异常视频或测试指标预选 top-K。B2 正式命令与产物见
 `run_instructions/RUN_VIN_VAD_B2_DSANET.md`。
 
+#### B2 正式结果（DSANet，2026-09-02）
+
+| Dataset | normal train videos | normal snippets | running median | running MAD | direction overlap | `pi` sum error | activation/evidence 复算最大误差 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| UCF-Crime | 720 | 109,811 | 0.079880 | 0.013631 | 0 | 0 | 4.47e-8 / 2.21e-6 |
+| XD-Violence | 1,841 | 353,820 | 0.073371 | 0.011415 | 0 | 0 | 3.73e-8 / 2.26e-6 |
+
+B2 单元测试 5 项全部通过：正负方向互斥，`entmax-1.5` 非负、归一且可产生
+稀疏 support，running statistics 只读取 normal valid snippets，保存项可逐步复算，
+padding 不改变有效输出或统计量。正式审计只读取 B1 的 `train_normal.csv`，没有读取
+异常、验证或测试视频。初始 `omega` 全相等，因此 18,432 个方向坐标初始都在 support
+内；这符合“联合学习、不预选 top-K”的方案，不能把初始稠密误写成失败。
+
+B2 结论：**通过，可以进入 B3，但本阶段结束时先停下汇报。** 这一步只证明方向
+残差与正常标定实现正确、无泄漏、可审计，不证明 detection gain，也不证明最终 field
+会变稀疏。远程产物位于 `../vadmy_data/vin_vad/dsanet/b2/<dataset>/`；正式命令和
+查看方式见 `run_instructions/RUN_VIN_VAD_B2_DSANET.md`。
+
 ### B3：两轴 host auditor
 
 在 `host_auditor.py` 独立实现两个分支。
@@ -432,9 +450,9 @@ A4 确实优于 A0 和两个单分支后，再补三个必要结构消融：
 ## 8. 实际执行清单
 
 ```text
-[ ] B0 数据审计、host identity、统一 evaluator
+[x] B0 数据审计、host identity、统一 evaluator（DSANet；UCF/XD 均通过）
 [x] B1 leakage/padding/gradient/NLL 测试（DSANet；UCF/XD 均通过）
-[ ] B2 residual/entmax/running-stat 测试
+[x] B2 residual/entmax/running-stat 测试（DSANet；UCF/XD 均通过）
 [ ] B3 identity/sign/zero-mean/bound/branch-independence 测试
 [ ] B4 单 optimizer 训练与完整 checkpoint
 [ ] E1 C0-C4，决定 contextual-directional claim

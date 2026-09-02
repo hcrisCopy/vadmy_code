@@ -312,6 +312,7 @@ def main() -> None:
             "final_mil": 0.0,
             "dense_normal": 0.0,
             "sparse": 0.0,
+            "intervention": 0.0,
         }
         lr_start = float(optimizer.param_groups[0]["lr"])
         progress = tqdm(

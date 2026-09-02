@@ -39,6 +39,39 @@ def temporal_smoothness(score: torch.Tensor, validity: torch.Tensor) -> torch.Te
     return difference[pair_mask].mean()
 
 
+def intervention_consistency(
+    corrected: torch.Tensor,
+    host_score: torch.Tensor,
+    evidence: torch.Tensor,
+    validity: torch.Tensor,
+    labels: torch.Tensor,
+    temperature: float = 0.02,
+) -> torch.Tensor:
+    """Assign correction credit using only weak-label-identifiable snippets.
+
+    Every valid snippet in a normal video is reliably normal, so increasing it is
+    inconsistent.  In an abnormal video the location is latent; the witness top-k
+    supplies a sparse responsibility set whose scores should be increased.
+    """
+    if temperature <= 0.0:
+        raise ValueError("temperature must be positive")
+    gain = corrected - host_score
+    terms = []
+    for row_gain, row_evidence, row_validity, label in zip(
+        gain, evidence.detach(), validity, labels
+    ):
+        valid_gain = row_gain[row_validity]
+        if valid_gain.numel() == 0:
+            raise ValueError("every video needs at least one valid snippet")
+        if label <= 0.5:
+            terms.append(F.softplus(valid_gain / temperature).mean())
+            continue
+        count = min(valid_gain.numel(), int(valid_gain.numel() / 16 + 1))
+        responsible = torch.topk(row_evidence[row_validity], count).indices
+        terms.append(F.softplus(-valid_gain[responsible] / temperature).mean())
+    return torch.stack(terms).mean()
+
+
 def witness_objective(
     result: dict[str, torch.Tensor],
     host_score: torch.Tensor,
@@ -52,6 +85,7 @@ def witness_objective(
     rank_weight: float = 0.5,
     rank_margin: float = 0.5,
     smooth_weight: float = 0.02,
+    intervention_weight: float = 0.5,
 ) -> dict[str, torch.Tensor]:
     evidence = result["evidence"]
     corrected = result["corrected_score"]
@@ -62,6 +96,9 @@ def witness_objective(
     neuron_loss = neuron_loss + rank_weight * ranking_loss(evidence, validity, labels, rank_margin)
     neuron_loss = neuron_loss + smooth_weight * temporal_smoothness(evidence, validity)
     final_loss = per_video_mil(corrected, validity, labels).mean()
+    intervention_loss = intervention_consistency(
+        corrected, host_score, evidence, validity, labels
+    )
     normal_mask = labels <= 0.5
     if normal_mask.any():
         normal_evidence = -torch.log1p(-evidence.clamp(max=1.0 - 1e-6))
@@ -79,6 +116,7 @@ def witness_objective(
         + lambda_final * final_loss
         + lambda_normal * dense_normal
         + lambda_sparse * sparse_loss
+        + intervention_weight * intervention_loss
     )
     return {
         "total": total,
@@ -87,6 +125,7 @@ def witness_objective(
         "final_mil": final_loss,
         "dense_normal": dense_normal,
         "sparse": sparse_loss,
+        "intervention": intervention_loss,
         "host_residual": residual.mean(),
     }
 
@@ -105,6 +144,7 @@ def variant_objective(
     rank_weight: float = 0.5,
     rank_margin: float = 0.5,
     smooth_weight: float = 0.02,
+    intervention_weight: float = 0.5,
 ) -> dict[str, torch.Tensor]:
     """Apply only the losses belonging to one pre-registered F3 variant."""
     if variant == "w6":
@@ -123,6 +163,7 @@ def variant_objective(
             rank_weight=rank_weight,
             rank_margin=rank_margin,
             smooth_weight=smooth_weight,
+            intervention_weight=intervention_weight,
         )
 
     corrected = result["corrected_score"]
@@ -147,6 +188,7 @@ def variant_objective(
             "final_mil": final_loss,
             "dense_normal": dense_corrected,
             "sparse": zero,
+            "intervention": zero,
             "host_residual": zero,
         }
 
@@ -183,6 +225,7 @@ def variant_objective(
             "final_mil": final_loss,
             "dense_normal": dense_normal,
             "sparse": sparsity,
+            "intervention": zero,
             "host_residual": residual.mean(),
         }
     raise ValueError("variant must be w1, w2 or w6")

@@ -8,7 +8,7 @@
 >
 > **边界**：只在本仓库写代码；训练、测试和结果分析都在远程服务器执行；产物统一写到 ../vadmy_data。
 >
-> **当前进度**：v9 的 B0--E1 已归档；v10 的 F0--F2 已通过；F3 已按 baseline-compatible checkpoint 选择协议完成并判定 NO-GO，尚未进入 F4。
+> **当前进度**：v9 的 B0--E1 已归档；v10 的 F0--F2 已通过；F3 已判定 NO-GO；F3.1 已排除“只因 eta_A 太小”，下一步应重构 witness evidence/router，尚未进入 F4。
 
 ---
 
@@ -488,6 +488,26 @@ bash run_instructions/run_witness_vad_f3_eta_probe_dsanet.sh --clean
 ~~~text
 ../vadmy_data/witness_vad/dsanet/f3_eta_probe/
 ~~~
+
+#### 已完成记录（2026-09-02）
+
+正式命令：
+
+~~~bash
+bash run_instructions/run_witness_vad_f3_eta_probe_dsanet.sh --clean
+~~~
+
+| Dataset | Variant | learned eta | fixed 0.25 | fixed 0.35 | fixed 0.60 |
+|---|---|---:|---:|---:|---:|
+| UCF AUC gain | W2 | +0.007 | +0.007 | +0.003 | -0.016 |
+| UCF AUC gain | W6 | +0.032 | +0.028 | +0.020 | -0.005 |
+| XD AP gain | W2 | +0.469 | +0.312 | +0.397 | +0.513 |
+| XD AP gain | W6 | +0.501 | +0.361 | +0.432 | +0.526 |
+
+- 7 个远程测试全部通过；12 组评测均复用 F3 checkpoint，没有训练和后处理。
+- UCF 上增大强度会继续提高部分 Macro-Within 指标，但 pooled/Cross AUC 下降；最佳固定设置仅 `+0.028 pp`，远低于 `+0.2 pp` 裁决线。
+- XD 随强度增大而改善，但 fixed 0.60 的最好结果仍只有 `+0.526 pp`，不能解决硬目标。
+- **裁决：redesign_correction。停止 eta_A 调参；不得把 0.60 作为新正式配置。下一步修改 residual supervision、video correction-need routing 和非零均值稀疏 correction support。**
 
 ---
 

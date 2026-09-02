@@ -34,6 +34,8 @@ if ($LASTEXITCODE -ne 0) {
 
 $metricCommand = @"
 cd $remoteRepository
+source /root/miniconda3/etc/profile.d/conda.sh
+conda activate dsanet
 python -c 'import json; print(json.load(open("../vadmy_data/witness_vad/dsanet/f3_2_signed_support/target_margin.json"))["target_margin_pp"])'
 "@
 $metric = ssh -p $port $remote $metricCommand

@@ -134,7 +134,6 @@ for dataset in $DATASETS; do
   done
 done
 
-python -m vin_vad.summarize_f3 --root "$OUT" || true
 python - "$OUT" $DATASETS <<'PY'
 import json
 import pathlib

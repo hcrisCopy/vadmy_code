@@ -107,10 +107,7 @@ class WitnessRouter(nn.Module):
             [host_clipped, evidence_clipped, host_clipped - evidence_clipped, host_clipped * evidence_clipped],
             dim=1,
         )
-        direct_witness = (
-            masked_standardize(evidence_clipped, validity)
-            - masked_standardize(host_clipped, validity)
-        ).clamp(-3.0, 3.0)
+        direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
         local_raw = torch.tanh(
             self.local_head(local_input).squeeze(1) + direct_witness
         )

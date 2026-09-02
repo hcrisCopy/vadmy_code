@@ -8,7 +8,7 @@
 >
 > **边界**：只在本仓库写代码；训练、测试和结果分析都在远程服务器执行；产物统一写到 ../vadmy_data。
 >
-> **当前进度**：v9 的 B0--E1 已完成并归档在 docs/vin-vad-build-ablation-guide-2026-09-01.md；v10 从本指南 F0 开始。
+> **当前进度**：v9 的 B0--E1 已归档；v10 的 F0 已通过，当前停在 F1 开始前。
 
 ---
 
@@ -222,6 +222,33 @@ run_instructions/RUN_WITNESS_VAD_F0_DSANET.md。
 ### 阶段汇报
 
 停下来报告：U0–U4 两数据集指标、最大增益来源、远程产物路径。
+
+### F0 已完成记录（2026-09-02）
+
+正式命令：
+
+~~~bash
+bash run_instructions/run_witness_vad_f0_dsanet.sh --clean
+~~~
+
+| 数据集 | Host | Full | Full 增益 | 去 suppression 损失 | 去局部神经元损失 | 去 temporal rules 损失 |
+|---|---:|---:|---:|---:|---:|---:|
+| UCF AUC | 89.445 | 90.503 | +1.058 | 0.242 | 0.709 | 0.292 |
+| XD AP | 86.951 | 88.166 | +1.215 | 0.776 | 1.018 | 0.259 |
+
+- 4 个单元测试全部通过；两数据集的 Full 均以小于 0.001 pp 的误差复现历史结果。
+- UCF 的主导来源是局部神经元校正；XD 是局部校正与视频级 suppression 的组合。
+- 只保留 suppression 时，UCF/XD 的 Macro-Within-AUC 都低于 host。不能把“压低正常”
+  写成定位贡献；局部神经元校正才负责补回视频内排序。
+- 手工 temporal rules 只有约 0.26--0.29 pp 的 pooled 增益，而且没有稳定改善
+  Macro-Within-AUC。v10 不复制这些规则，只保留可学习的最小时序 readout。
+- **裁决：PASS，允许进入 F1；本轮按约定停在 F1 开始前。**
+
+远程结果：
+
+~~~text
+../vadmy_data/witness_vad/dsanet/f0_universal_autopsy/
+~~~
 
 ---
 

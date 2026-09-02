@@ -1,7 +1,7 @@
 # WITNESS-VAD v10：用弱标签证人神经元审计冻结的视频异常检测器
 
 > 目标会议：ICLR 2027。
-> 状态：待 DSANet 正式验证的新主方案。CVA-VAD v9 的 contextual-directional evidence 已由 E1 判定 no-go。
+> 状态：F0 已通过，下一步为 F1 单体结构与梯度闭环。CVA-VAD v9 的 contextual-directional evidence 已由 E1 判定 no-go。
 > 硬目标：同一权重、同一 evaluator 的 paired executable baseline 上，DSANet/UCF frame AUC 与 DSANet/XD frame AP 均至少 `+1.0 pp`。
 
 ## 1. 一句话主张
@@ -13,6 +13,13 @@
 v9 的 masked context predictor 在 UCF/XD 都学到了更好的 conditional NLL，但 C3 detection gain 近零，且没有稳定赢 C1/C4。五组 `kappa_cross` 全部回到 0。结论很明确：**“能预测上下文”没有转化为“拥有 host 缺失的异常证据”。**
 
 因此 v10 不调 v9 的窗口、overlap、budget、学习率或 smoothing；直接删除 contextual predictor、directional residual field 和 two-axis kappa。
+
+F0 对历史 Universal 做了同缓存 leave-one-out 验尸。Full 相对 host 在 UCF AUC
+提升 1.058 pp、XD AP 提升 1.215 pp；删除局部神经元校正分别损失 0.709/1.018 pp，
+删除视频级 suppression 分别损失 0.242/0.776 pp，删除手工 temporal rules 分别损失
+0.292/0.259 pp。只保留 suppression 时，两数据集的视频内排序都弱于 host。结论是：
+**必须保留“视频级判断是否需要改 + 神经元决定在哪里改”的信息分工，但不继承手工
+temporal morphology。**
 
 ## 3. 领域能力缺口
 

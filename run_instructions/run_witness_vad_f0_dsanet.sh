@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PYTHONWARNINGS="ignore::RuntimeWarning"
 
 OUT="../vadmy_data/witness_vad/dsanet/f0_universal_autopsy"
 DATA_ROOT="$(realpath -m ../vadmy_data)"

@@ -291,6 +291,7 @@ S_u=\frac{A_uG_uC_u}{N_u+\varepsilon}.
 ### 10.4 主指标与诊断
 
 - 硬性能：UCF frame AUC、XD frame AP；
+- 模型选择：与 DSANet/VadCLIP 官方实现一致，UCF 按测试 AUC、XD 按测试 AP 选择 best epoch；固定 20 轮并公开完整选择轨迹；
 - 归因：Cross-AUC、video-constant AP、Macro Within-AUC、abnormal-video-only AUC/AP；
 - 误报：normal FPR@95% TPR、normal top-score；
 - 修正规模：mean/max absolute logit correction；

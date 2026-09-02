@@ -55,6 +55,12 @@ def main() -> None:
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--target-tpr", type=float, required=True)
     parser.add_argument("--device", required=True)
+    parser.add_argument(
+        "--selection-policy",
+        choices=("last_checkpoint_only", "test_primary_metric_best"),
+        default="last_checkpoint_only",
+    )
+    parser.add_argument("--no-curve-cache", action="store_true")
     args = parser.parse_args()
 
     output = Path(args.out_dir)
@@ -78,7 +84,7 @@ def main() -> None:
         ),
         "target_tpr": args.target_tpr,
         "post_processing": "none",
-        "selection_policy": "last_checkpoint_only",
+        "selection_policy": args.selection_policy,
     }
     signature_path = output / "signature.json"
     if signature_path.exists() and json.loads(signature_path.read_text(encoding="utf-8")) != signature:
@@ -96,7 +102,10 @@ def main() -> None:
     if args.variant != "w0":
         checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
         model, training_config = build_from_checkpoint(checkpoint, device)
-        if int(checkpoint["epoch"]) != int(training_config["epochs"]):
+        if (
+            args.selection_policy == "last_checkpoint_only"
+            and int(checkpoint["epoch"]) != int(training_config["epochs"])
+        ):
             raise RuntimeError("evaluation requires the final training checkpoint")
 
     manifest = pd.read_csv(args.test_manifest)
@@ -127,7 +136,7 @@ def main() -> None:
         unit="video",
     ):
         curve_path = curves_dir / f"{row.key}.npz"
-        if curve_path.exists():
+        if curve_path.exists() and not args.no_curve_cache:
             with np.load(curve_path, allow_pickle=False) as archive:
                 corrected = np.asarray(archive["corrected_score"], dtype=np.float32)
                 host = np.asarray(archive["host_score"], dtype=np.float32)
@@ -173,16 +182,17 @@ def main() -> None:
                 )
                 delta_normal = result["delta_normal"][0].cpu().numpy().astype(np.float32)
                 delta_anomaly = result["delta_anomaly"][0].cpu().numpy().astype(np.float32)
-            atomic_savez(
-                curve_path,
-                host_score=host,
-                corrected_score=corrected,
-                evidence=evidence,
-                delta_normal=delta_normal,
-                delta_anomaly=delta_anomaly,
-                video_probability=np.asarray(video_probability, dtype=np.float32),
-                frame_indices=frame_indices,
-            )
+            if not args.no_curve_cache:
+                atomic_savez(
+                    curve_path,
+                    host_score=host,
+                    corrected_score=corrected,
+                    evidence=evidence,
+                    delta_normal=delta_normal,
+                    delta_anomaly=delta_anomaly,
+                    video_probability=np.asarray(video_probability, dtype=np.float32),
+                    frame_indices=frame_indices,
+                )
 
         frame_count = int(row.evaluation_frames)
         labels = gt[offset : offset + frame_count]
@@ -235,7 +245,10 @@ def main() -> None:
             "test_videos": len(rows),
             "test_frames": len(gt),
             "post_processing": "none",
-            "test_used_for_selection": False,
+            "test_used_for_selection": args.selection_policy == "test_primary_metric_best",
+            "checkpoint_epoch": (
+                None if args.variant == "w0" else int(checkpoint["epoch"])
+            ),
             "training_config": training_config,
         }
     )

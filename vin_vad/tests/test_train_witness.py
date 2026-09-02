@@ -10,6 +10,7 @@ from vin_vad.train_witness import (
     comparable_configuration,
     merge_balanced_batches,
 )
+from vin_vad.select_witness_checkpoint import select_best
 
 
 def test_balanced_indices_are_fixed_and_class_complete() -> None:
@@ -44,6 +45,15 @@ def test_resume_ignores_provenance_hash_but_not_hyperparameters() -> None:
     assert comparable_configuration(saved) == comparable_configuration(current)
     current["learning_rate"] = 1e-4
     assert comparable_configuration(saved) != comparable_configuration(current)
+
+
+def test_checkpoint_selection_matches_baseline_primary_metric() -> None:
+    rows = [
+        {"epoch": 1, "pooled_auc": 0.9, "pooled_ap": 0.7},
+        {"epoch": 2, "pooled_auc": 0.8, "pooled_ap": 0.8},
+    ]
+    assert select_best(rows, "ucf")["epoch"] == 1
+    assert select_best(rows, "xd")["epoch"] == 2
 
 
 def test_rng_checkpoint_tensors_are_cpu_compatible() -> None:

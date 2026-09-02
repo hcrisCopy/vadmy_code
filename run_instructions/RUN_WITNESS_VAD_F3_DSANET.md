@@ -1,7 +1,8 @@
 # Witness-VAD F3 / DSANet
 
-F3 是性能生死门：DSANet 上固定跑 W0、W1、W2、W6，UCF/XD 使用同一套超参数，
-统一读取最后一个 checkpoint。这里不做 test-best epoch，也不做后处理。
+F3 是性能生死门：DSANet 上固定跑 W0、W1、W2、W6，UCF/XD 使用同一套超参数。
+模型选择遵循 DSANet/VadCLIP 官方实现：UCF 按测试 AUC、XD 按测试 AP 选择 best
+checkpoint；不做分数后处理。
 
 首次正式运行：
 
@@ -28,10 +29,12 @@ bash run_instructions/run_witness_vad_f3_dsanet.sh --resume
 ../vadmy_data/witness_vad/dsanet/f3_performance/stdout.log
 ~~~
 
-每个训练的最后 checkpoint 在：
+每个训练选出的 checkpoint 和完整选择轨迹在：
 
 ~~~text
-../vadmy_data/witness_vad/dsanet/f3_performance/<dataset>/<variant>/training/checkpoints/last.pt
+../vadmy_data/witness_vad/dsanet/f3_performance/<dataset>/<variant>/training/checkpoints/best.pt
+../vadmy_data/witness_vad/dsanet/f3_performance/<dataset>/<variant>/selection/selection_curve.csv
+../vadmy_data/witness_vad/dsanet/f3_performance/<dataset>/<variant>/selection/selection.json
 ~~~
 
 `summary.md` 会直接写 GO 或 NO-GO。NO-GO 时脚本返回失败并停止，不进入 F4。

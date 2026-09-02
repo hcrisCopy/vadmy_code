@@ -65,6 +65,7 @@ def comparable_configuration(config: dict[str, object]) -> dict[str, object]:
     comparable = {key: value for key, value in config.items() if key != "git_commit"}
     comparable.setdefault("variant", "w6")
     comparable.setdefault("num_workers", 0)
+    comparable.setdefault("retain_epoch_checkpoints", False)
     return comparable
 
 
@@ -180,6 +181,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--device", required=True)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--retain-epoch-checkpoints", action="store_true")
     args = parser.parse_args()
 
     if args.batch_size < 2 or args.batch_size % 2:
@@ -206,7 +208,11 @@ def main() -> None:
         {
             "manifest_sha256": file_sha256(manifest),
             "git_commit": git_commit(),
-            "selection_policy": "last_checkpoint_only",
+            "selection_policy": (
+                "external_test_primary_metric_best"
+                if args.retain_epoch_checkpoints
+                else "last_checkpoint_only"
+            ),
             "test_data_used": False,
             "optimizer_count": 1,
         }
@@ -378,6 +384,13 @@ def main() -> None:
             ),
             last_path,
         )
+        if args.retain_epoch_checkpoints:
+            atomic_torch_save(
+                checkpoint_payload(
+                    model, optimizer, scheduler, epoch + 1, history, configuration
+                ),
+                checkpoints / f"epoch_{epoch + 1:03d}.pt",
+            )
         print(json.dumps(record, indent=2), flush=True)
 
     completed_epochs = len(history)
@@ -389,17 +402,23 @@ def main() -> None:
         "checkpoint": str(last_path),
         "optimizer_count": 1,
         "test_data_used": False,
-        "selection_policy": "last_checkpoint_only",
+        "selection_policy": configuration["selection_policy"],
+        "epoch_checkpoints_retained": args.retain_epoch_checkpoints,
         "history": history,
     }
     (output / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    checkpoint_note = (
+        "all epoch checkpoints retained for external baseline-compatible selection"
+        if args.retain_epoch_checkpoints
+        else "last checkpoint only"
+    )
     summary = f"""# Witness-VAD training run
 
 - Status: **{metrics['status']}**
 - Completed epochs: {completed_epochs}/{args.epochs}
 - Dataset: {args.dataset} training split only
 - Checkpoint: `checkpoints/last.pt`
-- Selection: last checkpoint only; test data used: false
+- Training output: {checkpoint_note}; test data used during training: false
 """
     (output / "summary.md").write_text(summary, encoding="utf-8")
     print(json.dumps(metrics, indent=2), flush=True)

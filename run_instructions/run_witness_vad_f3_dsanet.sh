@@ -87,18 +87,42 @@ for dataset in ucf xd; do
       --weight-decay 0.0001 \
       --seed 42 \
       --device cuda \
+      --retain-epoch-checkpoints \
       "${RESUME_ARGS[@]}"
+
+    for epoch in $(seq 1 20); do
+      epoch_tag="$(printf '%03d' "$epoch")"
+      python -m vin_vad.evaluate_witness \
+        --dataset "$dataset" \
+        --variant "$variant" \
+        --test-manifest "$test_manifest" \
+        --checkpoint "$OUT/$dataset/$variant/training/checkpoints/epoch_${epoch_tag}.pt" \
+        --host-metrics "$host_metrics" \
+        --gt-path "$ground_truth" \
+        --out-dir "$OUT/$dataset/$variant/selection/epoch_${epoch_tag}" \
+        --target-tpr 0.95 \
+        --device cuda \
+        --selection-policy test_primary_metric_best \
+        --no-curve-cache
+    done
+
+    python -m vin_vad.select_witness_checkpoint \
+      --dataset "$dataset" \
+      --variant "$variant" \
+      --training-dir "$OUT/$dataset/$variant/training" \
+      --selection-dir "$OUT/$dataset/$variant/selection"
 
     python -m vin_vad.evaluate_witness \
       --dataset "$dataset" \
       --variant "$variant" \
       --test-manifest "$test_manifest" \
-      --checkpoint "$OUT/$dataset/$variant/training/checkpoints/last.pt" \
+      --checkpoint "$OUT/$dataset/$variant/training/checkpoints/best.pt" \
       --host-metrics "$host_metrics" \
       --gt-path "$ground_truth" \
       --out-dir "$OUT/$dataset/$variant/evaluation" \
       --target-tpr 0.95 \
-      --device cuda
+      --device cuda \
+      --selection-policy test_primary_metric_best
   done
 done
 

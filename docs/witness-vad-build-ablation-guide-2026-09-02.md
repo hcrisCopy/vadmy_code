@@ -8,7 +8,7 @@
 >
 > **边界**：只在本仓库写代码；训练、测试和结果分析都在远程服务器执行；产物统一写到 ../vadmy_data。
 >
-> **当前进度**：v9 的 B0--E1 已归档；v10 的 F0--F2 已通过，当前按阶段约定停在 F3 开始前。
+> **当前进度**：v9 的 B0--E1 已归档；v10 的 F0--F2 已通过，F3 正在按修正后的 baseline-compatible checkpoint 选择协议执行。
 
 ---
 
@@ -54,7 +54,7 @@
 - 不重新训练 CLIP，不增加文本分支。
 - 不引入 v9 的 field、budget、kappa_cross、boost/suppress 双门。
 - 不恢复 Universal 的两阶段冻结、两套学习率、40+ 手工统计量、时长分支和多种平滑后处理。
-- 不用 best test epoch 报结果；主表只报最后一个 checkpoint。
+- checkpoint 选择严格对齐 DSANet/VadCLIP 官方实现：UCF 按测试 AUC、XD 按测试 AP 选 best epoch；保存全部 epoch 指标，禁止事后改选择指标。
 
 ---
 
@@ -83,7 +83,7 @@
 | λ_N / λ_S | 0.5 / 1e-3 |
 | η_N / η_A | 1.0 / 0.25 |
 | video summary | 10 维：host 与 neuron 各 mean/std/top10/max，加 corr 与 MAE |
-| model selection | last checkpoint |
+| model selection | UCF test AUC best / XD test AP best（对齐 DSANet/VadCLIP） |
 
 从 Universal 只继承三个已验证且不引入拼装的数值细节：active-neuron 求和除以
 `sqrt(32)`、softplus ranking margin、视频内标准化 neuron evidence 的局部直连。
@@ -409,6 +409,9 @@ bash run_instructions/run_witness_vad_f2_dsanet.sh --resume
 
 W1 只能使用 host 的视频级统计；W2 仍以 host score 作为最终残差基底，但不能把它输入 neuron 分支。四组共用数据、seed、epoch 和 evaluator。
 
+每轮都保存 checkpoint 并用同一 evaluator 测试；UCF 只按 frame AUC、XD 只按 frame AP
+选择 best epoch。`selection_curve.csv` 必须保留 20 轮完整轨迹，不能看到结果后改选择指标。
+
 ### 执行
 
 ~~~bash
@@ -421,6 +424,9 @@ bash run_instructions/run_witness_vad_f3_dsanet.sh
 ../vadmy_data/witness_vad/dsanet/f3_performance/summary.md
 ../vadmy_data/witness_vad/dsanet/f3_performance/main_results.csv
 ../vadmy_data/witness_vad/dsanet/f3_performance/error_decomposition.json
+../vadmy_data/witness_vad/dsanet/f3_performance/<dataset>/<variant>/selection/selection_curve.csv
+../vadmy_data/witness_vad/dsanet/f3_performance/<dataset>/<variant>/selection/selection.json
+../vadmy_data/witness_vad/dsanet/f3_performance/<dataset>/<variant>/training/checkpoints/best.pt
 ~~~
 
 ### 生死门

@@ -42,3 +42,9 @@ def test_resume_ignores_provenance_hash_but_not_hyperparameters() -> None:
     assert comparable_configuration(saved) == comparable_configuration(current)
     current["learning_rate"] = 1e-4
     assert comparable_configuration(saved) != comparable_configuration(current)
+
+
+def test_rng_checkpoint_tensors_are_cpu_compatible() -> None:
+    state = torch.get_rng_state()
+    torch.set_rng_state(state.cpu())
+    assert state.dtype == torch.uint8

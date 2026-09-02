@@ -237,8 +237,8 @@ def main() -> None:
         start_epoch = int(saved["epoch"])
         random.setstate(saved["python_rng"])
         np.random.set_state(saved["numpy_rng"])
-        torch.set_rng_state(saved["torch_rng"])
-        torch.cuda.set_rng_state_all(saved["cuda_rng"])
+        torch.set_rng_state(saved["torch_rng"].cpu())
+        torch.cuda.set_rng_state_all([state.cpu() for state in saved["cuda_rng"]])
         print(f"resume from completed epoch {start_epoch}", flush=True)
 
     for epoch in range(start_epoch, args.epochs):

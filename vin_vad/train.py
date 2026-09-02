@@ -76,19 +76,41 @@ def build_model(args: argparse.Namespace) -> tuple[CVAVADCorrectionModel, dict[s
     )
     predictor.load_state_dict(predictor_checkpoint["model"])
 
+    evidence_types = {
+        "c0": "raw_directional",
+        "c1": "global_directional",
+        "c2": "contextual_absolute",
+        "c3": "contextual_directional",
+        "c4": "contextual_directional",
+    }
+    global_mean = None
+    global_sigma = None
+    if args.evidence == "c1":
+        if not args.global_statistics:
+            raise ValueError("C1 requires --global-statistics")
+        with np.load(args.global_statistics, allow_pickle=False) as archive:
+            global_mean = torch.from_numpy(np.asarray(archive["mean"], dtype=np.float32))
+            global_sigma = torch.from_numpy(np.asarray(archive["sigma"], dtype=np.float32))
     field = ViolationField(
         delta=args.delta,
         statistics_momentum=args.statistics_momentum,
+        evidence_type=evidence_types[args.evidence],
+        global_mean=global_mean,
+        global_sigma=global_sigma,
     )
-    field_checkpoint = torch.load(
-        b2_checkpoint_path, map_location="cpu", weights_only=False
-    )
-    saved_field_config = field_checkpoint["config"]
-    if float(saved_field_config["delta"]) != args.delta or float(
-        saved_field_config["statistics_momentum"]
-    ) != args.statistics_momentum:
-        raise RuntimeError("B4 delta/statistics momentum must match the B2 checkpoint")
-    field.load_state_dict(field_checkpoint["field"])
+    if args.stage == "b4":
+        field_checkpoint = torch.load(
+            b2_checkpoint_path, map_location="cpu", weights_only=False
+        )
+        saved_field_config = field_checkpoint["config"]
+        if float(saved_field_config["delta"]) != args.delta or float(
+            saved_field_config["statistics_momentum"]
+        ) != args.statistics_momentum:
+            raise RuntimeError("B4 delta/statistics momentum must match the B2 checkpoint")
+        incompatible = field.load_state_dict(field_checkpoint["field"], strict=False)
+        allowed_missing = {"global_mean", "global_sigma"}
+        if not set(incompatible.missing_keys).issubset(allowed_missing) or incompatible.unexpected_keys:
+            raise RuntimeError(f"unexpected B2 field state mismatch: {incompatible}")
 
     auditor = TwoAxisHostAuditor(
         alpha_cross=args.alpha_cross,
@@ -101,13 +123,17 @@ def build_model(args: argparse.Namespace) -> tuple[CVAVADCorrectionModel, dict[s
     sources = {
         "b1_config": file_sha256(b1_config_path),
         "b1_checkpoint": file_sha256(b1_checkpoint_path),
-        "b2_checkpoint": file_sha256(b2_checkpoint_path),
     }
+    if args.stage == "b4":
+        sources["b2_checkpoint"] = file_sha256(b2_checkpoint_path)
+    elif args.global_statistics:
+        sources["global_statistics"] = file_sha256(args.global_statistics)
     return CVAVADCorrectionModel(
         predictor=predictor,
         field=field,
         auditor=auditor,
         q_calibrator=q_calibrator,
+        evidence_id=args.evidence,
     ), sources
 
 
@@ -185,7 +211,7 @@ def checkpoint_payload(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Train the CVA-VAD B4 joint correction model around frozen DSANet scores."
+        description="Train one CVA-VAD correction model around frozen DSANet scores."
     )
     parser.add_argument("--dataset", choices=["ucf", "xd"], required=True)
     parser.add_argument("--train-manifest", required=True)
@@ -210,6 +236,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int, required=True)
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--device", required=True)
+    parser.add_argument("--stage", choices=["b4", "e1"], default="b4")
+    parser.add_argument("--evidence", choices=["c0", "c1", "c2", "c3", "c4"], default="c3")
+    parser.add_argument("--global-statistics")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--clean", action="store_true")
     return parser.parse_args()
@@ -228,6 +257,11 @@ def main() -> None:
     config = vars(args).copy()
     config.pop("clean")
     config.pop("resume")
+    if args.stage == "b4":
+        # Keep the completed B4 signature byte-for-byte compatible.
+        config.pop("stage")
+        config.pop("evidence")
+        config.pop("global_statistics")
     config.update(
         {
             "train_manifest_sha256": file_sha256(args.train_manifest),
@@ -240,12 +274,12 @@ def main() -> None:
     )
     config_path = output / "config.json"
     if config_path.exists() and json.loads(config_path.read_text(encoding="utf-8")) != config:
-        raise RuntimeError("B4 configuration changed; use --clean or a new output directory")
+        raise RuntimeError("training configuration changed; use --clean or a new output directory")
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
     summary_path = output / "summary.json"
     final_path = output / "model_final.pt"
     if args.resume and summary_path.exists() and final_path.exists():
-        print(f"reusing completed B4 run: {summary_path}", flush=True)
+        print(f"reusing completed {args.stage.upper()} run: {summary_path}", flush=True)
         print(summary_path.read_text(encoding="utf-8"), flush=True)
         return
 
@@ -254,7 +288,7 @@ def main() -> None:
     normal_indices = np.flatnonzero(labels == 0).tolist()
     abnormal_indices = np.flatnonzero(labels == 1).tolist()
     if min(len(normal_indices), len(abnormal_indices)) < args.batch_size:
-        raise RuntimeError("B4 needs at least one full normal and abnormal batch")
+        raise RuntimeError("training needs at least one full normal and abnormal batch")
 
     device = torch.device(args.device)
     model = model.to(device)
@@ -283,7 +317,7 @@ def main() -> None:
     if args.resume and latest_path.exists():
         checkpoint = torch.load(latest_path, map_location=device, weights_only=False)
         if checkpoint["config"] != config:
-            raise RuntimeError("checkpoint configuration does not match this B4 run")
+            raise RuntimeError("checkpoint configuration does not match this training run")
         model.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
         scheduler.load_state_dict(checkpoint["scheduler"])
@@ -297,7 +331,10 @@ def main() -> None:
         if history:
             maximum_cross_gradient = max(float(row["max_cross_gradient_abs"]) for row in history)
             maximum_within_gradient = max(float(row["max_within_gradient_abs"]) for row in history)
-        print(f"resume {args.dataset} B4 from epoch {start_epoch + 1}", flush=True)
+        print(
+            f"resume {args.dataset} {args.stage.upper()} from epoch {start_epoch + 1}",
+            flush=True,
+        )
 
     for epoch in range(start_epoch, args.epochs):
         normal_loader, abnormal_loader = make_class_loaders(
@@ -319,7 +356,7 @@ def main() -> None:
         progress = tqdm(
             zip(normal_loader, abnormal_loader),
             total=steps,
-            desc=f"{args.dataset} B4 epoch {epoch + 1}/{args.epochs}",
+            desc=f"{args.dataset} {args.stage.upper()} epoch {epoch + 1}/{args.epochs}",
             unit="batch",
         )
         for step, (normal_batch, abnormal_batch) in enumerate(progress, start=1):
@@ -419,7 +456,11 @@ def main() -> None:
     summary = {
         "status": status,
         "dataset": args.dataset,
-        "scope": "B4 training audit; no validation/test metric or model selection",
+        "scope": (
+            "B4 training audit; no validation/test metric or model selection"
+            if args.stage == "b4"
+            else "E1 evidence ablation training; test is evaluated only after the fixed final epoch"
+        ),
         "epochs": args.epochs,
         "normal_training_videos": len(normal_indices),
         "abnormal_training_videos": len(abnormal_indices),
@@ -464,10 +505,14 @@ def main() -> None:
         "test_split_used": False,
         "selection_policy": config["selection_policy"],
     }
+    if args.stage == "e1":
+        summary["evidence"] = args.evidence
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2), flush=True)
     if status != "pass":
-        raise RuntimeError("B4 failed; inspect gradient and normal-statistics diagnostics")
+        raise RuntimeError(
+            f"{args.stage.upper()} failed; inspect gradient and normal-statistics diagnostics"
+        )
 
 
 if __name__ == "__main__":

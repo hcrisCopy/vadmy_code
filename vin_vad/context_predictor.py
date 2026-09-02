@@ -64,6 +64,32 @@ def guarded_attention_mask(
     return expanded, prediction_mask
 
 
+def global_attention_mask(
+    validity: torch.Tensor,
+    attention_heads: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Allow every valid key, including the target, for the C4 control."""
+    if validity.ndim != 2 or validity.dtype != torch.bool:
+        raise ValueError("validity must be a boolean [B,T] tensor")
+    if attention_heads < 1:
+        raise ValueError("attention_heads must be positive")
+    batch, steps = validity.shape
+    mask = torch.ones(batch, steps, steps, dtype=torch.bool, device=validity.device)
+    for batch_index in range(batch):
+        length = int(validity[batch_index].sum().item())
+        if length < 1 or not torch.all(validity[batch_index, :length]):
+            raise ValueError("valid positions must form a non-empty left-aligned prefix")
+        if torch.any(validity[batch_index, length:]):
+            raise ValueError("valid positions must be left aligned")
+        mask[batch_index, :, :length] = False
+    expanded = (
+        mask[:, None]
+        .expand(batch, attention_heads, steps, steps)
+        .reshape(batch * attention_heads, steps, steps)
+    )
+    return expanded, validity.clone()
+
+
 class MaskedCrossAttentionBlock(nn.Module):
     def __init__(self, width: int, heads: int, dropout: float) -> None:
         super().__init__()
@@ -173,7 +199,10 @@ class MaskedContextPredictor(nn.Module):
         return self.fixed_layer_norm(hidden)
 
     def forward(
-        self, hidden: torch.Tensor, validity: torch.Tensor
+        self,
+        hidden: torch.Tensor,
+        validity: torch.Tensor,
+        attention_mode: str = "masked",
     ) -> dict[str, torch.Tensor]:
         normalized = self.normalize_hidden(hidden)
         batch, steps = normalized.shape[:2]
@@ -184,9 +213,16 @@ class MaskedContextPredictor(nn.Module):
         memory = self.token_projection(reduced) + positions.unsqueeze(0)
         # The query contains positions only. It has no hidden-state input path.
         query = positions.unsqueeze(0).expand(batch, steps, self.model_width)
-        attention_mask, prediction_mask = guarded_attention_mask(
-            validity, self.guard_radius, self.attention_heads
-        )
+        if attention_mode == "masked":
+            attention_mask, prediction_mask = guarded_attention_mask(
+                validity, self.guard_radius, self.attention_heads
+            )
+        elif attention_mode == "global":
+            attention_mask, prediction_mask = global_attention_mask(
+                validity, self.attention_heads
+            )
+        else:
+            raise ValueError("attention_mode must be masked or global")
         for block in self.blocks:
             query = block(query, memory, attention_mask)
         context = self.output_norm(query)

@@ -85,3 +85,34 @@ def test_padding_does_not_change_valid_outputs_or_statistics() -> None:
     torch.testing.assert_close(first["evidence"][mask], second["evidence"][mask])
     torch.testing.assert_close(first_field.running_median, second_field.running_median)
     torch.testing.assert_close(first_field.running_mad, second_field.running_mad)
+
+
+def test_e1_evidence_definitions_change_only_the_intended_residual() -> None:
+    hidden, mean, sigma, mask = sample_inputs()
+    global_mean = torch.full((12, 768), 0.25)
+    global_sigma = torch.full((12, 768), 2.0)
+    raw = ViolationField(0.5, 0.1, evidence_type="raw_directional")(
+        hidden, mean, sigma, mask
+    )
+    global_result = ViolationField(
+        0.5,
+        0.1,
+        evidence_type="global_directional",
+        global_mean=global_mean,
+        global_sigma=global_sigma,
+    )(hidden, mean, sigma, mask)
+    absolute = ViolationField(0.5, 0.1, evidence_type="contextual_absolute")(
+        hidden, mean, sigma, mask
+    )
+    contextual = ViolationField(0.5, 0.1)(hidden, mean, sigma, mask)
+    torch.testing.assert_close(raw["residual"][mask], hidden[mask])
+    torch.testing.assert_close(
+        global_result["residual"][mask],
+        ((hidden - global_mean) / (global_sigma + 1e-6))[mask],
+    )
+    torch.testing.assert_close(
+        absolute["directional"][..., 0], absolute["directional"][..., 1]
+    )
+    assert not torch.equal(
+        contextual["directional"][..., 0], contextual["directional"][..., 1]
+    )

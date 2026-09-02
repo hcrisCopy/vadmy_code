@@ -94,3 +94,19 @@ def test_length_two_sequence_keeps_one_context_key() -> None:
     )
     assert result["prediction_mask"].tolist() == [[True, True]]
     assert torch.isfinite(result["mean"]).all()
+
+
+def test_global_control_reads_target_while_masked_predictor_does_not() -> None:
+    torch.manual_seed(9)
+    model = build_predictor().eval()
+    hidden = torch.randn(1, 7, 12, 768)
+    mask = torch.ones(1, 7, dtype=torch.bool)
+    changed = hidden.clone()
+    changed[:, 3] += 50.0 * torch.randn_like(changed[:, 3])
+    with torch.no_grad():
+        masked_before = model(hidden, mask, attention_mode="masked")["mean"][:, 3]
+        masked_after = model(changed, mask, attention_mode="masked")["mean"][:, 3]
+        global_before = model(hidden, mask, attention_mode="global")["mean"][:, 3]
+        global_after = model(changed, mask, attention_mode="global")["mean"][:, 3]
+    torch.testing.assert_close(masked_before, masked_after, atol=0.0, rtol=0.0)
+    assert float((global_before - global_after).abs().max()) > 1e-6

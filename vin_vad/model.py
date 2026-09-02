@@ -50,12 +50,47 @@ class CVAVADCorrectionModel(nn.Module):
         field: ViolationField,
         auditor: TwoAxisHostAuditor,
         q_calibrator: NormalQCalibrator,
+        evidence_id: str = "c3",
     ) -> None:
         super().__init__()
+        if evidence_id not in {"c0", "c1", "c2", "c3", "c4"}:
+            raise ValueError("evidence_id must be c0/c1/c2/c3/c4")
         self.predictor = predictor
         self.field = field
         self.auditor = auditor
         self.q_calibrator = q_calibrator
+        self.evidence_id = str(evidence_id)
+
+    def evidence_forward(
+        self,
+        hidden: torch.Tensor,
+        validity: torch.Tensor,
+        labels: torch.Tensor | None = None,
+        update_statistics: bool = False,
+        require_context_loss: bool = True,
+    ) -> dict[str, object]:
+        """Compute one ablation's evidence without applying the host auditor."""
+        attention_mode = "global" if self.evidence_id == "c4" else "masked"
+        if require_context_loss or self.evidence_id in {"c2", "c3", "c4"}:
+            distribution = self.predictor(
+                hidden, validity, attention_mode=attention_mode
+            )
+            normalized = distribution["normalized_hidden"]
+            mean, sigma = detached_distribution(distribution)
+        else:
+            normalized = self.predictor.normalize_hidden(hidden)
+            mean = torch.zeros_like(normalized)
+            sigma = torch.ones_like(normalized)
+            distribution = None
+        field = self.field(
+            normalized,
+            mean,
+            sigma,
+            validity,
+            labels=labels,
+            update_statistics=update_statistics,
+        )
+        return {"distribution": distribution, "field": field}
 
     def forward(
         self,
@@ -65,16 +100,15 @@ class CVAVADCorrectionModel(nn.Module):
         labels: torch.Tensor,
         update_statistics: bool,
     ) -> dict[str, torch.Tensor]:
-        distribution = self.predictor(hidden, validity)
-        mean, sigma = detached_distribution(distribution)
-        field = self.field(
-            distribution["normalized_hidden"],
-            mean,
-            sigma,
+        evidence_result = self.evidence_forward(
+            hidden,
             validity,
             labels=labels,
             update_statistics=update_statistics,
+            require_context_loss=True,
         )
+        distribution = evidence_result["distribution"]
+        field = evidence_result["field"]
         evidence_video = masked_topk_mean(field["evidence"], validity)
         if update_statistics:
             self.q_calibrator.update(evidence_video, labels)

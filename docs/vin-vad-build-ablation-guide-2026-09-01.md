@@ -378,13 +378,39 @@ E0 通过后保存不可改动的 host score cache 和 evaluator 版本。后续
 | C3 | masked contextual directional residual | 完整创新一 |
 | C4 | global-context controller | 不是任意 context encoder 都能做到 |
 
+#### E1 运行前冻结协议（DSANet，2026-09-02）
+
+先对每个 hidden token 做 B1 的固定 LayerNorm，记为 `x`。五组的唯一区别冻结为：
+
+- C0：`r=x`，保留正负方向；
+- C1：用 B1 normal-train-only 的逐神经元 global mean/sigma 得到 `r=(x-m)/s`；
+- C2：用 guarded masked predictor 得到 contextual residual，只取 `abs(r)`；为保持完全
+  相同的 18,432 个 readout 参数，把相同绝对值复制到两个方向槽；
+- C3：用 guarded masked predictor 得到 contextual residual，再拆正负方向；
+- C4：与 C3 使用同一 predictor 架构和参数量，但 attention 允许读取目标 token。它是
+  故意带 target leakage 的 global-context control，只回答 guard/masking 是否必要，不是候选方法。
+
+所有组都从 B1 predictor checkpoint 和同值 `omega` 开始，分别训练 10 epochs；共享
+DSANet frozen host cache、train manifest、seed 42、单 optimizer、batch size 8、学习率、
+weight decay、auditor 上界、correction budget、三项 loss 权重、normal statistics、最后一轮
+checkpoint 和 B0 evaluator。UCF 主指标预先固定为 pooled AUC，XD 固定为 pooled AP。
+全测试序列不压到 256：contextual evidence 用长度 256、重叠 64 的窗口预测并在重叠处
+取均值，然后只调用一次 full-sequence auditor。C0/C1 不依赖上下文，使用无重叠窗口。
+所有组都禁止 smoothing、伪标签、阈值搜索和测试集选模。
+
+C3 context replacement 预先固定为 32 对 normal validation 视频、seed 42：目标 token 与
+guard 区保持 receiver 原值，只把 guard 外上下文换成 donor；验收要求目标 raw 最大误差
+不超过 `1e-7`，且 `mu/r/e/correction/corrected score` 每一级在至少 80% 配对中改变。
+matched/random donor 对照属于 E4，本阶段不提前扩展。正式命令和产物见
+`run_instructions/RUN_VIN_VAD_E1_DSANET.md`。
+
 C3 必须同时满足：
 
 1. 正常验证视频 conditional NLL 优于 global baseline；
 2. detection 指标优于 C0、C1、C2、C4；
 3. context replacement 在目标 raw activation 不变时，能稳定改变 `mu/r/e/correction`。
 
-若只满足第 2 条，可能只是更复杂的 readout；若只满足第 1 条，predictor 更准但没有提供检测增量。两者都不能支撑 C1 claim。
+若只满足第 2 条，可能只是更复杂的 readout；若只满足第 1 条，predictor 更准但没有提供检测增量。两者都不能支撑 contextual-directional claim。
 
 ### E2：创新二的职责分解
 

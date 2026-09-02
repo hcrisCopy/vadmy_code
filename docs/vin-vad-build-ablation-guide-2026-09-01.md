@@ -299,6 +299,20 @@ B3 结论：**通过，可以进入 B4，但本阶段结束时先停下汇报。
 
 训练日志只保留能诊断方法的量：三项 loss、两个 `kappa`、平均绝对 correction、budget violation、field support size、正常/异常视频 evidence 摘要。不要为旧模块继续加日志。
 
+B4 固定执行纪律：UCF 和 XD 共用同一套 auditor 超参数，不按测试结果分别调参；
+`alpha_cross=0.5`、`alpha_within=0.25`，使 cross 与 within 的逐点最坏改动上界都为
+0.5 logit；唯一 correction budget 固定为 `rho=0.1`。normal-video q 使用只接收训练
+normal 的 4096 项 FIFO reservoir，`tau_N` 固定取其中标准化 q 的 95% 分位。长视频按
+DSANet 正式训练预处理均匀压到 256 个时间 bin，hidden 与 frozen host score 共用同一
+组 bin。训练固定 10 epochs、seed 42、单 optimizer，不用验证集或测试集选 checkpoint。
+
+B4 只回答“整个训练图是否真实连通且可恢复”。它不报告 detection gain，也不因为
+某个 `kappa` 最终较大就宣称分支有效。真正决定创新是否成立的仍是后续 E1 的 C0--C4
+和 E2 的 A0/A2/A3/A4；不要在 B4 增加学习率、budget、分位数的网格搜索。
+
+B4 正式命令、断点恢复和产物查看见
+`run_instructions/RUN_VIN_VAD_B4_DSANET.md`。
+
 ### B5：干预和 tag
 
 仅在完整检测模型确定后实现。贡献定义为：

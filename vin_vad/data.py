@@ -197,16 +197,96 @@ def collate_aligned_hidden(items: list[dict[str, object]]) -> dict[str, object]:
 
 
 def uniform_temporal_average(features: np.ndarray, target_length: int) -> np.ndarray:
-    """Match DSANet's training-time uniform bin averaging."""
+    """Match DSANet's training-time uniform bin averaging on any trailing shape."""
     features = np.asarray(features, dtype=np.float32)
     if len(features) <= target_length:
         return features
     boundaries = np.linspace(0, len(features), target_length + 1, dtype=np.int32)
-    output = np.empty((target_length, features.shape[1]), dtype=np.float32)
+    output = np.empty((target_length, *features.shape[1:]), dtype=np.float32)
     for index in range(target_length):
         left, right = int(boundaries[index]), int(boundaries[index + 1])
         output[index] = features[left:right].mean(axis=0) if left != right else features[left]
     return output
+
+
+class AuditorTrainingDataset(torch.utils.data.Dataset):
+    """Aligned hidden states and frozen host scores for B4 training.
+
+    Long videos use DSANet's official training-time uniform bin averaging. The
+    same bin boundaries are applied to hidden states and cached host scores, so
+    the correction target never drifts out of temporal alignment.
+    """
+
+    def __init__(self, manifest: str, maximum_length: int) -> None:
+        self.frame = pd.read_csv(manifest)
+        self.maximum_length = int(maximum_length)
+        required = {
+            "key",
+            "binary_label",
+            "hidden_path",
+            "host_score_path",
+            "valid_snippets",
+        }
+        missing = required - set(self.frame.columns)
+        if missing:
+            raise ValueError(f"{manifest}: missing columns {sorted(missing)}")
+        if self.maximum_length < 2:
+            raise ValueError("maximum_length must be at least two")
+
+    def __len__(self) -> int:
+        return len(self.frame)
+
+    def __getitem__(self, index: int) -> dict[str, object]:
+        row = self.frame.iloc[index]
+        length = int(row.valid_snippets)
+        with np.load(str(row.hidden_path), allow_pickle=False) as archive:
+            hidden = np.asarray(archive["hidden"][:length], dtype=np.float32)
+        host_score = np.asarray(
+            np.load(str(row.host_score_path), allow_pickle=False), dtype=np.float32
+        ).reshape(-1)[:length]
+        if hidden.shape != (length, 12, 768):
+            raise ValueError(
+                f"{row.hidden_path}: expected {(length, 12, 768)}, got {hidden.shape}"
+            )
+        if len(host_score) != length:
+            raise ValueError(
+                f"{row.host_score_path}: expected {length} scores, got {len(host_score)}"
+            )
+        if length > self.maximum_length:
+            hidden = uniform_temporal_average(hidden, self.maximum_length)
+            host_score = uniform_temporal_average(
+                host_score[:, None], self.maximum_length
+            )[:, 0]
+        return {
+            "key": str(row.key),
+            "hidden": torch.from_numpy(hidden.copy()),
+            "host_score": torch.from_numpy(host_score.copy()),
+            "label": int(row.binary_label),
+        }
+
+
+def collate_auditor_training(items: list[dict[str, object]]) -> dict[str, object]:
+    """Right-pad a B4 batch; the boolean mask is authoritative everywhere."""
+    lengths = torch.tensor([len(item["host_score"]) for item in items], dtype=torch.long)
+    maximum = int(lengths.max())
+    hidden = torch.zeros(len(items), maximum, 12, 768, dtype=torch.float32)
+    host_score = torch.zeros(len(items), maximum, dtype=torch.float32)
+    mask = torch.zeros(len(items), maximum, dtype=torch.bool)
+    for index, item in enumerate(items):
+        length = int(lengths[index])
+        hidden[index, :length] = item["hidden"]
+        host_score[index, :length] = item["host_score"]
+        mask[index, :length] = True
+    return {
+        "keys": [str(item["key"]) for item in items],
+        "hidden": hidden,
+        "host_score": host_score,
+        "mask": mask,
+        "lengths": lengths,
+        "labels": torch.tensor(
+            [int(item["label"]) for item in items], dtype=torch.float32
+        ),
+    }
 
 
 class FinalLayerDataset(torch.utils.data.Dataset):

@@ -27,6 +27,62 @@ def masked_mean(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
     return (values * validity.to(values.dtype)).sum(dim=1) / denominator
 
 
+class NormalQCalibrator(nn.Module):
+    """FIFO reservoir for normal-video evidence calibration during B4.
+
+    The reservoir contains detached training-normal values only. Its state is
+    part of the model checkpoint, so resuming a run does not silently reset the
+    normal reference distribution.
+    """
+
+    def __init__(
+        self,
+        capacity: int,
+        normal_quantile: float,
+        epsilon: float = 1e-6,
+    ) -> None:
+        super().__init__()
+        if capacity < 2:
+            raise ValueError("calibration capacity must be at least two")
+        if not 0.0 < normal_quantile < 1.0:
+            raise ValueError("normal quantile must be in (0,1)")
+        if epsilon <= 0.0:
+            raise ValueError("epsilon must be positive")
+        self.capacity = int(capacity)
+        self.normal_quantile = float(normal_quantile)
+        self.epsilon = float(epsilon)
+        self.register_buffer("reservoir", torch.zeros(self.capacity))
+        self.register_buffer("count", torch.tensor(0, dtype=torch.long))
+        self.register_buffer("cursor", torch.tensor(0, dtype=torch.long))
+        self.register_buffer("median", torch.tensor(0.0))
+        self.register_buffer("mad", torch.tensor(1.0))
+        self.register_buffer("tau_normal", torch.tensor(0.0))
+        self.register_buffer("updates", torch.tensor(0, dtype=torch.long))
+
+    @torch.no_grad()
+    def update(self, evidence_video: torch.Tensor, labels: torch.Tensor) -> None:
+        if evidence_video.ndim != 1 or labels.shape != evidence_video.shape:
+            raise ValueError("evidence_video and labels must share shape [B]")
+        values = evidence_video.detach()[labels <= 0.5]
+        values = values[torch.isfinite(values)].to(self.reservoir.dtype)
+        for value in values:
+            position = int(self.cursor)
+            self.reservoir[position].copy_(value)
+            self.cursor.fill_((position + 1) % self.capacity)
+            self.count.fill_(min(int(self.count) + 1, self.capacity))
+        if values.numel() == 0:
+            return
+        active = self.reservoir[: int(self.count)]
+        median = active.median()
+        mad = (active - median).abs().median()
+        standardized = (active - median) / (1.4826 * mad + self.epsilon)
+        tau = torch.quantile(standardized, self.normal_quantile)
+        self.median.copy_(median)
+        self.mad.copy_(mad)
+        self.tau_normal.copy_(tau)
+        self.updates.add_(1)
+
+
 class TwoAxisHostAuditor(nn.Module):
     """Bounded cross-video suppression plus zero-mean within-video reordering."""
 

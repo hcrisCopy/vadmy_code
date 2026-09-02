@@ -1,3 +1,8 @@
+param(
+    [ValidateSet("ucf", "xd", "all")]
+    [string]$Dataset = "all"
+)
+
 $ErrorActionPreference = "Stop"
 
 $repository = (Resolve-Path ".").Path
@@ -10,6 +15,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "git push failed"
 }
 
+$datasetList = if ($Dataset -eq "all") { "ucf xd" } else { $Dataset }
 $remoteCommand = @"
 set -e
 cd $remoteRepository
@@ -17,6 +23,7 @@ source /etc/network_turbo
 git pull --ff-only origin main
 source /root/miniconda3/etc/profile.d/conda.sh
 conda activate dsanet
+export WITNESS_DATASETS='$datasetList'
 bash run_instructions/run_witness_vad_f3_2_dsanet.sh --clean
 "@
 

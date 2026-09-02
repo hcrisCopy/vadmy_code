@@ -27,6 +27,13 @@ exec > >(tee -a "$OUT/stdout.log") 2>&1
 
 echo "F3.2 Witness-VAD DSANet signed-support performance gate"
 echo "output: $OUT_ABS"
+DATASETS="${WITNESS_DATASETS:-ucf xd}"
+for dataset in $DATASETS; do
+  if [[ "$dataset" != "ucf" && "$dataset" != "xd" ]]; then
+    echo "WITNESS_DATASETS may contain only ucf and xd" >&2
+    exit 2
+  fi
+done
 python -m pytest \
   vin_vad/tests/test_witness_neurons.py \
   vin_vad/tests/test_witness_router.py \
@@ -40,7 +47,7 @@ if [[ "${1:-}" == "--resume" ]]; then
   RESUME_ARGS=(--resume)
 fi
 
-for dataset in ucf xd; do
+for dataset in $DATASETS; do
   if [[ "$dataset" == "ucf" ]]; then
     ground_truth="baseline/DSANet/list/gt_ucf.npy"
   else
@@ -128,20 +135,22 @@ for dataset in ucf xd; do
 done
 
 python -m vin_vad.summarize_f3 --root "$OUT" || true
-python - "$OUT" <<'PY'
+python - "$OUT" $DATASETS <<'PY'
 import json
 import pathlib
 import sys
 
 root = pathlib.Path(sys.argv[1])
 rows = []
-for dataset, primary in (("ucf", "pooled_auc"), ("xd", "pooled_ap")):
+primary_metrics = {"ucf": "pooled_auc", "xd": "pooled_ap"}
+for dataset in sys.argv[2:]:
+    primary = primary_metrics[dataset]
     host = json.loads((root / dataset / "w0" / "evaluation" / "metrics.json").read_text())[primary]
     full = json.loads((root / dataset / "w6" / "evaluation" / "metrics.json").read_text())[primary]
     rows.append(100.0 * (full - host) - 1.0)
 metric = min(rows)
 (root / "target_margin.json").write_text(
-    json.dumps({"target_margin_pp": metric, "dataset_margins_pp": rows}, indent=2) + "\n"
+    json.dumps({"target_margin_pp": metric, "datasets": sys.argv[2:], "dataset_margins_pp": rows}, indent=2) + "\n"
 )
 print(f"{metric:.9f}")
 PY

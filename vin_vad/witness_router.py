@@ -112,10 +112,16 @@ class WitnessRouter(nn.Module):
             self.local_head(local_input).squeeze(1) + direct_witness
         )
         local_raw = local_raw.masked_fill(~validity, 0.0)
-        # The anomaly branch is structurally unable to hide a video-wide bias.
-        local_shape = local_raw - masked_mean(local_raw, validity).unsqueeze(1)
-        local_shape = local_shape.masked_fill(~validity, 0.0)
-        delta_anomaly = video_probability.unsqueeze(1) * eta_anomaly * local_shape
+        witness_support = torch.relu(local_raw)
+        veto_support = torch.relu(-local_raw)
+        local_shape = (
+            video_probability.unsqueeze(1) * witness_support
+            - (1.0 - video_probability).unsqueeze(1) * veto_support
+        ).masked_fill(~validity, 0.0)
+        # q decides the correction direction; neuron evidence decides its support.
+        # A non-zero mean is required to repair cross-video ranking, which dominates
+        # frame AUC/AP, while the support remains temporally localized.
+        delta_anomaly = eta_anomaly * local_shape
         delta_anomaly = delta_anomaly.masked_fill(~validity, 0.0)
         delta_normal = delta_normal.masked_fill(~validity, 0.0)
 
@@ -137,5 +143,7 @@ class WitnessRouter(nn.Module):
             "delta_normal": delta_normal,
             "delta_anomaly": delta_anomaly,
             "local_shape": local_shape,
+            "witness_support": witness_support,
+            "veto_support": veto_support,
             "corrected_score": corrected,
         }

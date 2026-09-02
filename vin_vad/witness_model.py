@@ -95,7 +95,7 @@ class HostVideoOnlyVAD(nn.Module):
 
 
 class NeuronOnlyRouter(nn.Module):
-    """W2: no video state; neuron evidence supplies only zero-mean local change."""
+    """W2: no video state; signed neuron evidence supplies local correction."""
 
     def __init__(self, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
         super().__init__()
@@ -123,7 +123,7 @@ class NeuronOnlyRouter(nn.Module):
         raw = torch.tanh(
             self.local_head(features).squeeze(1) + direct_witness
         ).masked_fill(~validity, 0.0)
-        local_shape = (raw - masked_mean(raw, validity).unsqueeze(1)).masked_fill(~validity, 0.0)
+        local_shape = raw
         eta_anomaly = (
             F.softplus(self.raw_eta_anomaly)
             if eta_anomaly_override is None

@@ -29,7 +29,7 @@ def test_w1_has_no_neuron_expert_and_only_nonpositive_uniform_shift() -> None:
     assert torch.count_nonzero(result["delta_anomaly"]) == 0
 
 
-def test_w2_neuron_evidence_is_host_independent_and_correction_is_zero_mean() -> None:
+def test_w2_neuron_evidence_is_host_independent_and_correction_is_local() -> None:
     hidden, host, validity, _ = inputs()
     model = NeuronOnlyWitnessVAD()
     first = model(hidden, host, validity)
@@ -37,12 +37,7 @@ def test_w2_neuron_evidence_is_host_independent_and_correction_is_zero_mean() ->
     changed_host[validity] = 1.0 - changed_host[validity]
     second = model(hidden, changed_host, validity)
     torch.testing.assert_close(first["evidence"], second["evidence"])
-    torch.testing.assert_close(
-        masked_mean(first["delta_anomaly"], validity),
-        torch.zeros(2),
-        atol=1e-7,
-        rtol=0.0,
-    )
+    assert torch.any(masked_mean(first["delta_anomaly"], validity).abs() > 1e-5)
     assert torch.count_nonzero(first["delta_normal"]) == 0
 
 

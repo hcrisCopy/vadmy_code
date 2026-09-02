@@ -24,16 +24,18 @@ def test_zero_eta_is_exact_host_identity() -> None:
     assert torch.equal(result["corrected_score"][validity], host[validity])
 
 
-def test_route_sign_and_local_zero_mean_are_structural() -> None:
+def test_video_state_routes_witness_and_veto_support() -> None:
     host, evidence, validity = inputs()
-    result = WitnessRouter()(host, evidence, validity)
-    assert torch.all(result["delta_normal"][validity] <= 0.0)
-    torch.testing.assert_close(
-        masked_mean(result["delta_anomaly"], validity),
-        torch.zeros(2),
-        atol=1e-7,
-        rtol=0.0,
-    )
+    router = WitnessRouter()
+    router.video_head.weight.data.zero_()
+    router.video_head.bias.data.fill_(8.0)
+    abnormal = router(host, evidence, validity)
+    router.video_head.bias.data.fill_(-8.0)
+    normal = router(host, evidence, validity)
+    assert torch.all(abnormal["delta_normal"][validity] <= 0.0)
+    assert torch.all(abnormal["delta_anomaly"][abnormal["witness_support"] > 0] > 0.0)
+    assert torch.all(normal["delta_anomaly"][normal["veto_support"] > 0] < 0.0)
+    assert torch.any(masked_mean(abnormal["delta_anomaly"], validity).abs() > 1e-5)
 
 
 def test_padding_does_not_enter_video_pooling_or_router() -> None:

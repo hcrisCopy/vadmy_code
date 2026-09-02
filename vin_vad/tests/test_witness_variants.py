@@ -18,12 +18,11 @@ def inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     return hidden, host, validity, labels
 
 
-def test_w1_has_no_neuron_expert_and_only_nonpositive_uniform_shift() -> None:
+def test_w1_has_no_neuron_expert_and_applies_uniform_signed_shift() -> None:
     _, host, validity, _ = inputs()
     model = HostVideoOnlyVAD()
     assert not hasattr(model, "expert")
     result = model(host, validity)
-    assert torch.all(result["delta_normal"][validity] <= 0.0)
     for row, mask in zip(result["delta_normal"], validity):
         assert torch.unique(row[mask]).numel() == 1
     assert torch.count_nonzero(result["delta_anomaly"]) == 0

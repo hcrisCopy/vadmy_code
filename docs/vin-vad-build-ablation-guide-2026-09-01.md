@@ -1,10 +1,11 @@
-# CVA-VAD v9 搭建与核心实验指南
+# WITNESS-VAD v10 接力搭建与核心实验指南
 
-> 唯一方法依据：`docs/cva-vad-final-v9-iclr-2026-09-01.md`
+> 当前唯一方法依据：`docs/witness-vad-final-v10-iclr-2026-09-02.md`。
+> B0--E1 是 CVA-VAD v9 已完成的正式记录，保留用于审计；v9 已 no-go，**禁止进入原 E2**。当前执行入口从第 5 节 F0 开始。
 >
 > 本指南只回答四件事：先写什么、每个模块如何验收、哪些实验决定 claim 是否成立、结果出来后论文能说什么。
 
-## 1. 先锁定论文要证明的三件事
+## 1. v9 原主张（已 no-go，仅保留审计）
 
 | Claim | 方法对象 | 必须由什么证据证明 |
 |---|---|---|
@@ -23,7 +24,7 @@
 
 任何代码或实验若不服务这条链，不进入主项目。
 
-## 2. 固定输入、输出和训练边界
+## 2. v9 固定输入、输出和训练边界（已归档）
 
 ```text
 输入
@@ -46,7 +47,7 @@ S_corr [B,T]         校正后的 snippet score
 - tag、文本模型和 intervention 都在检测模型训练完成后运行，不能反馈到检测分数；
 - 不接回旧方案的 detector、event chain、exact OR、平滑、膨胀、提前量、Kneedle 或 host top-k 神经元伪标签。
 
-## 3. 代码按六个可验收单元搭建
+## 3. v9 六个搭建单元（已完成/停止）
 
 建议在现有 `vin_vad/` 上实现：
 
@@ -354,7 +355,7 @@ C_{t,u,q}=v_{t,u,q}
 
 context replacement 必须固定目标 `x_t`，只替换上下文，并保存 `mu -> r -> e -> Delta -> S_corr` 的整条变化。`tags.py` 只给通过干预的 field 生成组合 tag；删除整个文件后，`S_corr` 必须逐点不变。
 
-## 4. 最小实验顺序
+## 4. v9 正式实验记录（E1 后停止）
 
 不要先跑完整消融表。下面每一关决定下一关是否值得做。
 
@@ -443,7 +444,249 @@ E2 的固定 field 继续做 A2/A3/A4。** 直白地说，模型会预测上下�
 `../vadmy_data/vin_vad/dsanet/e1/`，复现及查看命令见
 `run_instructions/RUN_VIN_VAD_E1_DSANET.md`。
 
-### E2：创新二的职责分解
+## 5. v10 当前要证明的三件事
+
+| Claim | 方法对象 | 生死证据 |
+|---|---|---|
+| C1：弱标签下可定位补充 host 的 witness neurons | witness/normal/complementarity 三因子 | Full 优于 activation-gradient 版本；selected intervention 强于 contribution-matched control |
+| C2：这些神经元能在一次训练里恢复 Universal 的有效增益 | witness-routed residual | DSANet/UCF AUC 与 DSANet/XD AP 都相对 paired host `>= +1.0 pp`；video-only 不能解释全部增益 |
+| C3：tag 描述的是时间上的功能作用，不是相关热图 | temporal tag + erase/patch | held-out fidelity、双向 patch、删除 tag 后 prediction identity |
+
+active chain 只有：
+
+\[
+\text{weak bag semantics}
+\rightarrow \text{witness neuron}
+\rightarrow \text{one-stage routed correction}
+\rightarrow \text{intervention-verified tag}.
+\]
+
+whole-video classification、多尺度 Conv1D 和 top-k MIL 都是已有构件，不单独写创新。
+
+## 6. v10 代码边界
+
+继续复用已经验收的 `vin_vad/data.py`、`vin_vad/b0_identity.py` 与
+`vin_vad/evaluate.py`，不要复制第二套数据和 evaluator。v9 的 predictor/auditor 文件保留，
+但 v10 model 不得导入它们。
+
+新增文件固定为：
+
+```text
+vin_vad/
+├── universal_autopsy.py       # F0，只读旧 cache 的信息归因
+├── witness_neurons.py         # 12 层稀疏方向 gate 与 layer weights
+├── witness_temporal.py        # 单个可学习 temporal readout
+├── witness_router.py          # 10 维 video head 与单一 routed residual
+├── witness_model.py           # 唯一训练图
+├── witness_losses.py          # video/residual-weighted MIL/dense-normal/sparse
+├── train_witness.py           # 一个 optimizer、resume、clean
+├── evaluate_witness.py        # 调用统一 evaluator，不重写指标
+├── score_witness_neurons.py   # 训练后 A/G/C/N/S
+├── intervene_witness.py       # erase/patch/matched controls
+└── tag_witness.py             # 只命名，不进入 inference
+```
+
+所有输出放在：
+
+```text
+../vadmy_data/witness_vad/dsanet/<stage>/<dataset>/
+```
+
+每个训练 checkpoint 必须包含 model、optimizer、scheduler、epoch、seed、全部随机状态、
+配置、train manifest 哈希和 host cache 哈希。seed 固定 42。正式命令在实现时写入
+`run_instructions/RUN_WITNESS_VAD_<STAGE>_DSANET.md`；指南和实际运行复制同一行命令，
+不能另外写“示例命令”。
+
+## 7. 当前从这里接力：按阶段做，做完必须停
+
+### F0：Universal 信息验尸
+
+目的：先确认 DSANet 的历史 +1 pp 到底由哪类信息产生，再写 v10 模型。只读现有 host、
+expert 和 Universal cache，不训练，不改原产物。
+
+| ID | 设置 | 必须输出 |
+|---|---|---|
+| U0 | frozen host | pooled、Cross、Within、normal FPR、abnormal-only |
+| U1 | Universal full | 同上与 paired gain |
+| U2 | U1 去 video suppression | 视频级判别的净贡献 |
+| U3 | U1 去 neuron evidence/correction | 神经元视角的净贡献 |
+| U4 | U1 去全部 temporal rules | morphology 的净贡献 |
+
+额外保存每个视频的 `video_decision`、`normal_shift`、host/neuron 十维摘要和最终 correction，
+用于判断十维透明 pooling 是否覆盖旧两个 LR 的主要判别力。
+
+验收：
+
+1. U0 必须逐点等于 B0 host；
+2. U1 必须复现同一批历史输出，而不是重新调系数；
+3. 所有 ablation 只改一个开关；
+4. U2/U3/U4 的 correction 曲线必须可逐视频查看；
+5. 结论只说信息来源，不把旧结果写成 v10 性能。
+
+远程产物：
+
+```text
+../vadmy_data/witness_vad/dsanet/f0/<dataset>/
+├── metrics.csv
+├── per_video.csv
+├── curves/
+├── information_attribution.json
+└── figures/
+```
+
+**F0 完成后必须停下汇报**：给出正式运行命令、远程产物路径、U2/U3/U4 各掉多少、
+十维 pooling 是否足够。没有这一步，不实现 F1。
+
+### F1：一次训练图与单元测试
+
+只实现 v10 最小模型，不正式跑性能。固定结构：
+
+- 12 层每层 Top-32 straight-through gate，另学 12 个 layer weights；
+- temporal readout 固定三个 dilation，不做结构搜索；
+- video head 输入严格十维；
+- `delta_minus <= 0` 且同视频为常数；
+- `delta_plus` 由 `q_v` 路由；
+- `eta_N/eta_A` 用 softplus，不做 v9 的零点投影；
+- 一个 forward、一个 backward、一个 optimizer、一个 checkpoint。
+
+必须测试：
+
+1. `eta_N/eta_A` 关闭时逐点等于 host；
+2. padding 不进入 temporal conv、pooling、MIL 或统计；
+3. normal-like 输入的 `delta_minus` 永不为正；
+4. video BCE、host-residual witness MIL、final MIL、dense-normal 和 sparse loss 都向对应参数产生有限非零梯度；
+5. resume 后下一 step 与不中断训练一致；
+6. 删除/禁用 v9 predictor 和 auditor 后 v10 仍可运行；
+7. `tag_witness.py` 不被训练和 evaluator 导入。
+
+远程产物：
+
+```text
+../vadmy_data/witness_vad/dsanet/f1/<dataset>/
+├── unit_tests.json
+├── gradient_audit.json
+├── identity_audit.json
+└── resume_audit.json
+```
+
+**F1 完成后必须停下汇报**：说清各项 loss 分别训练谁、是否真的只有一个 optimizer、
+identity/gradient/resume 是否通过。结构不过关不跑 F2。
+
+### F2：DSANet 正式性能生死门
+
+UCF/XD 使用同一结构、同一超参数和 seed 42。每个变体独立训练，使用最后一轮 checkpoint，
+禁止测试指标选 epoch。
+
+| ID | 设置 | reviewer 问题 |
+|---|---|---|
+| W0 | Host | paired executable 起点 |
+| W1 | Host + video-only | 现有 whole-video classification 能解释多少 |
+| W2 | Host + neuron-only | 神经元曲线是否有独立增量 |
+| W3 | Full 去 host-residual witness weighting | 为什么必须学习 host 剩余错误 |
+| W4 | Full 去 dense-normal loss | 正常标签不对称是否必要 |
+| W5 | Full 去 temporal readout | learned temporal bias 是否只是装饰 |
+| W6 | Full WITNESS-VAD | 是否恢复硬 SOTA |
+
+执行顺序：先 W0/W1/W2/W6。只有 W6 两数据集都 `>= +1.0 pp` 且 `W6-W1 >= 0.2 pp`，
+再跑 W3/W4/W5；否则先依据 F0 查丢失的信息，禁止展开消融。
+
+必须报告：frame AUC/AP、Cross-AUC、video-constant AP、Macro Within-AUC、
+abnormal-video-only AUC/AP、normal FPR@95% TPR、平均/最大绝对 logit correction、`q_v`
+视频分类结果。mAP 不作为项目硬目标，但保存原 evaluator 能直接给出的结果，不为它调参。
+
+远程产物：
+
+```text
+../vadmy_data/witness_vad/dsanet/f2/<dataset>/<variant>/
+├── checkpoints/last.pt
+├── train_log.csv
+├── metrics.json
+├── per_video.csv
+├── curves/
+└── config.json
+```
+
+**F2 完成后必须停下汇报**：先说 UCF/XD 是否都过 +1 pp，再说增益主要来自 normal
+suppression 还是 abnormal-video 内部排序。没过硬门槛，不跑解释图和第二 host。
+
+### F3：Witness neuron 与功能干预
+
+只在 W6 通过后做。先保存每个坐标的 `A/G/C/N/S`，再固定 top neurons；不得看测试干预
+结果后换坐标。
+
+| ID | 实验 | 必须控制 |
+|---|---|---|
+| I1 | selected erase | global random、same-layer random |
+| I2 | normal→anomaly 与 anomaly→normal directional patch | matched video、random donor |
+| I3 | selected patch | contribution-matched non-selected |
+| I4 | held-out tag retrieval | activation-only tag、random tag |
+
+patch 只改 adapter 输入的缓存 CLS 坐标，host score 固定。论文只允许说“witness neuron
+导致 adapter correction 变化”，不能说修改了原 DSANet 内部决策。
+
+远程产物：
+
+```text
+../vadmy_data/witness_vad/dsanet/f3/<dataset>/
+├── neuron_scores.csv
+├── fixed_neuron_set.json
+├── intervention_metrics.json
+├── intervention_pairs.csv
+├── tags.csv
+└── figures/
+```
+
+**F3 完成后必须停下汇报**：selected-control effect gap、双向 logit shift/flip rate、
+失败 tag 和成功 tag 都要展示，不挑漂亮案例。
+
+### F4：最小泛化
+
+DSANet 全部通过后只接一个第二 host，优先选已经有稳定 score cache、同一 CLIP hidden 对齐
+最干净的 host。先原样复用全部超参数，再决定是否值得扩四个 baseline。
+
+只回答：
+
+1. 同一方法是否在第二 host 两数据集保持正增益；
+2. witness neuron 的层分布和 intervention effect 是否仍成立；
+3. 不要求 neuron ID 完全相同，报告 top-set overlap 与功能分数相关性。
+
+**F4 完成后必须停下汇报**。第二 host 不成立就不写 universal 或 host-agnostic。
+
+## 8. Reviewer 最可能问什么，只保留这些回答
+
+| 质疑 | 核心实验 |
+|---|---|
+| 只是 whole-video classification | W1 vs W6 |
+| 只是重写 Universal | F0 信息验尸；训练阶段/模块/推理规则对比 |
+| neuron 只是 activation correlation | W3、I1、I3 |
+| 正常视频整体压低冒充定位 | Cross/Within/FPR/abnormal-only 分轴 |
+| 三因子是硬凑公式 | 分别保存 A/G/C/N；W3 与 matched controls |
+| temporal block 是普通模块 | W5；不把它列为贡献 |
+| tag 是看图说话 | held-out retrieval、失败案例、prediction identity |
+| 首次 video neuron 的 claim 撞 V-FIND | 不作该 claim；明确 WSVAD latent witness 适配 |
+| 一会训练一会冻结 | F1 单图/单 optimizer/checkpoint 审计 |
+
+## 9. 当前执行清单
+
+```text
+[x] v9 B0-B4：结构与 evaluator 审计
+[x] v9 E1：contextual-directional evidence no-go
+[x] v10：领域/沈飞路线/Universal 信息流重调研与方案冻结
+[ ] F0：Universal 信息验尸（下一阶段）
+[ ] F1：v10 单训练图实现与单元测试
+[ ] F2：W0/W1/W2/W6 性能生死门
+[ ] F2 通过后：W3/W4/W5 核心消融
+[ ] F3：神经元排序、erase/patch、tag
+[ ] F4：第二 host 最小泛化
+```
+
+停止增加实验的标准：三条 claim 各有一个直接对照、一个机制量和一个匹配干预。禁止加入
+context window 搜索、event chain、伪标签 student、两套视频 LR、post-hoc morphology、
+数据集专属结构或无关超参数笛卡尔积。
+
+## 附录 A：v9 已停止的后续计划（不得执行）
+
+### A.1：原 E2 两轴职责分解
 
 先只跑四项：
 
@@ -472,7 +715,7 @@ A4 确实优于 A0 和两个单分支后，再补三个必要结构消融：
 
 `entmax -> softmax` 只在论文强调“稀疏 field”时补做；它不决定两轴 auditor 是否成立。
 
-### E3：最近方法的同口径控制
+### A.2：原 E3 最近方法同口径控制
 
 这是新颖性实验，不是普通 baseline 表。固定 A0 host、hidden、loss、budget 和 evaluator，只替换 evidence/controller：
 
@@ -485,7 +728,7 @@ A4 确实优于 A0 和两个单分支后，再补三个必要结构消融：
 
 公开论文数字不能替代这个实验，因为 backbone、host、输入与 evaluator 均不同。
 
-### E4：创新三的功能验证
+### A.3：原 E4 功能验证
 
 只做能区分“功能单元”和“相关维度”的实验：
 
@@ -498,7 +741,7 @@ A4 确实优于 A0 和两个单分支后，再补三个必要结构消融：
 
 关键量不是 heatmap 漂不漂亮，而是 `abs(Delta change)`、目标/非目标位置差异，以及 selected-control effect gap。I2/I3 不强于贡献匹配控制时，只能把 tag 称为描述，不能称为功能解释。
 
-### E5：最小泛化验证
+### A.4：原 E5 最小泛化验证
 
 主实验先完成 UCF-Crime、XD-Violence 和两个已接入 host。不要先扩成多 host 笛卡尔积。
 
@@ -509,7 +752,7 @@ A4 确实优于 A0 和两个单分支后，再补三个必要结构消融：
 
 第一项成立才可以声称 correction field 可迁移；第二项失败不影响主方法，但必须如实报告。
 
-## 5. Reviewer 最可能问什么，哪一个实验回答
+### A.5：原 reviewer 对照表
 
 | Reviewer 质疑 | 唯一核心回答 |
 |---|---|
@@ -523,7 +766,7 @@ A4 确实优于 A0 和两个单分支后，再补三个必要结构消融：
 | 只对一个 host 有效 | 第二 host 和 source-field -> target-host transfer |
 | 文本偷偷参与检测 | 删除 `tags.py` 后逐点 identity test |
 
-## 6. 指标不能混着解释
+### A.6：原指标解释边界
 
 | 指标 | 只允许支撑什么 |
 |---|---|
@@ -538,33 +781,33 @@ A4 确实优于 A0 和两个单分支后，再补三个必要结构消融：
 
 禁止用 pooled AUC 上升直接写“定位更准”，也禁止用零均值公式代替 Macro Within 实验。
 
-## 7. 论文最终只需要的结果
+### A.7：原论文结果规划
 
-### 表 1：主结果
+#### 原表 1：主结果
 
 每个 dataset-host 组合只列：Host、完整方法、pooled、Cross、Within、normal FPR、平均绝对 correction。
 
-### 表 2：机制与结构消融
+#### 原表 2：机制与结构消融
 
 上半部分 C0–C4；下半部分 A0、A2、A3、A4、A1、A5、A6。每一行对应一个明确 claim，不再增加旧模块。
 
-### 表 3：解释与迁移
+#### 原表 3：解释与迁移
 
 列 context replacement、erase、patch、三类控制、tag fidelity、source-to-target transfer。
 
-### 图 1：动机例子
+#### 原图 1：动机例子
 
 一个正常误报案例展示 host 高分但 normal support 强，因此 cross branch 下压；一个异常视频展示 contextual violation 如何经 within branch 改变时间排序。
 
-### 图 2：方法总图
+#### 原图 2：方法总图
 
 只画四步：masked normal expectation -> directional field -> cross/within correction -> intervention-verified field。
 
-### 图 3：机制证据
+#### 原图 3：机制证据
 
 同一视频对齐展示 raw activation、预测区间、directional violation、两项 correction、最终 score，并加入 selected 与 matched-control patch 结果。
 
-## 8. 实际执行清单
+### A.8：原执行清单
 
 ```text
 [x] B0 数据审计、host identity、统一 evaluator（DSANet；UCF/XD 均通过）
@@ -583,7 +826,7 @@ A4 确实优于 A0 和两个单分支后，再补三个必要结构消融：
 
 停止增加实验的标准很简单：三条 claim 都已经有一个直接对照、一个机制量和一个失败可解释的结果。不要做事件窗口扫描、所有层组合、预算笛卡尔积、额外 smoothing、装饰性 heatmap，或把旧方案模块逐个接回来。
 
-## 9. 结果出来后的诚实收缩规则
+### A.9：原收缩规则
 
 - C3 不优于 C1/C4：不能讲 context-conditional correction neurons；
 - A2 有效、A3 无效：保留 cross audit，论文只讲正常误报审计；

@@ -61,6 +61,7 @@ def main() -> None:
         default="last_checkpoint_only",
     )
     parser.add_argument("--no-curve-cache", action="store_true")
+    parser.add_argument("--eta-anomaly-override", type=float, default=None)
     args = parser.parse_args()
 
     output = Path(args.out_dir)
@@ -71,6 +72,11 @@ def main() -> None:
         raise ValueError("w0 must not receive a checkpoint")
     if args.variant != "w0" and not args.checkpoint:
         raise ValueError(f"{args.variant} requires a checkpoint")
+    if args.eta_anomaly_override is not None:
+        if args.variant not in {"w2", "w6"}:
+            raise ValueError("eta-anomaly-override is only valid for w2 and w6")
+        if args.eta_anomaly_override <= 0.0:
+            raise ValueError("eta-anomaly-override must be positive")
     signature = {
         "dataset": args.dataset,
         "variant": args.variant,
@@ -85,6 +91,7 @@ def main() -> None:
         "target_tpr": args.target_tpr,
         "post_processing": "none",
         "selection_policy": args.selection_policy,
+        "eta_anomaly_override": args.eta_anomaly_override,
     }
     signature_path = output / "signature.json"
     if signature_path.exists() and json.loads(signature_path.read_text(encoding="utf-8")) != signature:
@@ -171,6 +178,7 @@ def main() -> None:
                             torch.from_numpy(hidden_array).unsqueeze(0).to(device),
                             host_tensor,
                             validity,
+                            eta_anomaly_override=args.eta_anomaly_override,
                         )
                     )
                 corrected = result["corrected_score"][0].cpu().numpy().astype(np.float32)
@@ -245,6 +253,7 @@ def main() -> None:
             "test_videos": len(rows),
             "test_frames": len(gt),
             "post_processing": "none",
+            "eta_anomaly_override": args.eta_anomaly_override,
             "test_used_for_selection": args.selection_policy == "test_primary_metric_best",
             "checkpoint_epoch": (
                 None if args.variant == "w0" else int(checkpoint["epoch"])

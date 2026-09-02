@@ -107,7 +107,11 @@ class NeuronOnlyRouter(nn.Module):
         self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
 
     def forward(
-        self, host_score: torch.Tensor, evidence: torch.Tensor, validity: torch.Tensor
+        self,
+        host_score: torch.Tensor,
+        evidence: torch.Tensor,
+        validity: torch.Tensor,
+        eta_anomaly_override: float | None = None,
     ) -> dict[str, torch.Tensor]:
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
@@ -120,11 +124,17 @@ class NeuronOnlyRouter(nn.Module):
             self.local_head(features).squeeze(1) + direct_witness
         ).masked_fill(~validity, 0.0)
         local_shape = (raw - masked_mean(raw, validity).unsqueeze(1)).masked_fill(~validity, 0.0)
-        delta = F.softplus(self.raw_eta_anomaly) * local_shape
+        eta_anomaly = (
+            F.softplus(self.raw_eta_anomaly)
+            if eta_anomaly_override is None
+            else host_score.new_tensor(eta_anomaly_override)
+        )
+        delta = eta_anomaly * local_shape
         clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         corrected = host_score + torch.sigmoid(torch.logit(clipped) + delta) - clipped
         return {
             "video_probability": torch.ones(host_score.shape[0], device=host_score.device),
+            "eta_anomaly": eta_anomaly,
             "delta_normal": torch.zeros_like(delta),
             "delta_anomaly": delta,
             "local_shape": local_shape,
@@ -139,10 +149,22 @@ class NeuronOnlyWitnessVAD(nn.Module):
         self.router = NeuronOnlyRouter(eta_anomaly=eta_anomaly)
 
     def forward(
-        self, hidden: torch.Tensor, host_score: torch.Tensor, validity: torch.Tensor
+        self,
+        hidden: torch.Tensor,
+        host_score: torch.Tensor,
+        validity: torch.Tensor,
+        eta_anomaly_override: float | None = None,
     ) -> dict[str, torch.Tensor]:
         expert = self.expert(hidden, validity)
-        return {**expert, **self.router(host_score, expert["evidence"], validity)}
+        return {
+            **expert,
+            **self.router(
+                host_score,
+                expert["evidence"],
+                validity,
+                eta_anomaly_override=eta_anomaly_override,
+            ),
+        }
 
 
 def build_witness_variant(

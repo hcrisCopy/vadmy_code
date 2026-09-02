@@ -475,6 +475,20 @@ W0 是固定 host，不选择 epoch；W1/W2/W6 的 best epoch 在 UCF 为 3/2/20
 ../vadmy_data/witness_vad/dsanet/f3_performance/
 ~~~
 
+### F3.1：失败后的校正强度探针
+
+F3 NO-GO 后先复用 W2/W6 best checkpoint，固定推理时 `eta_A` 为 0.25/0.35/0.60。该探针不训练，只判断失败是否主要因为局部校正力度不足。
+
+~~~bash
+bash run_instructions/run_witness_vad_f3_eta_probe_dsanet.sh --clean
+~~~
+
+若固定强度在 UCF 仍不能达到 `+0.2 pp`，停止调 `eta_A`，下一步必须修改 witness evidence/router 公式。结果写入：
+
+~~~text
+../vadmy_data/witness_vad/dsanet/f3_eta_probe/
+~~~
+
 ---
 
 ## 9. F4：审稿人真正需要的结构消融

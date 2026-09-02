@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import torch
 
+from vin_vad.witness_model import NeuronOnlyRouter
 from vin_vad.witness_router import WitnessRouter, masked_mean, video_summary
 
 
@@ -49,3 +50,17 @@ def test_padding_does_not_enter_video_pooling_or_router() -> None:
     torch.testing.assert_close(first_summary, second_summary)
     for name in ("video_probability", "delta_normal", "delta_anomaly"):
         torch.testing.assert_close(first[name], second[name])
+
+
+def test_neuron_only_eta_override_changes_only_correction_strength() -> None:
+    host, evidence, validity = inputs()
+    router = NeuronOnlyRouter(eta_anomaly=0.25)
+    weak = router(host, evidence, validity, eta_anomaly_override=0.25)
+    strong = router(host, evidence, validity, eta_anomaly_override=0.60)
+    torch.testing.assert_close(weak["local_shape"], strong["local_shape"])
+    torch.testing.assert_close(
+        strong["delta_anomaly"],
+        weak["delta_anomaly"] * (0.60 / 0.25),
+        atol=1e-6,
+        rtol=1e-6,
+    )

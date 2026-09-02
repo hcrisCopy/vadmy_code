@@ -182,6 +182,12 @@ a_t=\sum_{u,q}\pi_{u,q}v_{t,u,q}.
 
 B2 不能靠“异常视频的 `e` 更大”验收。它是否提供增量检测信息，只由后面的 C0–C4 决定。
 
+实现纪律：running statistics 使用 stop-gradient 的 batch normal median/MAD 做
+EMA，正式 momentum 固定为 0.05，不做数据集级扫描。B2 的 `omega` 按方案从同值
+初始化，所以初始 `pi` 合法但稠密；稀疏 support 必须由 B4 的校正目标联合学出，
+禁止在 B2 根据异常视频或测试指标预选 top-K。B2 正式命令与产物见
+`run_instructions/RUN_VIN_VAD_B2_DSANET.md`。
+
 ### B3：两轴 host auditor
 
 在 `host_auditor.py` 独立实现两个分支。

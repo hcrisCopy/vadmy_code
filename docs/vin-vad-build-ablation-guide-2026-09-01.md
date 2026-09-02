@@ -257,6 +257,10 @@ S^{corr}_{v,t}=\sigma\!\left(
 
 不要用“zero-mean 所以只改善定位”作为验收。sigmoid 后并不严格保持视频平均概率；必须通过 A2/A3 的 Cross/Within 指标判断真实作用。
 
+B3 只做结构审计，正式命令中的 `alpha/kappa` 是测试公式边界用的探针值，不是
+模型选择结果，也不允许据此写性能结论。正式命令和产物见
+`run_instructions/RUN_VIN_VAD_B3_DSANET.md`。
+
 ### B4：统一训练目标
 
 在 `losses.py` 和 `train.py` 实现：

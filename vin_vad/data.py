@@ -265,6 +265,39 @@ class AuditorTrainingDataset(torch.utils.data.Dataset):
         }
 
 
+class HostScoreTrainingDataset(torch.utils.data.Dataset):
+    """Host-only W1 data path; it never opens hidden-state archives."""
+
+    def __init__(self, manifest: str, maximum_length: int) -> None:
+        self.frame = pd.read_csv(manifest)
+        self.maximum_length = int(maximum_length)
+        required = {"key", "binary_label", "host_score_path", "valid_snippets"}
+        missing = required - set(self.frame.columns)
+        if missing:
+            raise ValueError(f"{manifest}: missing columns {sorted(missing)}")
+
+    def __len__(self) -> int:
+        return len(self.frame)
+
+    def __getitem__(self, index: int) -> dict[str, object]:
+        row = self.frame.iloc[index]
+        length = int(row.valid_snippets)
+        host_score = np.asarray(
+            np.load(str(row.host_score_path), allow_pickle=False), dtype=np.float32
+        ).reshape(-1)[:length]
+        if len(host_score) != length:
+            raise ValueError(f"{row.host_score_path}: host-score length mismatch")
+        if length > self.maximum_length:
+            host_score = uniform_temporal_average(
+                host_score[:, None], self.maximum_length
+            )[:, 0]
+        return {
+            "key": str(row.key),
+            "host_score": torch.from_numpy(host_score.copy()),
+            "label": int(row.binary_label),
+        }
+
+
 def collate_auditor_training(items: list[dict[str, object]]) -> dict[str, object]:
     """Right-pad a B4 batch; the boolean mask is authoritative everywhere."""
     lengths = torch.tensor([len(item["host_score"]) for item in items], dtype=torch.long)
@@ -280,6 +313,26 @@ def collate_auditor_training(items: list[dict[str, object]]) -> dict[str, object
     return {
         "keys": [str(item["key"]) for item in items],
         "hidden": hidden,
+        "host_score": host_score,
+        "mask": mask,
+        "lengths": lengths,
+        "labels": torch.tensor(
+            [int(item["label"]) for item in items], dtype=torch.float32
+        ),
+    }
+
+
+def collate_host_score_training(items: list[dict[str, object]]) -> dict[str, object]:
+    lengths = torch.tensor([len(item["host_score"]) for item in items], dtype=torch.long)
+    maximum = int(lengths.max())
+    host_score = torch.zeros(len(items), maximum, dtype=torch.float32)
+    mask = torch.zeros(len(items), maximum, dtype=torch.bool)
+    for index, item in enumerate(items):
+        length = int(lengths[index])
+        host_score[index, :length] = item["host_score"]
+        mask[index, :length] = True
+    return {
+        "keys": [str(item["key"]) for item in items],
         "host_score": host_score,
         "mask": mask,
         "lengths": lengths,

@@ -139,6 +139,10 @@ u_{v,t}=\tanh r_\psi(s^h_{v,t},e_{v,t}),\qquad
 \qquad \eta_A=\operatorname{softplus}(\tilde\eta_A)>0.
 \]
 
+其中 `r_psi` 由视频内标准化的 witness evidence 直连项与逐 snippet 小型 MLP 残差相加。
+直连项保留 Universal 已验证的 neuron ordering 信息，避免强 host 下局部头因梯度太弱而忽略
+witness；MLP 只学习 host 与 witness 的局部交互，不再增加第二套时序网络。
+
 最终：
 
 \[

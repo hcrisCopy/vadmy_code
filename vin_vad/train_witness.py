@@ -14,9 +14,14 @@ import torch
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
-from vin_vad.data import AuditorTrainingDataset, collate_auditor_training
-from vin_vad.witness_losses import witness_objective
-from vin_vad.witness_model import WitnessVAD
+from vin_vad.data import (
+    AuditorTrainingDataset,
+    HostScoreTrainingDataset,
+    collate_auditor_training,
+    collate_host_score_training,
+)
+from vin_vad.witness_losses import variant_objective
+from vin_vad.witness_model import build_witness_variant
 
 
 def seed_everything(seed: int) -> None:
@@ -57,7 +62,10 @@ def ensure_training_paths(manifest: Path, output: Path) -> None:
 
 def comparable_configuration(config: dict[str, object]) -> dict[str, object]:
     """Git provenance is recorded but is not a training hyperparameter."""
-    return {key: value for key, value in config.items() if key != "git_commit"}
+    comparable = {key: value for key, value in config.items() if key != "git_commit"}
+    comparable.setdefault("variant", "w6")
+    comparable.setdefault("num_workers", 0)
+    return comparable
 
 
 def balanced_indices(frame: pd.DataFrame, per_class: int) -> tuple[list[int], list[int]]:
@@ -73,10 +81,11 @@ def balanced_indices(frame: pd.DataFrame, per_class: int) -> tuple[list[int], li
 
 
 def class_loader(
-    dataset: AuditorTrainingDataset,
+    dataset: AuditorTrainingDataset | HostScoreTrainingDataset,
     indices: list[int],
     batch_size: int,
     seed: int,
+    num_workers: int,
 ) -> DataLoader:
     generator = torch.Generator().manual_seed(seed)
     return DataLoader(
@@ -84,17 +93,21 @@ def class_loader(
         batch_size=batch_size,
         shuffle=True,
         drop_last=True,
-        num_workers=0,
+        num_workers=num_workers,
         pin_memory=True,
         generator=generator,
-        collate_fn=collate_auditor_training,
+        collate_fn=(
+            collate_host_score_training
+            if isinstance(dataset, HostScoreTrainingDataset)
+            else collate_auditor_training
+        ),
     )
 
 
 def merge_balanced_batches(
     normal: dict[str, object], abnormal: dict[str, object]
 ) -> dict[str, object]:
-    maximum = max(normal["hidden"].shape[1], abnormal["hidden"].shape[1])
+    maximum = max(normal["host_score"].shape[1], abnormal["host_score"].shape[1])
 
     def pad(value: torch.Tensor, target: int) -> torch.Tensor:
         if value.shape[1] == target:
@@ -103,18 +116,22 @@ def merge_balanced_batches(
         shape[1] = target - value.shape[1]
         return torch.cat([value, value.new_zeros(shape)], dim=1)
 
-    return {
-        "hidden": torch.cat([pad(normal["hidden"], maximum), pad(abnormal["hidden"], maximum)]),
+    merged = {
         "host_score": torch.cat(
             [pad(normal["host_score"], maximum), pad(abnormal["host_score"], maximum)]
         ),
         "mask": torch.cat([pad(normal["mask"], maximum), pad(abnormal["mask"], maximum)]),
         "labels": torch.cat([normal["labels"], abnormal["labels"]]),
     }
+    if "hidden" in normal and "hidden" in abnormal:
+        merged["hidden"] = torch.cat(
+            [pad(normal["hidden"], maximum), pad(abnormal["hidden"], maximum)]
+        )
+    return merged
 
 
 def checkpoint_payload(
-    model: WitnessVAD,
+    model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler,
     epoch: int,
@@ -138,6 +155,7 @@ def checkpoint_payload(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train the single-graph Witness-VAD model")
     parser.add_argument("--dataset", required=True, choices=("ucf", "xd"))
+    parser.add_argument("--variant", required=True, choices=("w1", "w2", "w6"))
     parser.add_argument("--train-manifest", required=True)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--epochs", type=int, required=True)
@@ -145,6 +163,7 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, required=True)
     parser.add_argument("--maximum-length", type=int, required=True)
     parser.add_argument("--videos-per-class", type=int, default=0)
+    parser.add_argument("--num-workers", type=int, required=True)
     parser.add_argument("--active-neurons", type=int, required=True)
     parser.add_argument("--temporal-width", type=int, required=True)
     parser.add_argument("--eta-normal", type=float, required=True)
@@ -204,7 +223,11 @@ def main() -> None:
     else:
         config_path.write_text(json.dumps(configuration, indent=2), encoding="utf-8")
 
-    dataset = AuditorTrainingDataset(str(manifest), maximum_length=args.maximum_length)
+    dataset = (
+        HostScoreTrainingDataset(str(manifest), maximum_length=args.maximum_length)
+        if args.variant == "w1"
+        else AuditorTrainingDataset(str(manifest), maximum_length=args.maximum_length)
+    )
     normal_indices, abnormal_indices = balanced_indices(
         dataset.frame, args.videos_per_class
     )
@@ -212,7 +235,8 @@ def main() -> None:
     if min(len(normal_indices), len(abnormal_indices)) < half_batch:
         raise ValueError("not enough videos per class for one balanced batch")
 
-    model = WitnessVAD(
+    model = build_witness_variant(
+        args.variant,
         active=args.active_neurons,
         temporal_width=args.temporal_width,
         eta_normal=args.eta_normal,
@@ -245,10 +269,18 @@ def main() -> None:
         if args.stop_after_epoch and epoch >= args.stop_after_epoch:
             break
         normal_loader = class_loader(
-            dataset, normal_indices, half_batch, args.seed + 1000 * epoch
+            dataset,
+            normal_indices,
+            half_batch,
+            args.seed + 1000 * epoch,
+            args.num_workers,
         )
         abnormal_loader = class_loader(
-            dataset, abnormal_indices, half_batch, args.seed + 1000 * epoch + 1
+            dataset,
+            abnormal_indices,
+            half_batch,
+            args.seed + 1000 * epoch + 1,
+            args.num_workers,
         )
         steps = min(len(normal_loader), len(abnormal_loader))
         if steps == 0:
@@ -274,18 +306,33 @@ def main() -> None:
         )
         for step, (normal, abnormal) in enumerate(progress, start=1):
             batch = merge_balanced_batches(normal, abnormal)
-            hidden = batch["hidden"].to(device, non_blocking=True)
+            hidden = (
+                None
+                if args.variant == "w1"
+                else batch["hidden"].to(device, non_blocking=True)
+            )
             host_score = batch["host_score"].to(device, non_blocking=True)
             validity = batch["mask"].to(device, non_blocking=True)
             labels = batch["labels"].to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
-            result = model(hidden, host_score, validity)
-            losses = witness_objective(
+            result = (
+                model(host_score, validity)
+                if args.variant == "w1"
+                else model(hidden, host_score, validity)
+            )
+            expert = getattr(model, "expert", None)
+            sparsity = (
+                None
+                if expert is None
+                else expert.neurons.sparsity_surrogate()
+            )
+            losses = variant_objective(
+                args.variant,
                 result,
                 host_score,
                 validity,
                 labels,
-                model.expert.neurons.sparsity_surrogate(),
+                sparsity,
                 lambda_witness=args.lambda_witness,
                 lambda_final=args.lambda_final,
                 lambda_normal=args.lambda_normal,

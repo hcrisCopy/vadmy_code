@@ -40,6 +40,7 @@ fi
 
 python -m vin_vad.train_witness \
   --dataset ucf \
+  --variant w6 \
   --train-manifest ../vadmy_data/vin_vad/dsanet/b0/ucf/evaluation/train_aligned.csv \
   --out-dir "$OUT/reference" \
   --epochs 2 \
@@ -47,6 +48,7 @@ python -m vin_vad.train_witness \
   --batch-size 8 \
   --maximum-length 256 \
   --videos-per-class 8 \
+  --num-workers 0 \
   --active-neurons 32 \
   --temporal-width 64 \
   --eta-normal 1.0 \
@@ -66,6 +68,7 @@ python -m vin_vad.train_witness \
 
 python -m vin_vad.train_witness \
   --dataset ucf \
+  --variant w6 \
   --train-manifest ../vadmy_data/vin_vad/dsanet/b0/ucf/evaluation/train_aligned.csv \
   --out-dir "$OUT/resumed" \
   --epochs 2 \
@@ -73,6 +76,7 @@ python -m vin_vad.train_witness \
   --batch-size 8 \
   --maximum-length 256 \
   --videos-per-class 8 \
+  --num-workers 0 \
   --active-neurons 32 \
   --temporal-width 64 \
   --eta-normal 1.0 \
@@ -96,6 +100,7 @@ fi
 
 python -m vin_vad.train_witness \
   --dataset ucf \
+  --variant w6 \
   --train-manifest ../vadmy_data/vin_vad/dsanet/b0/ucf/evaluation/train_aligned.csv \
   --out-dir "$OUT/resumed" \
   --epochs 2 \
@@ -103,6 +108,7 @@ python -m vin_vad.train_witness \
   --batch-size 8 \
   --maximum-length 256 \
   --videos-per-class 8 \
+  --num-workers 0 \
   --active-neurons 32 \
   --temporal-width 64 \
   --eta-normal 1.0 \

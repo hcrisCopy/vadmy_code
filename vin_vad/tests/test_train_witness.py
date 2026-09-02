@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import pandas as pd
+import numpy as np
 import torch
 
+from vin_vad.data import HostScoreTrainingDataset
 from vin_vad.train_witness import (
     balanced_indices,
     comparable_configuration,
@@ -48,3 +50,20 @@ def test_rng_checkpoint_tensors_are_cpu_compatible() -> None:
     state = torch.get_rng_state()
     torch.set_rng_state(state.cpu())
     assert state.dtype == torch.uint8
+
+
+def test_w1_host_dataset_never_opens_hidden_archive(tmp_path) -> None:
+    score_path = tmp_path / "score.npy"
+    np.save(score_path, np.asarray([0.1, 0.2, 0.3], dtype=np.float32))
+    manifest = tmp_path / "train_aligned.csv"
+    pd.DataFrame(
+        [{
+            "key": "video",
+            "binary_label": 0,
+            "host_score_path": score_path,
+            "hidden_path": tmp_path / "does_not_exist.npz",
+            "valid_snippets": 3,
+        }]
+    ).to_csv(manifest, index=False)
+    item = HostScoreTrainingDataset(str(manifest), maximum_length=256)[0]
+    torch.testing.assert_close(item["host_score"], torch.tensor([0.1, 0.2, 0.3]))

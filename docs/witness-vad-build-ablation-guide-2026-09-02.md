@@ -85,6 +85,10 @@
 | video summary | 10 维：host 与 neuron 各 mean/std/top10/max，加 corr 与 MAE |
 | model selection | last checkpoint |
 
+从 Universal 只继承三个已验证且不引入拼装的数值细节：active-neuron 求和除以
+`sqrt(32)`、softplus ranking margin、视频内标准化 neuron evidence 的局部直连。
+它们分别稳定尺度、保留难样本梯度、保证 witness 不会被强 host 忽略；不恢复测试期拟合和手工后处理。
+
 允许的调参只有：
 
 - 若 Full 与 video-only 差距不足，仅试 η_A ∈ {0.15, 0.25, 0.35}。
@@ -428,6 +432,8 @@ bash run_instructions/run_witness_vad_f3_dsanet.sh
 - W6 − W1：两个数据集都 ≥ +0.2pp，证明不是只靠压低正常视频。
 - W2 − W0：两个数据集都 > 0，证明神经元分支本身有信息。
 - normal FPR 改善不能伴随异常视频内排序的明显下降；同时报告 within-video AUC、abnormal-only AUC/AP。
+
+这里预先把“明显下降”定义为 Macro-Within-AUC 下降超过 0.2 pp，避免结果出来后改口径。
 
 若失败，只允许按第 2 节的小范围单变量规则调整一次。仍失败则停止：方法尚未 work，不做可解释性包装。
 

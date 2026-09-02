@@ -11,6 +11,13 @@ def masked_mean(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
     return (values * validity.to(values.dtype)).sum(dim=1) / denominator
 
 
+def masked_standardize(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
+    mean = masked_mean(values, validity).unsqueeze(1)
+    centered = (values - mean).masked_fill(~validity, 0.0)
+    variance = masked_mean(centered.square(), validity).unsqueeze(1)
+    return (centered / torch.sqrt(variance + 1e-6)).masked_fill(~validity, 0.0)
+
+
 def masked_summary(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
     rows = []
     for value, mask in zip(values, validity):
@@ -100,7 +107,10 @@ class WitnessRouter(nn.Module):
             [host_clipped, evidence_clipped, host_clipped - evidence_clipped, host_clipped * evidence_clipped],
             dim=1,
         )
-        local_raw = torch.tanh(self.local_head(local_input).squeeze(1))
+        direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
+        local_raw = torch.tanh(
+            self.local_head(local_input).squeeze(1) + direct_witness
+        )
         local_raw = local_raw.masked_fill(~validity, 0.0)
         # The anomaly branch is structurally unable to hide a video-wide bias.
         local_shape = local_raw - masked_mean(local_raw, validity).unsqueeze(1)

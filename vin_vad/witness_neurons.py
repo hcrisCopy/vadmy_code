@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import nn
 
@@ -52,7 +54,9 @@ class SignedTopKWitnessNeurons(nn.Module):
         normalized = self.normalization(hidden)
         gate = self.gates(neuron_keep_mask)
         coordinate_weights = gate * self.signed_weights
-        layer_evidence = torch.einsum("btld,ld->btl", normalized, coordinate_weights)
+        layer_evidence = torch.einsum(
+            "btld,ld->btl", normalized, coordinate_weights
+        ) / math.sqrt(self.active)
         layer_evidence = layer_evidence.masked_fill(~validity.unsqueeze(-1), 0.0)
         layer_probability = torch.softmax(self.layer_logits, dim=0)
         temporal_input = layer_evidence * (self.layers * layer_probability.view(1, 1, -1))

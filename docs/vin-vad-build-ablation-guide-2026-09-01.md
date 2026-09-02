@@ -261,6 +261,26 @@ B3 只做结构审计，正式命令中的 `alpha/kappa` 是测试公式边界�
 模型选择结果，也不允许据此写性能结论。正式命令和产物见
 `run_instructions/RUN_VIN_VAD_B3_DSANET.md`。
 
+#### B3 正式结果（DSANet，2026-09-02）
+
+| Dataset | identity error | cross/within 零点梯度绝对值 | within mean error | sign/bound/branch error | padding output/budget error |
+|---|---:|---:|---:|---:|---:|
+| UCF-Crime | 0 | 2.49e-7 / 1.61e-5 | 2.79e-9 | 0 | 0 / 0 |
+| XD-Violence | 0 | 1.65e-3 / 3.42e-4 | 6.52e-9 | 0 | 0 / 0 |
+
+B3 单元测试 6 项全部通过。两个 `kappa=0` 时输出与正式 DSANet host 分数逐点
+相等且梯度非零；cross 始终是同一视频内不大于零的常数项，within 在有效位置严格零均值；
+两项满足上界且可独立关闭；padding 不进入 pooling、中心化或 correction budget。
+正式审计只用了 B0/B2 的正常训练样例，没有读取测试集。
+
+UCF 的 cross 零点梯度较小，是因为 B3 用未标定的中性 `q` statistics 做代数审计，
+normal-support sigmoid 接近饱和；它不是性能信号。B4 必须先由正常训练视频建立并保存
+实际 `q` median/MAD/`tau_N`，再训练校正器，同时监控两个 `kappa` 是否获得有效更新。
+
+B3 结论：**通过，可以进入 B4，但本阶段结束时先停下汇报。** 它只证明校正结构
+不会暗改 host、越界或受 padding 污染；是否提点、两轴是否互补仍只能由后续 E1/E2
+决定。远程产物位于 `../vadmy_data/vin_vad/dsanet/b3/<dataset>/`。
+
 ### B4：统一训练目标
 
 在 `losses.py` 和 `train.py` 实现：
@@ -457,7 +477,7 @@ A4 确实优于 A0 和两个单分支后，再补三个必要结构消融：
 [x] B0 数据审计、host identity、统一 evaluator（DSANet；UCF/XD 均通过）
 [x] B1 leakage/padding/gradient/NLL 测试（DSANet；UCF/XD 均通过）
 [x] B2 residual/entmax/running-stat 测试（DSANet；UCF/XD 均通过）
-[ ] B3 identity/sign/zero-mean/bound/branch-independence 测试
+[x] B3 identity/sign/zero-mean/bound/branch-independence 测试（DSANet；UCF/XD 均通过）
 [ ] B4 单 optimizer 训练与完整 checkpoint
 [ ] E1 C0-C4，决定 contextual-directional claim
 [ ] E2 A0/A2/A3/A4，决定 cross/within 两条职责

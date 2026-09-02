@@ -2,12 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from vin_vad.witness_losses import (
-    intervention_consistency,
-    temporal_smoothness,
-    topk_bag_probability,
-    witness_objective,
-)
+from vin_vad.witness_losses import temporal_smoothness, topk_bag_probability, witness_objective
 from vin_vad.witness_model import WitnessVAD
 
 
@@ -33,27 +28,10 @@ def test_padding_does_not_enter_topk_or_smoothness() -> None:
     torch.testing.assert_close(first_smooth, temporal_smoothness(changed, validity))
 
 
-def test_intervention_consistency_rewards_weak_label_safe_directions() -> None:
-    _, host, validity, labels = sample()
-    evidence = torch.tensor(
-        [[0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.0, 0.0],
-         [0.1, 0.2, 0.3, 0.4, 0.5, 0.9, 0.8, 0.7]]
-    )
-    good = host.clone()
-    good[0, :6] -= 0.02
-    good[1, 5] += 0.02
-    bad = host.clone()
-    bad[0, :6] += 0.02
-    bad[1, 5] -= 0.02
-    assert intervention_consistency(good, host, evidence, validity, labels) < intervention_consistency(
-        bad, host, evidence, validity, labels
-    )
-
-
 def test_every_objective_component_reaches_witness_parameters() -> None:
     hidden, host, validity, labels = sample()
     model = WitnessVAD()
-    for name in ("video", "witness_mil", "final_mil", "dense_normal", "sparse", "intervention"):
+    for name in ("video", "witness_mil", "final_mil", "dense_normal", "sparse"):
         model.zero_grad(set_to_none=True)
         result = model(hidden, host, validity)
         losses = witness_objective(

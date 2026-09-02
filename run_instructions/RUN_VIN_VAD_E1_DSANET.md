@@ -59,3 +59,19 @@ contextual-directional claim：B1 conditional NLL 在两个数据集都优于 gl
 ```bash
 bash run_instructions/run_vin_vad_e1_dsanet.sh
 ```
+
+## 4. 2026-09-02 正式结论
+
+代码 commit：`94de5a3`。正式汇总为 `no-go`：C3 在 UCF 和 XD 的主指标上都没有严格
+优于 C0/C1/C2/C4；UCF context replacement 失败，XD 通过。当前 C3 不进入 E2。
+
+核对本次结果：
+
+```bash
+cd /root/autodl-tmp/vadmy_code
+git rev-parse HEAD
+column -s, -t < ../vadmy_data/vin_vad/dsanet/e1/comparison.csv | less -S
+cat ../vadmy_data/vin_vad/dsanet/e1/summary.json
+cat ../vadmy_data/vin_vad/dsanet/e1/ucf/c3/context_replacement/summary.json
+cat ../vadmy_data/vin_vad/dsanet/e1/xd/c3/context_replacement/summary.json
+```

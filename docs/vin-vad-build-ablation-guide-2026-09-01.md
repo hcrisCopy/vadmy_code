@@ -412,6 +412,37 @@ C3 必须同时满足：
 
 若只满足第 2 条，可能只是更复杂的 readout；若只满足第 1 条，predictor 更准但没有提供检测增量。两者都不能支撑 contextual-directional claim。
 
+#### E1 正式结果与决定（DSANet，2026-09-02）
+
+正式运行代码为 commit `94de5a3`，固定最后一轮、seed 42、无后处理。五组均有
+1,110,162 个可训练参数。下表的 gain 都相对同一 B0 frozen host；UCF 看 pooled AUC，
+XD 看 pooled AP。
+
+| Evidence | UCF primary gain | XD primary gain | 结论 |
+|---|---:|---:|---|
+| C0 raw directional | -0.00000530 | +0.00041864 | 不稳定，UCF 下降 |
+| C1 global directional z-score | +0.00000000 | **+0.00054985** | XD 最好，且结构更简单 |
+| C2 contextual absolute | +0.00000000 | +0.00010658 | 基本无效 |
+| C3 contextual directional | +0.00000010 | +0.00046365 | 两个数据集都未赢全部对照 |
+| C4 target-visible global context | **+0.00001531** | +0.00042685 | UCF 好于 C3，但仍是极小收益 |
+
+补充机制检查：B1 conditional NLL 在两数据集都优于 global baseline，说明 predictor
+确实学到了条件期望；但五组的 `kappa_cross` 最终全为 0，检测收益只来自 within 分支。
+C3 context replacement 在 XD 通过：固定 raw 后，`mu -> residual -> evidence -> correction ->
+corrected score` 均在 100% 的 32 对样本中改变。UCF 失败：前四级均在 100% 配对中改变，
+但 corrected score 只在 50% 配对中改变，平均变化仅 `5.72e-7`。
+
+**正式决定：E1 no-go，当前 C3 不能支撑 contextual-directional evidence claim，也不能作为
+E2 的固定 field 继续做 A2/A3/A4。** 直白地说，模型会预测上下文，但这份 residual 没有给
+检测带来独特且稳定的信息；C1/C4 已足以解释观察到的微小变化。
+
+停止无效扩展：不为当前 C3 做多 seed、窗口长度、overlap、budget、学习率或 smoothing
+搜索。这些最多放大一个未成立的现象，回答不了审稿人“为什么必须用 C3”。下一步只能先
+重新设计 evidence，并用完全相同的 E1 协议重新过生死门；新候选出现明确且跨数据集的
+优势后，再补三 seed 稳定性。远程原始表和审计位于
+`../vadmy_data/vin_vad/dsanet/e1/`，复现及查看命令见
+`run_instructions/RUN_VIN_VAD_E1_DSANET.md`。
+
 ### E2：创新二的职责分解
 
 先只跑四项：
@@ -541,7 +572,7 @@ A4 确实优于 A0 和两个单分支后，再补三个必要结构消融：
 [x] B2 residual/entmax/running-stat 测试（DSANet；UCF/XD 均通过）
 [x] B3 identity/sign/zero-mean/bound/branch-independence 测试（DSANet；UCF/XD 均通过）
 [x] B4 单 optimizer 训练与完整 checkpoint（DSANet；UCF/XD 结构通过，cross gate 均收缩为 0）
-[ ] E1 C0-C4，决定 contextual-directional claim
+[x] E1 C0-C4（DSANet；no-go，C3 两数据集均未胜出，暂缓 E2）
 [ ] E2 A0/A2/A3/A4，决定 cross/within 两条职责
 [ ] E2 成立后补 A1/A5/A6
 [ ] E3 三个最近邻同口径控制

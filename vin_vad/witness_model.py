@@ -119,7 +119,10 @@ class NeuronOnlyRouter(nn.Module):
             [host_clipped, evidence_clipped, host_clipped - evidence_clipped, host_clipped * evidence_clipped],
             dim=1,
         )
-        direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
+        direct_witness = (
+            masked_standardize(evidence_clipped, validity)
+            - masked_standardize(host_clipped, validity)
+        ).clamp(-3.0, 3.0)
         raw = torch.tanh(
             self.local_head(features).squeeze(1) + direct_witness
         ).masked_fill(~validity, 0.0)

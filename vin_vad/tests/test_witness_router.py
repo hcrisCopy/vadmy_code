@@ -14,7 +14,12 @@ def inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
 def test_zero_eta_is_exact_host_identity() -> None:
     host, evidence, validity = inputs()
-    result = WitnessRouter()(host, evidence, validity, 0.0, 0.0)
+    router = WitnessRouter()
+    optimizer = torch.optim.AdamW(router.parameters(), lr=1e-3)
+    optimizer.zero_grad(set_to_none=True)
+    router(host, evidence, validity)["corrected_score"].sum().backward()
+    optimizer.step()
+    result = router(host, evidence, validity, 0.0, 0.0)
     assert torch.equal(result["corrected_score"][validity], host[validity])
 
 

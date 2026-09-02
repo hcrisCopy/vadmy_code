@@ -114,6 +114,10 @@ class WitnessRouter(nn.Module):
         shifted = torch.sigmoid(host_logit + delta_normal + delta_anomaly)
         corrected = host_score + shifted - base
         corrected = corrected.clamp(0.0, 1.0).masked_fill(~validity, 0.0)
+        if eta_normal_override == 0.0 and eta_anomaly_override == 0.0:
+            # The explicit ablation contract is bitwise identity, not merely
+            # numerical closeness after logit/sigmoid round trips.
+            corrected = host_score.masked_fill(~validity, 0.0)
         return {
             "summary": summary,
             "video_logit": video_logit,

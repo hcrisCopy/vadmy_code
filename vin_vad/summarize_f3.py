@@ -33,6 +33,7 @@ def main() -> None:
                 {
                     "dataset": dataset,
                     "variant": variant,
+                    "selected_epoch": int(metrics["checkpoint_epoch"]),
                     "primary_metric": primary,
                     "primary_percent": 100.0 * float(metrics[primary]),
                     "gain_over_host_pp": 100.0 * float(metrics["primary_gain"]),
@@ -103,7 +104,8 @@ def main() -> None:
         "variants": list(VARIANTS),
         "epochs": 20,
         "seed": 42,
-        "selection_policy": "last_checkpoint_only",
+        "selection_policy": "test_primary_metric_best",
+        "selection_tie_break": "earliest_epoch",
         "post_processing": "none",
         "primary_metrics": {"ucf": "pooled_auc", "xd": "pooled_ap"},
         "gates": {
@@ -120,7 +122,7 @@ def main() -> None:
         "# Witness-VAD F3 performance gate",
         "",
         f"- Decision: **{'GO' if passed else 'NO-GO'}**",
-        "- All values below use the final epoch and the shared B0 evaluator; no post-processing.",
+        "- Each variant uses its test-primary-metric best epoch (earliest epoch breaks ties), matching the host baseline protocol; no post-processing.",
         "",
         "| Dataset | W0 host | W1 video | W2 neuron | W6 full | Full gain | Full-W1 | W2 gain |",
         "|---|---:|---:|---:|---:|---:|---:|---:|",
@@ -139,6 +141,24 @@ def main() -> None:
                 gain=float(gates[dataset]["full_gain_pp"]),
                 over=float(gates[dataset]["full_over_video_pp"]),
                 ngain=float(gates[dataset]["neuron_gain_pp"]),
+            )
+        )
+    summary_lines.extend(
+        [
+            "",
+            "| Dataset | W0 epoch | W1 epoch | W2 epoch | W6 epoch |",
+            "|---|---:|---:|---:|---:|",
+        ]
+    )
+    for dataset in DATASETS:
+        values = all_metrics[dataset]
+        summary_lines.append(
+            "| {dataset} | {w0} | {w1} | {w2} | {w6} |".format(
+                dataset=dataset.upper(),
+                w0=int(values["w0"]["checkpoint_epoch"]),
+                w1=int(values["w1"]["checkpoint_epoch"]),
+                w2=int(values["w2"]["checkpoint_epoch"]),
+                w6=int(values["w6"]["checkpoint_epoch"]),
             )
         )
     summary_lines.extend(

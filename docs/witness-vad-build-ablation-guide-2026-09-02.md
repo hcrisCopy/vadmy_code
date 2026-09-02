@@ -8,7 +8,7 @@
 >
 > **边界**：只在本仓库写代码；训练、测试和结果分析都在远程服务器执行；产物统一写到 ../vadmy_data。
 >
-> **当前进度**：v9 的 B0--E1 已归档；v10 的 F0--F2 已通过，F3 正在按修正后的 baseline-compatible checkpoint 选择协议执行。
+> **当前进度**：v9 的 B0--E1 已归档；v10 的 F0--F2 已通过；F3 已按 baseline-compatible checkpoint 选择协议完成并判定 NO-GO，尚未进入 F4。
 
 ---
 
@@ -447,6 +447,34 @@ bash run_instructions/run_witness_vad_f3_dsanet.sh
 
 停下来报告 W0/W1/W2/W6、是否跨过 +1pp、增益来自跨视频还是视频内排序、下一步 go/no-go。
 
+### 已完成记录（2026-09-02）
+
+正式复现命令：
+
+~~~bash
+bash run_instructions/run_witness_vad_f3_dsanet.sh --clean
+~~~
+
+四组均从同一 host cache 训练 20 epoch；每轮保存 checkpoint，并按 UCF frame AUC、XD frame AP 选择 test-best epoch，平局取更早 epoch。结果：
+
+| Dataset | W0 | W1 | W2 | W6 | W6-W0 | W6-W1 | W2-W0 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| UCF AUC | 89.445 | 89.449 | 89.451 | 89.476 | +0.032 | +0.027 | +0.007 |
+| XD AP | 86.951 | 86.979 | 87.420 | 87.452 | +0.501 | +0.473 | +0.469 |
+
+best epoch：UCF 的 W0/W1/W2/W6 为 20/3/2/20；XD 为 20/20/16/19。
+
+- **裁决：NO-GO。** W6 在两个数据集都没有达到 `+1.0 pp`，UCF 也没有达到 W6-W1 `+0.2 pp`；因此不得进入 F4。
+- UCF 的 W6 主要改善跨视频排序与正常误报，异常视频内 AUC/AP 反而略降，不能宣称定位更好。W2 虽使 Macro-Within-AUC 提升约 `0.322 pp`，但主 AUC 只提升 `0.007 pp`。
+- XD 的 neuron route 有真实信号：W2 提升 `0.469 pp`，视频内指标和正常 FPR 同时改善；但 W6 只比 W2 再多约 `0.033 pp`，video route 基本没有增加有效信息。
+- 按预注册规则，下一步最多允许一次小范围单变量调整；本阶段没有启动调参。
+
+远程结果：
+
+~~~text
+../vadmy_data/witness_vad/dsanet/f3_performance/
+~~~
+
 ---
 
 ## 9. F4：审稿人真正需要的结构消融
@@ -586,7 +614,7 @@ bash run_instructions/run_witness_vad_f5_dsanet.sh
 - 不做几十个 loss 权重和网络宽度表。
 - 不做没有 matched control 的 neuron visualization。
 - 不用正常视频整体压低单独冒充定位能力。
-- 不用 test best epoch、不挑 seed、不只报最好一次。
+- checkpoint 选择严格沿用 host baseline 的固定主指标与 test-best 规则；不挑 seed、不在结果出来后更换选择指标。
 - 不在 F3 失败后继续堆模块。
 - 不把 Universal 的工程 trick 全搬回来；只保留被 F0 证实的信息来源与简洁超参数经验。
 

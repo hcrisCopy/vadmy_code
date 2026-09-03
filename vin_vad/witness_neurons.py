@@ -6,35 +6,6 @@ import torch
 from torch import nn
 
 
-def cross_layer_consensus(
-    layer_evidence: torch.Tensor, validity: torch.Tensor
-) -> torch.Tensor:
-    """Require two CLIP depths to corroborate a frame-level witness.
-
-    Each depth is standardized within its own video, so agreement reflects a
-    shared temporal departure rather than incomparable layer magnitudes.  The
-    second-strongest positive response makes isolated single-layer activations
-    receive zero authorization.
-    """
-    if layer_evidence.ndim != 3 or validity.shape != layer_evidence.shape[:2]:
-        raise ValueError("layer_evidence must be [B,T,L] and validity [B,T]")
-    if validity.dtype != torch.bool:
-        raise ValueError("validity must be boolean")
-    if layer_evidence.shape[-1] < 2:
-        return torch.zeros_like(layer_evidence[..., 0]).masked_fill(~validity, 0.0)
-
-    mask = validity.unsqueeze(-1).to(layer_evidence.dtype)
-    denominator = validity.sum(dim=1).clamp_min(1).to(layer_evidence.dtype).unsqueeze(1)
-    mean = (layer_evidence * mask).sum(dim=1) / denominator
-    centered = (layer_evidence - mean.unsqueeze(1)) * mask
-    variance = centered.square().sum(dim=1) / denominator
-    standardized = centered / torch.sqrt(variance.unsqueeze(1) + 1e-6)
-    positive = torch.relu(standardized)
-    second_strongest = torch.topk(positive, k=2, dim=-1).values[..., 1]
-    consensus = 1.0 - torch.exp(-second_strongest)
-    return consensus.masked_fill(~validity, 0.0)
-
-
 class SignedTopKWitnessNeurons(nn.Module):
     """One globally sparse signed set over all CLIP CLS coordinates.
 

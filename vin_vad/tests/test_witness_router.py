@@ -18,18 +18,14 @@ def inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return host, evidence, validity
 
 
-def consensus(validity: torch.Tensor) -> torch.Tensor:
-    return validity.to(torch.float32)
-
-
 def test_zero_eta_is_exact_host_identity() -> None:
     host, evidence, validity = inputs()
     router = WitnessRouter()
     optimizer = torch.optim.AdamW(router.parameters(), lr=1e-3)
     optimizer.zero_grad(set_to_none=True)
-    router(host, evidence, consensus(validity), validity)["corrected_score"].sum().backward()
+    router(host, evidence, validity)["corrected_score"].sum().backward()
     optimizer.step()
-    result = router(host, evidence, consensus(validity), validity, 0.0, 0.0)
+    result = router(host, evidence, validity, 0.0, 0.0)
     assert torch.equal(result["corrected_score"][validity], host[validity])
 
 
@@ -38,9 +34,9 @@ def test_video_state_routes_witness_and_veto_support() -> None:
     router = WitnessRouter()
     router.video_head.weight.data.zero_()
     router.video_head.bias.data.fill_(8.0)
-    abnormal = router(host, evidence, consensus(validity), validity)
+    abnormal = router(host, evidence, validity)
     router.video_head.bias.data.fill_(-8.0)
-    normal = router(host, evidence, consensus(validity), validity)
+    normal = router(host, evidence, validity)
     assert torch.all(abnormal["delta_normal"][validity] <= 0.0)
     completion = (abnormal["witness_support"] > 0) & (abnormal["event_gap"] > 0)
     assert torch.all(abnormal["delta_anomaly"][completion] > 0.0)
@@ -59,13 +55,13 @@ def test_padding_does_not_enter_video_pooling_or_router() -> None:
     host, evidence, validity = inputs()
     router = WitnessRouter()
     first_summary = video_summary(host, evidence, validity)
-    first = router(host, evidence, consensus(validity), validity)
+    first = router(host, evidence, validity)
     changed_host = host.clone()
     changed_evidence = evidence.clone()
     changed_host[~validity] = 0.99
     changed_evidence[~validity] = 0.01
     second_summary = video_summary(changed_host, changed_evidence, validity)
-    second = router(changed_host, changed_evidence, consensus(validity), validity)
+    second = router(changed_host, changed_evidence, validity)
     torch.testing.assert_close(first_summary, second_summary)
     for name in ("video_probability", "delta_normal", "delta_anomaly"):
         torch.testing.assert_close(first[name], second[name])
@@ -74,9 +70,8 @@ def test_padding_does_not_enter_video_pooling_or_router() -> None:
 def test_neuron_only_eta_override_changes_only_correction_strength() -> None:
     host, evidence, validity = inputs()
     router = NeuronOnlyRouter(eta_anomaly=0.25)
-    agreement = consensus(validity)
-    weak = router(host, evidence, agreement, validity, eta_anomaly_override=0.25)
-    strong = router(host, evidence, agreement, validity, eta_anomaly_override=0.60)
+    weak = router(host, evidence, validity, eta_anomaly_override=0.25)
+    strong = router(host, evidence, validity, eta_anomaly_override=0.60)
     torch.testing.assert_close(weak["local_shape"], strong["local_shape"])
     torch.testing.assert_close(
         strong["delta_anomaly"],

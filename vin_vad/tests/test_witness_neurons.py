@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 
 from vin_vad.witness_model import WitnessExpert
-from vin_vad.witness_neurons import SignedTopKWitnessNeurons, cross_layer_consensus
+from vin_vad.witness_neurons import SignedTopKWitnessNeurons
 from vin_vad.witness_temporal import WitnessTemporalReadout
 
 
@@ -66,19 +66,3 @@ def test_temporal_padding_never_changes_valid_output() -> None:
     second = module(changed, validity)
     torch.testing.assert_close(first[validity], second[validity])
     assert torch.equal(second[~validity], torch.zeros_like(second[~validity]))
-
-
-def test_cross_layer_consensus_rejects_isolated_depth_response() -> None:
-    validity = torch.tensor([[True, True, True, False]])
-    isolated = torch.zeros(1, 4, 3)
-    isolated[0, 1, 0] = 4.0
-    corroborated = isolated.clone()
-    corroborated[0, 1, 1] = 4.0
-    isolated_consensus = cross_layer_consensus(isolated, validity)
-    corroborated_consensus = cross_layer_consensus(corroborated, validity)
-    assert isolated_consensus[0, 1] == 0.0
-    assert corroborated_consensus[0, 1] > 0.0
-    assert torch.equal(
-        corroborated_consensus[~validity],
-        torch.zeros_like(corroborated_consensus[~validity]),
-    )

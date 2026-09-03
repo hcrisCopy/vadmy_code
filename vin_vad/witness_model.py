@@ -16,6 +16,23 @@ from vin_vad.witness_router import (
 from vin_vad.witness_temporal import WitnessTemporalReadout
 
 
+def masked_temporal_mean(
+    values: torch.Tensor, validity: torch.Tensor, width: int
+) -> torch.Tensor:
+    if values.ndim != 3 or validity.shape != values.shape[:2] or width % 2 != 1:
+        raise ValueError("values must be [B,T,C], validity [B,T], and width odd")
+    channels = values.shape[-1]
+    mask = validity[:, None].to(values.dtype)
+    kernel = torch.ones(channels, 1, width, dtype=values.dtype, device=values.device)
+    numerator = F.conv1d(
+        values.transpose(1, 2) * mask, kernel, padding=width // 2, groups=channels
+    )
+    denominator = F.conv1d(mask, kernel[:1], padding=width // 2).clamp_min(1.0)
+    return (numerator / denominator).transpose(1, 2).masked_fill(
+        ~validity.unsqueeze(-1), 0.0
+    )
+
+
 class WitnessExpert(nn.Module):
     """Neuron-only path: its API intentionally has no host-score argument."""
 
@@ -23,6 +40,7 @@ class WitnessExpert(nn.Module):
         super().__init__()
         self.neurons = SignedTopKWitnessNeurons(active=active)
         self.temporal = WitnessTemporalReadout(width=temporal_width)
+        self.context_temporal = WitnessTemporalReadout(input_channels=24, width=temporal_width)
 
     def forward(
         self,
@@ -31,9 +49,39 @@ class WitnessExpert(nn.Module):
         neuron_keep_mask: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         neuron = self.neurons(hidden, validity, neuron_keep_mask)
-        logits = self.temporal(neuron["temporal_input"], validity)
+        primary_logits = self.temporal(neuron["temporal_input"], validity)
+        normality_layers = neuron["normality_layer_evidence"]
+        normality_raw = normality_layers.mean(dim=-1)
+        normality_logits = (
+            normality_raw - self.neurons.normal_score_threshold
+        ) / self.neurons.normal_score_std
+        normality_logits = normality_logits.masked_fill(~validity, 0.0)
+        context_input = torch.cat(
+            [
+                masked_temporal_mean(normality_layers, validity, width=9),
+                masked_temporal_mean(normality_layers, validity, width=25),
+            ],
+            dim=-1,
+        )
+        context_logits = self.context_temporal(context_input, validity)
+        primary_role = masked_standardize(primary_logits, validity).clamp(-3.0, 3.0)
+        normality_role = normality_logits.clamp(-3.0, 3.0)
+        context_role = masked_standardize(context_logits, validity).clamp(-3.0, 3.0)
+        roles = torch.stack([primary_role, normality_role, context_role], dim=-1)
+        positive_agreement = torch.relu(roles).amin(dim=-1)
+        negative_agreement = torch.relu(-roles).amin(dim=-1)
+        logits = roles.mean(dim=-1) + positive_agreement - negative_agreement
         evidence = torch.sigmoid(logits).masked_fill(~validity, 0.0)
-        return {**neuron, "evidence_logits": logits, "evidence": evidence}
+        return {
+            **neuron,
+            "primary_evidence": torch.sigmoid(primary_logits).masked_fill(~validity, 0.0),
+            "normality_evidence": torch.sigmoid(normality_role).masked_fill(~validity, 0.0),
+            "context_evidence": torch.sigmoid(context_logits).masked_fill(~validity, 0.0),
+            "positive_agreement": positive_agreement.masked_fill(~validity, 0.0),
+            "negative_agreement": negative_agreement.masked_fill(~validity, 0.0),
+            "evidence_logits": logits.masked_fill(~validity, 0.0),
+            "evidence": evidence,
+        }
 
 
 class WitnessVAD(nn.Module):

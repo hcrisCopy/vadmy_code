@@ -6,7 +6,6 @@ from torch.nn import functional as F
 
 from vin_vad.witness_neurons import SignedTopKWitnessNeurons
 from vin_vad.witness_router import (
-    bounded_completion_delta,
     WitnessRouter,
     inverse_softplus,
     masked_mean,
@@ -128,21 +127,17 @@ class NeuronOnlyRouter(nn.Module):
         witness_support = torch.relu(raw)
         veto_support = torch.relu(-raw)
         event_anchor = masked_topk_anchor(host_clipped, validity)
-        event_gap = torch.relu(event_anchor.unsqueeze(1) - host_clipped).masked_fill(
-            ~validity, 0.0
-        )
+        event_gap = torch.relu(
+            torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6)).unsqueeze(1)
+            - torch.logit(host_clipped)
+        ).masked_fill(~validity, 0.0)
         local_shape = witness_support * event_gap - veto_support
         eta_anomaly = (
             F.softplus(self.raw_eta_anomaly)
             if eta_anomaly_override is None
             else host_score.new_tensor(eta_anomaly_override)
         )
-        positive_delta = bounded_completion_delta(
-            host_clipped, event_anchor.unsqueeze(1), witness_support, eta_anomaly
-        )
-        delta = (positive_delta - eta_anomaly * veto_support).masked_fill(
-            ~validity, 0.0
-        )
+        delta = eta_anomaly * local_shape
         clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         corrected = host_score + torch.sigmoid(torch.logit(clipped) + delta) - clipped
         return {

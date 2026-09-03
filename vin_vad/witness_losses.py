@@ -22,29 +22,6 @@ def per_video_mil(score: torch.Tensor, validity: torch.Tensor, labels: torch.Ten
     return F.binary_cross_entropy(bag, labels.to(score.dtype), reduction="none")
 
 
-def witness_responsibility_mil(
-    corrected: torch.Tensor,
-    evidence: torch.Tensor,
-    validity: torch.Tensor,
-    labels: torch.Tensor,
-) -> torch.Tensor:
-    """Give latent witness candidates correction credit beyond host-led top-k."""
-    losses = per_video_mil(corrected, validity, labels)
-    for index, (row_score, row_evidence, row_validity, label) in enumerate(
-        zip(corrected, evidence.detach(), validity, labels)
-    ):
-        if label <= 0.5:
-            continue
-        valid_score = row_score[row_validity]
-        valid_evidence = row_evidence[row_validity]
-        count = min(valid_score.numel(), int(valid_score.numel() / 16 + 1))
-        responsible = torch.topk(valid_evidence, count).indices
-        witness_bag = valid_score[responsible].mean().clamp(1e-6, 1.0 - 1e-6)
-        witness_loss = -torch.log(witness_bag)
-        losses[index] = 0.5 * (losses[index] + witness_loss)
-    return losses
-
-
 def ranking_loss(score: torch.Tensor, validity: torch.Tensor, labels: torch.Tensor, margin: float) -> torch.Tensor:
     bag = topk_bag_probability(score, validity)
     normal = bag[labels <= 0.5]
@@ -84,9 +61,7 @@ def witness_objective(
     neuron_loss = (residual * neuron_per_video).sum() / residual.sum().clamp_min(1e-6)
     neuron_loss = neuron_loss + rank_weight * ranking_loss(evidence, validity, labels, rank_margin)
     neuron_loss = neuron_loss + smooth_weight * temporal_smoothness(evidence, validity)
-    final_loss = witness_responsibility_mil(
-        corrected, evidence, validity, labels
-    ).mean()
+    final_loss = per_video_mil(corrected, validity, labels).mean()
     normal_mask = labels <= 0.5
     if normal_mask.any():
         normal_evidence = -torch.log1p(-evidence.clamp(max=1.0 - 1e-6))
@@ -152,13 +127,7 @@ def variant_objective(
 
     corrected = result["corrected_score"]
     zero = corrected.sum() * 0.0
-    final_loss = (
-        per_video_mil(corrected, validity, labels).mean()
-        if variant == "w1"
-        else witness_responsibility_mil(
-            corrected, result["evidence"], validity, labels
-        ).mean()
-    )
+    final_loss = per_video_mil(corrected, validity, labels).mean()
     normal_mask = labels <= 0.5
     if normal_mask.any():
         corrected_normal = -torch.log1p(-corrected.clamp(max=1.0 - 1e-6))

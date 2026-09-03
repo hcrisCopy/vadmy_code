@@ -9,7 +9,6 @@ from vin_vad.train_witness import (
     balanced_indices,
     comparable_configuration,
     merge_balanced_batches,
-    initialize_residual_contrast,
 )
 from vin_vad.select_witness_checkpoint import select_best
 

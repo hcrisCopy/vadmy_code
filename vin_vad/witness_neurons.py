@@ -21,24 +21,11 @@ class SignedTopKWitnessNeurons(nn.Module):
         self.dimensions = int(dimensions)
         self.active = int(active)
         self.normalization = nn.LayerNorm(dimensions, elementwise_affine=False)
-        self.register_buffer("normal_mean", torch.zeros(layers, dimensions))
-        self.register_buffer("normal_std", torch.ones(layers, dimensions))
-        self.register_buffer("normal_reference_ready", torch.tensor(False))
         self.gate_logits = nn.Parameter(torch.empty(layers, dimensions))
         self.signed_weights = nn.Parameter(torch.empty(layers, dimensions))
         self.layer_logits = nn.Parameter(torch.zeros(layers))
         nn.init.normal_(self.gate_logits, mean=0.0, std=1e-3)
         nn.init.normal_(self.signed_weights, mean=0.0, std=0.02)
-
-    @torch.no_grad()
-    def set_normal_reference(
-        self, mean: torch.Tensor, standard_deviation: torch.Tensor
-    ) -> None:
-        if mean.shape != self.normal_mean.shape or standard_deviation.shape != mean.shape:
-            raise ValueError("normal reference must have shape [layers, dimensions]")
-        self.normal_mean.copy_(mean.to(self.normal_mean))
-        self.normal_std.copy_(standard_deviation.to(self.normal_std).clamp_min(1e-4))
-        self.normal_reference_ready.fill_(True)
 
     def gates(self, neuron_keep_mask: torch.Tensor | None = None) -> torch.Tensor:
         soft = torch.sigmoid(self.gate_logits)
@@ -72,26 +59,10 @@ class SignedTopKWitnessNeurons(nn.Module):
             "btld,ld->btl", normalized, coordinate_weights
         ) / math.sqrt(self.active)
         layer_evidence = layer_evidence.masked_fill(~validity.unsqueeze(-1), 0.0)
-        if bool(self.normal_reference_ready):
-            deviation = (
-                normalized - self.normal_mean.view(1, 1, self.layers, self.dimensions)
-            ) / self.normal_std.view(1, 1, self.layers, self.dimensions)
-            directional = torch.relu(
-                deviation * self.signed_weights.view(1, 1, self.layers, self.dimensions)
-            )
-            normality_layer_evidence = (directional * gate).sum(dim=-1) / math.sqrt(
-                self.active
-            )
-            normality_layer_evidence = normality_layer_evidence.masked_fill(
-                ~validity.unsqueeze(-1), 0.0
-            )
-        else:
-            normality_layer_evidence = torch.zeros_like(layer_evidence)
         layer_probability = torch.softmax(self.layer_logits, dim=0)
         temporal_input = layer_evidence * (self.layers * layer_probability.view(1, 1, -1))
         return {
             "layer_evidence": layer_evidence,
-            "normality_layer_evidence": normality_layer_evidence,
             "temporal_input": temporal_input,
             "gates": gate,
             "coordinate_weights": coordinate_weights,

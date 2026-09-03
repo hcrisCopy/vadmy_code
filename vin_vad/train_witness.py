@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+from torch.nn import functional as F
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
@@ -22,6 +23,34 @@ from vin_vad.data import (
 )
 from vin_vad.witness_losses import variant_objective
 from vin_vad.witness_model import build_witness_variant
+
+
+@torch.no_grad()
+def set_normal_neuron_reference(
+    model: torch.nn.Module,
+    dataset: AuditorTrainingDataset,
+    normal_indices: list[int],
+    device: torch.device,
+) -> int:
+    """Estimate coordinate statistics from trusted normal training snippets."""
+    neurons = model.expert.neurons
+    total = torch.zeros(
+        neurons.layers, neurons.dimensions, dtype=torch.float64, device=device
+    )
+    square = torch.zeros_like(total)
+    count = 0
+    for index in tqdm(normal_indices, desc="fit normal neuron reference", unit="video"):
+        hidden = dataset[index]["hidden"].to(device, non_blocking=True)
+        normalized = F.layer_norm(hidden, (neurons.dimensions,)).double()
+        total += normalized.sum(dim=0)
+        square += normalized.square().sum(dim=0)
+        count += len(normalized)
+    if count < 2:
+        raise RuntimeError("normal neuron reference needs at least two snippets")
+    mean = total / count
+    variance = (square / count - mean.square()).clamp_min(1e-8)
+    neurons.set_normal_reference(mean.float(), variance.sqrt().float())
+    return count
 
 
 def seed_everything(seed: int) -> None:
@@ -62,7 +91,8 @@ def ensure_training_paths(manifest: Path, output: Path) -> None:
 
 def comparable_configuration(config: dict[str, object]) -> dict[str, object]:
     """Git provenance is recorded but is not a training hyperparameter."""
-    comparable = {key: value for key, value in config.items() if key != "git_commit"}
+    derived = {"git_commit", "normal_reference_snippets"}
+    comparable = {key: value for key, value in config.items() if key not in derived}
     comparable.setdefault("variant", "w6")
     comparable.setdefault("num_workers", 0)
     comparable.setdefault("cache_training_data", False)
@@ -217,6 +247,7 @@ def main() -> None:
             ),
             "test_data_used": False,
             "optimizer_count": 1,
+            "normal_neuron_reference": args.variant in {"w2", "w6"},
         }
     )
     config_path = output / "config.json"
@@ -258,6 +289,13 @@ def main() -> None:
         eta_normal=args.eta_normal,
         eta_anomaly=args.eta_anomaly,
     ).to(device)
+    if not (args.resume and last_path.exists()) and isinstance(
+        dataset, AuditorTrainingDataset
+    ):
+        configuration["normal_reference_snippets"] = set_normal_neuron_reference(
+            model, dataset, normal_indices, device
+        )
+        config_path.write_text(json.dumps(configuration, indent=2), encoding="utf-8")
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )

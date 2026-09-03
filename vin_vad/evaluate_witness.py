@@ -165,7 +165,6 @@ def main() -> None:
                 corrected = host.copy()
                 video_probability = float("nan")
                 evidence = np.empty(0, dtype=np.float32)
-                veto_evidence = np.empty(0, dtype=np.float32)
                 delta_normal = np.zeros_like(host)
                 delta_anomaly = np.zeros_like(host)
             else:
@@ -189,11 +188,6 @@ def main() -> None:
                     if "evidence" not in result
                     else result["evidence"][0].cpu().numpy().astype(np.float32)
                 )
-                veto_evidence = (
-                    np.empty(0, dtype=np.float32)
-                    if "veto_evidence" not in result
-                    else result["veto_evidence"][0].cpu().numpy().astype(np.float32)
-                )
                 delta_normal = result["delta_normal"][0].cpu().numpy().astype(np.float32)
                 delta_anomaly = result["delta_anomaly"][0].cpu().numpy().astype(np.float32)
             if not args.no_curve_cache:
@@ -202,7 +196,6 @@ def main() -> None:
                     host_score=host,
                     corrected_score=corrected,
                     evidence=evidence,
-                    veto_evidence=veto_evidence,
                     delta_normal=delta_normal,
                     delta_anomaly=delta_anomaly,
                     video_probability=np.asarray(video_probability, dtype=np.float32),

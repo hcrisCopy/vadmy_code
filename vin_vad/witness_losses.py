@@ -54,7 +54,6 @@ def witness_objective(
     smooth_weight: float = 0.02,
 ) -> dict[str, torch.Tensor]:
     evidence = result["evidence"]
-    veto_evidence = result["veto_evidence"]
     corrected = result["corrected_score"]
     video_loss = F.binary_cross_entropy(result["video_probability"], labels.to(evidence.dtype))
     residual = (labels - topk_bag_probability(host_score, validity)).abs().detach()
@@ -71,12 +70,6 @@ def witness_objective(
             masked_mean(normal_evidence, validity)[normal_mask]
             + masked_mean(normal_corrected, validity)[normal_mask]
         ).mean()
-        normal_valid = validity & normal_mask.unsqueeze(1)
-        veto_target = host_score.detach().clamp(0.0, 1.0)
-        veto_residual = F.binary_cross_entropy(
-            veto_evidence[normal_valid], veto_target[normal_valid]
-        )
-        dense_normal = dense_normal + veto_residual
     else:
         dense_normal = evidence.sum() * 0.0
     sparse_loss = sparsity
@@ -161,7 +154,6 @@ def variant_objective(
         if sparsity is None:
             raise ValueError("w2 requires a sparsity surrogate")
         evidence = result["evidence"]
-        veto_evidence = result["veto_evidence"]
         residual = (labels - topk_bag_probability(host_score, validity)).abs().detach()
         neuron_loss = (
             residual * per_video_mil(evidence, validity, labels)
@@ -175,15 +167,9 @@ def variant_objective(
         if normal_mask.any():
             evidence_normal = -torch.log1p(-evidence.clamp(max=1.0 - 1e-6))
             dense_evidence = masked_mean(evidence_normal, validity)[normal_mask].mean()
-            normal_valid = validity & normal_mask.unsqueeze(1)
-            veto_residual = F.binary_cross_entropy(
-                veto_evidence[normal_valid],
-                host_score.detach().clamp(0.0, 1.0)[normal_valid],
-            )
         else:
             dense_evidence = zero
-            veto_residual = zero
-        dense_normal = dense_corrected + dense_evidence + veto_residual
+        dense_normal = dense_corrected + dense_evidence
         total = (
             lambda_witness * neuron_loss
             + lambda_final * final_loss

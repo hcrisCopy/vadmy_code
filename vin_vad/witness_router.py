@@ -47,27 +47,14 @@ def masked_correlation(first: torch.Tensor, second: torch.Tensor, validity: torc
     return torch.stack(outputs)
 
 
-def video_summary(
-    host_score: torch.Tensor,
-    evidence: torch.Tensor,
-    validity: torch.Tensor,
-    veto_evidence: torch.Tensor | None = None,
-) -> torch.Tensor:
+def video_summary(host_score: torch.Tensor, evidence: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
     if host_score.shape != evidence.shape or validity.shape != host_score.shape:
         raise ValueError("host_score, evidence and validity must share [B,T]")
     host = masked_summary(host_score, validity)
     neuron = masked_summary(evidence, validity)
-    veto_evidence = 1.0 - evidence if veto_evidence is None else veto_evidence
-    veto = masked_summary(veto_evidence, validity)
-    witness_correlation = masked_correlation(host_score, evidence, validity).unsqueeze(1)
-    veto_correlation = masked_correlation(host_score, veto_evidence, validity).unsqueeze(1)
-    witness_disagreement = masked_mean((host_score - evidence).abs(), validity).unsqueeze(1)
-    veto_disagreement = masked_mean((host_score - veto_evidence).abs(), validity).unsqueeze(1)
-    return torch.cat(
-        [host, neuron, veto, witness_correlation, veto_correlation,
-         witness_disagreement, veto_disagreement],
-        dim=1,
-    )
+    correlation = masked_correlation(host_score, evidence, validity).unsqueeze(1)
+    disagreement = masked_mean((host_score - evidence).abs(), validity).unsqueeze(1)
+    return torch.cat([host, neuron, correlation, disagreement], dim=1)
 
 
 def inverse_softplus(value: float) -> float:
@@ -81,11 +68,11 @@ class WitnessRouter(nn.Module):
 
     def __init__(self, eta_normal: float = 1.0, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
         super().__init__()
-        self.video_head = nn.Linear(16, 1)
+        self.video_head = nn.Linear(10, 1)
         self.local_head = nn.Sequential(
-            nn.Conv1d(6, local_width, kernel_size=1),
+            nn.Conv1d(4, local_width, kernel_size=1),
             nn.GELU(),
-            nn.Conv1d(local_width, 2, kernel_size=1),
+            nn.Conv1d(local_width, 1, kernel_size=1),
         )
         self.raw_eta_normal = nn.Parameter(torch.tensor(inverse_softplus(eta_normal)))
         self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
@@ -97,10 +84,8 @@ class WitnessRouter(nn.Module):
         validity: torch.Tensor,
         eta_normal_override: float | None = None,
         eta_anomaly_override: float | None = None,
-        veto_evidence: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
-        veto_evidence = 1.0 - evidence if veto_evidence is None else veto_evidence
-        summary = video_summary(host_score, evidence, validity, veto_evidence)
+        summary = video_summary(host_score, evidence, validity)
         video_logit = self.video_head(summary).squeeze(1)
         video_probability = torch.sigmoid(video_logit)
         eta_normal = (
@@ -118,20 +103,17 @@ class WitnessRouter(nn.Module):
 
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
-        veto_clipped = veto_evidence.clamp(1e-6, 1.0 - 1e-6)
         local_input = torch.stack(
-            [host_clipped, evidence_clipped, veto_clipped,
-             host_clipped - evidence_clipped, host_clipped - veto_clipped,
-             evidence_clipped - veto_clipped],
+            [host_clipped, evidence_clipped, host_clipped - evidence_clipped, host_clipped * evidence_clipped],
             dim=1,
         )
         direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
-        direct_veto = masked_standardize(veto_clipped, validity).clamp(-3.0, 3.0)
-        local_residual = self.local_head(local_input)
-        witness_support = torch.relu(torch.tanh(local_residual[:, 0] + direct_witness))
-        veto_support = torch.relu(torch.tanh(local_residual[:, 1] + direct_veto))
-        witness_support = witness_support.masked_fill(~validity, 0.0)
-        veto_support = veto_support.masked_fill(~validity, 0.0)
+        local_raw = torch.tanh(
+            self.local_head(local_input).squeeze(1) + direct_witness
+        )
+        local_raw = local_raw.masked_fill(~validity, 0.0)
+        witness_support = torch.relu(local_raw)
+        veto_support = torch.relu(-local_raw)
         local_shape = (
             video_probability.unsqueeze(1) * witness_support
             - (1.0 - video_probability).unsqueeze(1) * veto_support

@@ -21,24 +21,11 @@ class SignedTopKWitnessNeurons(nn.Module):
         self.dimensions = int(dimensions)
         self.active = int(active)
         self.normalization = nn.LayerNorm(dimensions, elementwise_affine=False)
-        self.register_buffer("normal_mean", torch.zeros(layers, dimensions))
-        self.register_buffer("normal_std", torch.ones(layers, dimensions))
-        self.register_buffer("normal_reference_ready", torch.tensor(False))
         self.gate_logits = nn.Parameter(torch.empty(layers, dimensions))
         self.signed_weights = nn.Parameter(torch.empty(layers, dimensions))
         self.layer_logits = nn.Parameter(torch.zeros(layers))
         nn.init.normal_(self.gate_logits, mean=0.0, std=1e-3)
         nn.init.normal_(self.signed_weights, mean=0.0, std=0.02)
-
-    @torch.no_grad()
-    def set_normal_reference(
-        self, mean: torch.Tensor, standard_deviation: torch.Tensor
-    ) -> None:
-        if mean.shape != self.normal_mean.shape or standard_deviation.shape != mean.shape:
-            raise ValueError("normal reference must have shape [layers, dimensions]")
-        self.normal_mean.copy_(mean.to(self.normal_mean))
-        self.normal_std.copy_(standard_deviation.to(self.normal_std).clamp_min(1e-4))
-        self.normal_reference_ready.fill_(True)
 
     def gates(self, neuron_keep_mask: torch.Tensor | None = None) -> torch.Tensor:
         soft = torch.sigmoid(self.gate_logits)
@@ -66,10 +53,6 @@ class SignedTopKWitnessNeurons(nn.Module):
         if validity.shape != hidden.shape[:2] or validity.dtype != torch.bool:
             raise ValueError("validity must be a boolean [B,T] tensor")
         normalized = self.normalization(hidden)
-        if bool(self.normal_reference_ready):
-            normalized = (
-                normalized - self.normal_mean.view(1, 1, self.layers, self.dimensions)
-            ) / self.normal_std.view(1, 1, self.layers, self.dimensions)
         gate = self.gates(neuron_keep_mask)
         coordinate_weights = gate * self.signed_weights
         layer_evidence = torch.einsum(

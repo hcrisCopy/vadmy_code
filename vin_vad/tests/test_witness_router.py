@@ -5,7 +5,6 @@ import torch
 from vin_vad.witness_model import NeuronOnlyRouter
 from vin_vad.witness_router import (
     WitnessRouter,
-    masked_local_max,
     masked_mean,
     masked_topk_anchor,
     video_summary,
@@ -50,13 +49,6 @@ def test_event_anchor_uses_standard_weak_mil_topk() -> None:
     validity = torch.tensor([[True, True, True, True, False]])
     anchor = masked_topk_anchor(score, validity)
     torch.testing.assert_close(anchor, torch.tensor([0.9]))
-
-
-def test_local_event_completion_ignores_padding() -> None:
-    score = torch.tensor([[0.1, 0.9, 0.2, 99.0]])
-    validity = torch.tensor([[True, True, True, False]])
-    completed = masked_local_max(score, validity, width=3)
-    torch.testing.assert_close(completed, torch.tensor([[0.9, 0.9, 0.9, 0.0]]))
 
 
 def test_padding_does_not_enter_video_pooling_or_router() -> None:

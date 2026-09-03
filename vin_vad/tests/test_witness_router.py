@@ -36,8 +36,16 @@ def test_video_state_routes_witness_and_veto_support() -> None:
     router.video_head.weight.data.zero_()
     router.video_head.bias.data.fill_(8.0)
     abnormal = router(host, evidence, validity)
+    assert torch.equal(
+        abnormal["anomaly_authorized"],
+        torch.ones_like(abnormal["anomaly_authorized"]),
+    )
     router.video_head.bias.data.fill_(-8.0)
     normal = router(host, evidence, validity)
+    assert torch.equal(
+        normal["anomaly_authorized"],
+        torch.zeros_like(normal["anomaly_authorized"]),
+    )
     assert torch.all(abnormal["delta_normal"][validity] <= 0.0)
     completion = (abnormal["witness_support"] > 0) & (abnormal["event_gap"] > 0)
     assert torch.all(abnormal["delta_anomaly"][completion] > 0.0)

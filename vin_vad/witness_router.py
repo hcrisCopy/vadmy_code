@@ -108,6 +108,13 @@ class WitnessRouter(nn.Module):
         summary = video_summary(host_score, evidence, validity)
         video_logit = self.video_head(summary).squeeze(1)
         video_probability = torch.sigmoid(video_logit)
+        hard_authorization = (video_probability >= 0.5).to(video_probability.dtype)
+        anomaly_authorized = (
+            hard_authorization
+            + video_probability
+            - video_probability.detach()
+        )
+        normal_authorized = 1.0 - anomaly_authorized
         eta_normal = (
             torch.nn.functional.softplus(self.raw_eta_normal)
             if eta_normal_override is None
@@ -133,9 +140,9 @@ class WitnessRouter(nn.Module):
             - torch.logit(host_clipped)
         ).masked_fill(~validity, 0.0)
         local_shape = (
-            video_probability.unsqueeze(1)
+            anomaly_authorized.unsqueeze(1)
             * (witness_support + witness_event_support * event_gap)
-            - (1.0 - video_probability).unsqueeze(1) * veto_support
+            - normal_authorized.unsqueeze(1) * veto_support
         ).masked_fill(~validity, 0.0)
         # q decides the correction direction; neuron evidence decides its support.
         # A non-zero mean is required to repair cross-video ranking, which dominates
@@ -152,7 +159,7 @@ class WitnessRouter(nn.Module):
         # own witness support and can never overshoot the local event peak.
         completion_anchor = masked_local_max(shifted, validity)
         completion_gate = (
-            video_probability.unsqueeze(1) * witness_support.clamp(max=1.0)
+            anomaly_authorized.unsqueeze(1) * witness_support.clamp(max=1.0)
         ).masked_fill(~validity, 0.0)
         completed = shifted + completion_gate * (completion_anchor - shifted)
         corrected = host_score + completed - base
@@ -165,6 +172,8 @@ class WitnessRouter(nn.Module):
             "summary": summary,
             "video_logit": video_logit,
             "video_probability": video_probability,
+            "anomaly_authorized": anomaly_authorized,
+            "normal_authorized": normal_authorized,
             "eta_normal": eta_normal,
             "eta_anomaly": eta_anomaly,
             "delta_normal": delta_normal,

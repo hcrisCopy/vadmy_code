@@ -6,7 +6,6 @@ from torch.nn import functional as F
 
 from vin_vad.witness_neurons import SignedTopKWitnessNeurons
 from vin_vad.witness_router import (
-    LocalWitnessCorrection,
     WitnessRouter,
     inverse_softplus,
     masked_mean,
@@ -100,7 +99,11 @@ class NeuronOnlyRouter(nn.Module):
 
     def __init__(self, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
         super().__init__()
-        self.local_head = LocalWitnessCorrection(local_width)
+        self.local_head = nn.Sequential(
+            nn.Conv1d(4, local_width, kernel_size=1),
+            nn.GELU(),
+            nn.Conv1d(local_width, 1, kernel_size=1),
+        )
         self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
 
     def forward(
@@ -112,9 +115,13 @@ class NeuronOnlyRouter(nn.Module):
     ) -> dict[str, torch.Tensor]:
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
+        features = torch.stack(
+            [host_clipped, evidence_clipped, host_clipped - evidence_clipped, host_clipped * evidence_clipped],
+            dim=1,
+        )
         direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
         raw = torch.tanh(
-            self.local_head(host_clipped, evidence_clipped, validity) + direct_witness
+            self.local_head(features).squeeze(1) + direct_witness
         ).masked_fill(~validity, 0.0)
         local_shape = raw
         eta_anomaly = (

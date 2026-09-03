@@ -58,14 +58,6 @@ class SignedTopKWitnessNeurons(nn.Module):
             score_threshold.to(self.normal_score_threshold)
         )
         self.normal_score_std.copy_(score_std.to(self.normal_score_std).clamp_min(1e-4))
-        # A witness must start from a weak-label-defined functional role instead
-        # of asking a random sparse gate to discover both support and direction.
-        # The parameters remain trainable in the single joint optimization.
-        selected = mask.to(self.gate_logits) > 0
-        self.gate_logits.copy_(torch.where(selected, 4.0, -4.0))
-        self.signed_weights.copy_(
-            direction.to(self.signed_weights) * weight.to(self.signed_weights)
-        )
         self.normal_role_ready.fill_(True)
 
     def gates(self, neuron_keep_mask: torch.Tensor | None = None) -> torch.Tensor:
@@ -94,22 +86,16 @@ class SignedTopKWitnessNeurons(nn.Module):
         if validity.shape != hidden.shape[:2] or validity.dtype != torch.bool:
             raise ValueError("validity must be a boolean [B,T] tensor")
         normalized = self.normalization(hidden)
+        gate = self.gates(neuron_keep_mask)
+        coordinate_weights = gate * self.signed_weights
+        layer_evidence = torch.einsum(
+            "btld,ld->btl", normalized, coordinate_weights
+        ) / math.sqrt(self.active)
+        layer_evidence = layer_evidence.masked_fill(~validity.unsqueeze(-1), 0.0)
         if bool(self.normal_role_ready):
             deviation = (
                 normalized - self.normal_mean.view(1, 1, self.layers, self.dimensions)
             ) / self.normal_std.view(1, 1, self.layers, self.dimensions)
-            primary_input = deviation
-        else:
-            deviation = None
-            primary_input = normalized
-        gate = self.gates(neuron_keep_mask)
-        coordinate_weights = gate * self.signed_weights
-        layer_evidence = torch.einsum(
-            "btld,ld->btl", primary_input, coordinate_weights
-        ) / math.sqrt(self.active)
-        layer_evidence = layer_evidence.masked_fill(~validity.unsqueeze(-1), 0.0)
-        if bool(self.normal_role_ready):
-            assert deviation is not None
             directional_deviation = torch.relu(
                 deviation * self.normal_role_direction.view(1, 1, self.layers, self.dimensions)
             )

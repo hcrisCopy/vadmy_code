@@ -33,36 +33,16 @@ def masked_summary(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor
     return torch.stack(rows)
 
 
-def witness_propagated_anchor(
-    host_score: torch.Tensor,
-    witness_support: torch.Tensor,
-    validity: torch.Tensor,
-) -> torch.Tensor:
-    """Propagate host peaks only through contiguous witness-supported events."""
-    if host_score.shape != witness_support.shape or validity.shape != host_score.shape:
-        raise ValueError("host_score, witness_support and validity must share [B,T]")
-
-    left = []
-    previous = torch.zeros_like(host_score[:, 0])
-    for time in range(host_score.shape[1]):
-        support = witness_support[:, time]
-        propagated = support * previous + (1.0 - support) * host_score[:, time]
-        current = torch.maximum(host_score[:, time], propagated)
-        current = torch.where(validity[:, time], current, torch.zeros_like(current))
-        left.append(current)
-        previous = current
-
-    right = []
-    previous = torch.zeros_like(host_score[:, 0])
-    for time in range(host_score.shape[1] - 1, -1, -1):
-        support = witness_support[:, time]
-        propagated = support * previous + (1.0 - support) * host_score[:, time]
-        current = torch.maximum(host_score[:, time], propagated)
-        current = torch.where(validity[:, time], current, torch.zeros_like(current))
-        right.append(current)
-        previous = current
-    right.reverse()
-    return torch.maximum(torch.stack(left, dim=1), torch.stack(right, dim=1))
+def masked_topk_anchor(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
+    """Use the host's standard weak-MIL top-k score as an event anchor."""
+    anchors = []
+    for value, mask in zip(values, validity):
+        valid = value[mask]
+        if valid.numel() == 0:
+            raise ValueError("every video needs at least one valid snippet")
+        count = min(valid.numel(), int(valid.numel() / 16 + 1))
+        anchors.append(torch.topk(valid, count).values.mean())
+    return torch.stack(anchors)
 
 
 def masked_correlation(first: torch.Tensor, second: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
@@ -146,11 +126,9 @@ class WitnessRouter(nn.Module):
         local_raw = local_raw.masked_fill(~validity, 0.0)
         witness_support = torch.relu(local_raw)
         veto_support = torch.relu(-local_raw)
-        event_anchor = witness_propagated_anchor(
-            host_clipped, witness_support, validity
-        )
+        event_anchor = masked_topk_anchor(host_clipped, validity)
         event_gap = torch.relu(
-            torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6))
+            torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6)).unsqueeze(1)
             - torch.logit(host_clipped)
         ).masked_fill(~validity, 0.0)
         local_shape = (

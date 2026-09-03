@@ -28,7 +28,7 @@ def test_padding_does_not_enter_topk_or_smoothness() -> None:
     torch.testing.assert_close(first_smooth, temporal_smoothness(changed, validity))
 
 
-def test_objective_gradient_ownership_preserves_independent_testimony() -> None:
+def test_every_objective_component_reaches_witness_parameters() -> None:
     hidden, host, validity, labels = sample()
     model = WitnessVAD()
     for name in ("video", "witness_mil", "final_mil", "dense_normal", "sparse"):
@@ -42,24 +42,12 @@ def test_objective_gradient_ownership_preserves_independent_testimony() -> None:
             model.expert.neurons.sparsity_surrogate(),
         )
         losses[name].backward()
-        expert_gradients = [
+        gradients = [
             parameter.grad.abs().sum()
             for parameter in model.expert.parameters()
             if parameter.grad is not None
         ]
-        expert_total = (
-            float(torch.stack(expert_gradients).sum()) if expert_gradients else 0.0
-        )
-        if name == "video":
-            assert expert_total == 0.0
-            router_gradients = [
-                parameter.grad.abs().sum()
-                for parameter in model.router.parameters()
-                if parameter.grad is not None
-            ]
-            assert router_gradients and float(torch.stack(router_gradients).sum()) > 0.0
-        else:
-            assert expert_total > 0.0, name
+        assert gradients and float(torch.stack(gradients).sum()) > 0.0, name
 
 
 def test_one_forward_backward_and_one_optimizer_step() -> None:

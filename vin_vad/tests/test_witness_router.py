@@ -8,7 +8,6 @@ from vin_vad.witness_router import (
     masked_local_max,
     masked_mean,
     masked_topk_anchor,
-    role_video_summary,
     video_summary,
 )
 
@@ -101,16 +100,6 @@ def test_padding_does_not_enter_video_pooling_or_router() -> None:
     torch.testing.assert_close(first_summary, second_summary)
     for name in ("video_probability", "delta_normal", "delta_anomaly"):
         torch.testing.assert_close(first[name], second[name])
-
-
-def test_role_video_summary_preserves_three_role_statistics() -> None:
-    host, evidence, validity = inputs()
-    roles = torch.stack([evidence, 1.0 - evidence, host], dim=-1)
-    summary = role_video_summary(host, roles, validity)
-    assert summary.shape == (2, 10)
-    changed = roles.clone()
-    changed[~validity] = 1e6
-    torch.testing.assert_close(summary, role_video_summary(host, changed, validity))
 
 
 def test_neuron_only_eta_override_changes_only_correction_strength() -> None:

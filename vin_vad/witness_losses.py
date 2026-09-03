@@ -72,7 +72,17 @@ def witness_objective(
         ).mean()
     else:
         dense_normal = evidence.sum() * 0.0
-    sparse_loss = sparsity
+    abnormal_mask = labels > 0.5
+    if abnormal_mask.any():
+        temporal_sparse = (
+            evidence * validity.to(evidence.dtype)
+        ).sum(dim=1)[abnormal_mask].mean()
+    else:
+        temporal_sparse = evidence.sum() * 0.0
+    # Sparse coordinates alone do not imply sparse temporal responsibility.
+    # Reuse the registered sparsity coefficient for the standard weak-MIL event
+    # prior, expressed as score mass so long diffuse activations are penalized.
+    sparse_loss = sparsity + temporal_sparse
     total = (
         video_loss
         + lambda_witness * neuron_loss
@@ -170,11 +180,18 @@ def variant_objective(
         else:
             dense_evidence = zero
         dense_normal = dense_corrected + dense_evidence
+        abnormal_mask = labels > 0.5
+        temporal_sparse = (
+            (evidence * validity.to(evidence.dtype)).sum(dim=1)[abnormal_mask].mean()
+            if abnormal_mask.any()
+            else zero
+        )
+        sparse_loss = sparsity + temporal_sparse
         total = (
             lambda_witness * neuron_loss
             + lambda_final * final_loss
             + lambda_normal * dense_normal
-            + lambda_sparse * sparsity
+            + lambda_sparse * sparse_loss
         )
         return {
             "total": total,
@@ -182,7 +199,7 @@ def variant_objective(
             "witness_mil": neuron_loss,
             "final_mil": final_loss,
             "dense_normal": dense_normal,
-            "sparse": sparsity,
+            "sparse": sparse_loss,
             "host_residual": residual.mean(),
         }
     raise ValueError("variant must be w1, w2 or w6")

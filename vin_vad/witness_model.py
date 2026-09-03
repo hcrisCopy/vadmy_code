@@ -11,6 +11,7 @@ from vin_vad.witness_router import (
     masked_mean,
     masked_standardize,
     masked_summary,
+    masked_topk_anchor,
 )
 from vin_vad.witness_temporal import WitnessTemporalReadout
 
@@ -123,7 +124,14 @@ class NeuronOnlyRouter(nn.Module):
         raw = torch.tanh(
             self.local_head(features).squeeze(1) + direct_witness
         ).masked_fill(~validity, 0.0)
-        local_shape = raw
+        witness_support = torch.relu(raw)
+        veto_support = torch.relu(-raw)
+        event_anchor = masked_topk_anchor(host_clipped, validity)
+        event_gap = torch.relu(
+            torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6)).unsqueeze(1)
+            - torch.logit(host_clipped)
+        ).masked_fill(~validity, 0.0)
+        local_shape = witness_support * event_gap - veto_support
         eta_anomaly = (
             F.softplus(self.raw_eta_anomaly)
             if eta_anomaly_override is None
@@ -138,6 +146,10 @@ class NeuronOnlyRouter(nn.Module):
             "delta_normal": torch.zeros_like(delta),
             "delta_anomaly": delta,
             "local_shape": local_shape,
+            "witness_support": witness_support,
+            "veto_support": veto_support,
+            "event_anchor": event_anchor,
+            "event_gap": event_gap,
             "corrected_score": corrected.clamp(0.0, 1.0).masked_fill(~validity, 0.0),
         }
 

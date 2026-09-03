@@ -33,6 +33,18 @@ def masked_summary(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor
     return torch.stack(rows)
 
 
+def masked_topk_anchor(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
+    """Use the host's standard weak-MIL top-k score as an event anchor."""
+    anchors = []
+    for value, mask in zip(values, validity):
+        valid = value[mask]
+        if valid.numel() == 0:
+            raise ValueError("every video needs at least one valid snippet")
+        count = min(valid.numel(), int(valid.numel() / 16 + 1))
+        anchors.append(torch.topk(valid, count).values.mean())
+    return torch.stack(anchors)
+
+
 def masked_correlation(first: torch.Tensor, second: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
     outputs = []
     for left, right, mask in zip(first, second, validity):
@@ -114,8 +126,13 @@ class WitnessRouter(nn.Module):
         local_raw = local_raw.masked_fill(~validity, 0.0)
         witness_support = torch.relu(local_raw)
         veto_support = torch.relu(-local_raw)
+        event_anchor = masked_topk_anchor(host_clipped, validity)
+        event_gap = torch.relu(
+            torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6)).unsqueeze(1)
+            - torch.logit(host_clipped)
+        ).masked_fill(~validity, 0.0)
         local_shape = (
-            video_probability.unsqueeze(1) * witness_support
+            video_probability.unsqueeze(1) * witness_support * event_gap
             - (1.0 - video_probability).unsqueeze(1) * veto_support
         ).masked_fill(~validity, 0.0)
         # q decides the correction direction; neuron evidence decides its support.
@@ -145,5 +162,7 @@ class WitnessRouter(nn.Module):
             "local_shape": local_shape,
             "witness_support": witness_support,
             "veto_support": veto_support,
+            "event_anchor": event_anchor,
+            "event_gap": event_gap,
             "corrected_score": corrected,
         }

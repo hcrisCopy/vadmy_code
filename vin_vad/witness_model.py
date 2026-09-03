@@ -12,7 +12,7 @@ from vin_vad.witness_router import (
     masked_standardize,
     masked_summary,
 )
-from vin_vad.witness_temporal import WitnessTemporalReadout
+from vin_vad.witness_temporal import WitnessCoordinateReadout
 
 
 class WitnessExpert(nn.Module):
@@ -21,7 +21,7 @@ class WitnessExpert(nn.Module):
     def __init__(self, active: int = 32, temporal_width: int = 64) -> None:
         super().__init__()
         self.neurons = SignedTopKWitnessNeurons(active=active)
-        self.temporal = WitnessTemporalReadout(width=temporal_width)
+        self.temporal = WitnessCoordinateReadout(width=temporal_width)
 
     def forward(
         self,

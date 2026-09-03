@@ -57,9 +57,12 @@ class WitnessVAD(nn.Module):
         eta_anomaly_override: float | None = None,
     ) -> dict[str, torch.Tensor]:
         expert = self.expert(hidden, validity, neuron_keep_mask)
+        # A witness is only auditable if the correction objective cannot rewrite
+        # what it claims to observe. The explicit witness losses train the expert;
+        # the router learns how to act on that evidence through a stopped mediator.
         routed = self.router(
             host_score,
-            expert["evidence"],
+            expert["evidence"].detach(),
             validity,
             eta_normal_override=eta_normal_override,
             eta_anomaly_override=eta_anomaly_override,

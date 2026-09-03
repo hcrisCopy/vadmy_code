@@ -28,10 +28,17 @@ def test_padding_does_not_enter_topk_or_smoothness() -> None:
     torch.testing.assert_close(first_smooth, temporal_smoothness(changed, validity))
 
 
-def test_every_objective_component_reaches_witness_parameters() -> None:
+def test_only_explicit_witness_objectives_reach_witness_parameters() -> None:
     hidden, host, validity, labels = sample()
     model = WitnessVAD()
-    for name in ("video", "witness_mil", "final_mil", "dense_normal", "sparse"):
+    expected = {
+        "video": False,
+        "witness_mil": True,
+        "final_mil": False,
+        "dense_normal": True,
+        "sparse": True,
+    }
+    for name, should_reach_expert in expected.items():
         model.zero_grad(set_to_none=True)
         result = model(hidden, host, validity)
         losses = witness_objective(
@@ -47,7 +54,8 @@ def test_every_objective_component_reaches_witness_parameters() -> None:
             for parameter in model.expert.parameters()
             if parameter.grad is not None
         ]
-        assert gradients and float(torch.stack(gradients).sum()) > 0.0, name
+        reached_expert = bool(gradients) and float(torch.stack(gradients).sum()) > 0.0
+        assert reached_expert is should_reach_expert, name
 
 
 def test_one_forward_backward_and_one_optimizer_step() -> None:

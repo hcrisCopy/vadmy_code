@@ -4,7 +4,6 @@ import math
 
 import torch
 from torch import nn
-from torch.nn import functional as F
 
 
 def masked_mean(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
@@ -34,19 +33,16 @@ def masked_summary(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor
     return torch.stack(rows)
 
 
-def masked_event_anchor(
-    values: torch.Tensor, validity: torch.Tensor, width: int = 41
-) -> torch.Tensor:
-    """Propagate frozen-host peaks only inside a local event neighborhood."""
-    if values.shape != validity.shape or validity.dtype != torch.bool:
-        raise ValueError("values and boolean validity must share [B,T]")
-    if width <= 0 or width % 2 == 0:
-        raise ValueError("event width must be a positive odd integer")
-    if not validity.any(dim=1).all():
-        raise ValueError("every video needs at least one valid snippet")
-    masked = values.masked_fill(~validity, -torch.inf).unsqueeze(1)
-    anchor = F.max_pool1d(masked, kernel_size=width, stride=1, padding=width // 2)
-    return anchor.squeeze(1).masked_fill(~validity, 0.0)
+def masked_topk_anchor(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
+    """Use the host's standard weak-MIL top-k score as an event anchor."""
+    anchors = []
+    for value, mask in zip(values, validity):
+        valid = value[mask]
+        if valid.numel() == 0:
+            raise ValueError("every video needs at least one valid snippet")
+        count = min(valid.numel(), int(valid.numel() / 16 + 1))
+        anchors.append(torch.topk(valid, count).values.mean())
+    return torch.stack(anchors)
 
 
 def masked_correlation(first: torch.Tensor, second: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
@@ -130,9 +126,9 @@ class WitnessRouter(nn.Module):
         local_raw = local_raw.masked_fill(~validity, 0.0)
         witness_support = torch.relu(local_raw)
         veto_support = torch.relu(-local_raw)
-        event_anchor = masked_event_anchor(host_clipped, validity)
+        event_anchor = masked_topk_anchor(host_clipped, validity)
         event_gap = torch.relu(
-            torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6))
+            torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6)).unsqueeze(1)
             - torch.logit(host_clipped)
         ).masked_fill(~validity, 0.0)
         local_shape = (

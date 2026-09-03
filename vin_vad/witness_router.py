@@ -104,7 +104,10 @@ class WitnessRouter(nn.Module):
         validity: torch.Tensor,
         eta_normal_override: float | None = None,
         eta_anomaly_override: float | None = None,
+        negative_consensus: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
+        if negative_consensus is not None and negative_consensus.shape != host_score.shape:
+            raise ValueError("negative_consensus must share the [B,T] host-score shape")
         summary = video_summary(host_score, evidence, validity)
         video_logit = self.video_head(summary).squeeze(1)
         video_probability = torch.sigmoid(video_logit)
@@ -134,6 +137,15 @@ class WitnessRouter(nn.Module):
         direct_host = masked_standardize(host_clipped, validity).clamp(-3.0, 3.0)
         witness_support = torch.relu(direct_witness)
         veto_support = torch.relu(-direct_witness)
+        host_support = torch.relu(direct_host)
+        consensus_conflict_veto = (
+            torch.zeros_like(host_support)
+            if negative_consensus is None
+            else torch.minimum(
+                host_support,
+                negative_consensus.clamp_min(0.0),
+            )
+        ).masked_fill(~validity, 0.0)
         host_miss_support = torch.relu(-direct_host)
         complementary_support = torch.minimum(
             witness_support, host_miss_support
@@ -150,6 +162,7 @@ class WitnessRouter(nn.Module):
                 witness_support
                 + complementary_support
                 + witness_event_support * event_gap
+                - consensus_conflict_veto
             )
             - normal_authorized.unsqueeze(1) * veto_support
         ).masked_fill(~validity, 0.0)
@@ -193,6 +206,7 @@ class WitnessRouter(nn.Module):
             "complementary_support": complementary_support,
             "witness_event_support": witness_event_support,
             "veto_support": veto_support,
+            "consensus_conflict_veto": consensus_conflict_veto,
             "event_anchor": event_anchor,
             "event_gap": event_gap,
             "completion_anchor": completion_anchor,

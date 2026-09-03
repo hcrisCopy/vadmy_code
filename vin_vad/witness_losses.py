@@ -22,14 +22,6 @@ def per_video_mil(score: torch.Tensor, validity: torch.Tensor, labels: torch.Ten
     return F.binary_cross_entropy(bag, labels.to(score.dtype), reduction="none")
 
 
-def masked_weighted_mean(
-    values: torch.Tensor, weights: torch.Tensor, validity: torch.Tensor
-) -> torch.Tensor:
-    effective = weights * validity.to(weights.dtype)
-    denominator = effective.sum(dim=1).clamp_min(1e-6)
-    return (values * effective).sum(dim=1) / denominator
-
-
 def ranking_loss(score: torch.Tensor, validity: torch.Tensor, labels: torch.Tensor, margin: float) -> torch.Tensor:
     bag = topk_bag_probability(score, validity)
     normal = bag[labels <= 0.5]
@@ -74,12 +66,9 @@ def witness_objective(
     if normal_mask.any():
         normal_evidence = -torch.log1p(-evidence.clamp(max=1.0 - 1e-6))
         normal_corrected = -torch.log1p(-corrected.clamp(max=1.0 - 1e-6))
-        # Every normal snippet is a trusted negative, but the host's high-risk
-        # snippets are the residual errors that matter for ranking.
-        normal_risk = host_score.detach().clamp_min(1e-3)
         dense_normal = (
-            masked_weighted_mean(normal_evidence, normal_risk, validity)[normal_mask]
-            + masked_weighted_mean(normal_corrected, normal_risk, validity)[normal_mask]
+            masked_mean(normal_evidence, validity)[normal_mask]
+            + masked_mean(normal_corrected, validity)[normal_mask]
         ).mean()
     else:
         dense_normal = evidence.sum() * 0.0
@@ -177,14 +166,7 @@ def variant_objective(
         )
         if normal_mask.any():
             evidence_normal = -torch.log1p(-evidence.clamp(max=1.0 - 1e-6))
-            normal_risk = host_score.detach().clamp_min(1e-3)
-            dense_evidence = masked_weighted_mean(
-                evidence_normal, normal_risk, validity
-            )[normal_mask].mean()
-            corrected_normal = -torch.log1p(-corrected.clamp(max=1.0 - 1e-6))
-            dense_corrected = masked_weighted_mean(
-                corrected_normal, normal_risk, validity
-            )[normal_mask].mean()
+            dense_evidence = masked_mean(evidence_normal, validity)[normal_mask].mean()
         else:
             dense_evidence = zero
         dense_normal = dense_corrected + dense_evidence

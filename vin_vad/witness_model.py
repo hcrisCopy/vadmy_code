@@ -22,6 +22,7 @@ class WitnessExpert(nn.Module):
         super().__init__()
         self.neurons = SignedTopKWitnessNeurons(active=active)
         self.temporal = WitnessTemporalReadout(width=temporal_width)
+        self.veto_temporal = WitnessTemporalReadout(width=temporal_width)
 
     def forward(
         self,
@@ -31,8 +32,16 @@ class WitnessExpert(nn.Module):
     ) -> dict[str, torch.Tensor]:
         neuron = self.neurons(hidden, validity, neuron_keep_mask)
         logits = self.temporal(neuron["temporal_input"], validity)
+        veto_logits = self.veto_temporal(neuron["temporal_input"], validity)
         evidence = torch.sigmoid(logits).masked_fill(~validity, 0.0)
-        return {**neuron, "evidence_logits": logits, "evidence": evidence}
+        veto_evidence = torch.sigmoid(veto_logits).masked_fill(~validity, 0.0)
+        return {
+            **neuron,
+            "evidence_logits": logits,
+            "evidence": evidence,
+            "veto_logits": veto_logits,
+            "veto_evidence": veto_evidence,
+        }
 
 
 class WitnessVAD(nn.Module):
@@ -61,6 +70,7 @@ class WitnessVAD(nn.Module):
             host_score,
             expert["evidence"],
             validity,
+            veto_evidence=expert["veto_evidence"],
             eta_normal_override=eta_normal_override,
             eta_anomaly_override=eta_anomaly_override,
         )
@@ -100,9 +110,9 @@ class NeuronOnlyRouter(nn.Module):
     def __init__(self, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
         super().__init__()
         self.local_head = nn.Sequential(
-            nn.Conv1d(4, local_width, kernel_size=1),
+            nn.Conv1d(6, local_width, kernel_size=1),
             nn.GELU(),
-            nn.Conv1d(local_width, 1, kernel_size=1),
+            nn.Conv1d(local_width, 2, kernel_size=1),
         )
         self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
 
@@ -112,18 +122,24 @@ class NeuronOnlyRouter(nn.Module):
         evidence: torch.Tensor,
         validity: torch.Tensor,
         eta_anomaly_override: float | None = None,
+        veto_evidence: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
+        veto_evidence = 1.0 - evidence if veto_evidence is None else veto_evidence
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
+        veto_clipped = veto_evidence.clamp(1e-6, 1.0 - 1e-6)
         features = torch.stack(
-            [host_clipped, evidence_clipped, host_clipped - evidence_clipped, host_clipped * evidence_clipped],
+            [host_clipped, evidence_clipped, veto_clipped,
+             host_clipped - evidence_clipped, host_clipped - veto_clipped,
+             evidence_clipped - veto_clipped],
             dim=1,
         )
         direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
-        raw = torch.tanh(
-            self.local_head(features).squeeze(1) + direct_witness
-        ).masked_fill(~validity, 0.0)
-        local_shape = raw
+        direct_veto = masked_standardize(veto_clipped, validity).clamp(-3.0, 3.0)
+        residual = self.local_head(features)
+        witness_support = torch.relu(torch.tanh(residual[:, 0] + direct_witness))
+        veto_support = torch.relu(torch.tanh(residual[:, 1] + direct_veto))
+        local_shape = (witness_support - veto_support).masked_fill(~validity, 0.0)
         eta_anomaly = (
             F.softplus(self.raw_eta_anomaly)
             if eta_anomaly_override is None
@@ -138,6 +154,8 @@ class NeuronOnlyRouter(nn.Module):
             "delta_normal": torch.zeros_like(delta),
             "delta_anomaly": delta,
             "local_shape": local_shape,
+            "witness_support": witness_support,
+            "veto_support": veto_support,
             "corrected_score": corrected.clamp(0.0, 1.0).masked_fill(~validity, 0.0),
         }
 
@@ -163,6 +181,7 @@ class NeuronOnlyWitnessVAD(nn.Module):
                 expert["evidence"],
                 validity,
                 eta_anomaly_override=eta_anomaly_override,
+                veto_evidence=expert["veto_evidence"],
             ),
         }
 

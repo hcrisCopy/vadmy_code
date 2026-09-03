@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+from torch.nn import functional as F
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
@@ -22,6 +23,64 @@ from vin_vad.data import (
 )
 from vin_vad.witness_losses import variant_objective
 from vin_vad.witness_model import build_witness_variant
+
+
+@torch.no_grad()
+def initialize_residual_contrast(
+    model: torch.nn.Module,
+    dataset: AuditorTrainingDataset,
+    device: torch.device,
+) -> dict[str, object]:
+    """Initialize sparse neurons from weak-label host-residual contrast.
+
+    The statistic is univariate and deterministic: hard abnormal bags contribute
+    temporal top-k activation, while hard normal bags provide matched negative
+    counterexamples.  No snippet labels or test data are used.
+    """
+    expert = getattr(model, "expert", None)
+    if expert is None:
+        raise ValueError("residual contrast requires a witness expert")
+    neurons = expert.neurons
+    shape = (neurons.layers, neurons.dimensions)
+    positive = torch.zeros(2, *shape, dtype=torch.float64, device=device)
+    negative = torch.zeros_like(positive)
+    weight_sum = torch.zeros(2, dtype=torch.float64, device=device)
+    for index in tqdm(
+        range(len(dataset)), desc="initialize host-residual witness contrast", unit="video"
+    ):
+        item = dataset[index]
+        hidden = item["hidden"].to(device, non_blocking=True)
+        host = item["host_score"].to(device, non_blocking=True)
+        label = int(item["label"])
+        count = min(len(host), int(len(host) / 16 + 1))
+        residual = abs(float(label) - float(torch.topk(host, count).values.mean()))
+        if residual <= 0.0:
+            continue
+        normalized = F.layer_norm(hidden, (neurons.dimensions,))
+        upper = torch.topk(normalized, count, dim=0).values.mean(dim=0).double()
+        lower = torch.topk(-normalized, count, dim=0).values.mean(dim=0).double()
+        target = positive if label else negative
+        target[0].add_(upper, alpha=residual)
+        target[1].add_(lower, alpha=residual)
+        weight_sum[label] += residual
+    if torch.any(weight_sum <= 0.0):
+        raise RuntimeError("residual contrast needs non-zero weight in both classes")
+    gap = positive / weight_sum[1] - negative / weight_sum[0]
+    score, direction_index = gap.max(dim=0)
+    standardized = (score - score.mean()) / score.std().clamp_min(1e-6)
+    neurons.gate_logits.copy_(0.1 * standardized.to(neurons.gate_logits.dtype))
+    direction = torch.where(direction_index == 0, 1.0, -1.0)
+    neurons.signed_weights.copy_(
+        0.02 * direction.to(neurons.signed_weights.dtype)
+    )
+    selected = torch.topk(neurons.gate_logits.flatten(), neurons.active).indices
+    layer_counts = torch.bincount(
+        selected // neurons.dimensions, minlength=neurons.layers
+    )
+    return {
+        "class_residual_weight": [float(value) for value in weight_sum.cpu()],
+        "selected_per_layer": [int(value) for value in layer_counts.cpu()],
+    }
 
 
 def seed_everything(seed: int) -> None:
@@ -62,7 +121,8 @@ def ensure_training_paths(manifest: Path, output: Path) -> None:
 
 def comparable_configuration(config: dict[str, object]) -> dict[str, object]:
     """Git provenance is recorded but is not a training hyperparameter."""
-    comparable = {key: value for key, value in config.items() if key != "git_commit"}
+    derived = {"git_commit", "residual_contrast"}
+    comparable = {key: value for key, value in config.items() if key not in derived}
     comparable.setdefault("variant", "w6")
     comparable.setdefault("num_workers", 0)
     comparable.setdefault("cache_training_data", False)
@@ -217,6 +277,7 @@ def main() -> None:
             ),
             "test_data_used": False,
             "optimizer_count": 1,
+            "residual_contrast_initialization": args.variant in {"w2", "w6"},
         }
     )
     config_path = output / "config.json"
@@ -258,6 +319,12 @@ def main() -> None:
         eta_normal=args.eta_normal,
         eta_anomaly=args.eta_anomaly,
     ).to(device)
+    if not (args.resume and last_path.exists()) and isinstance(
+        dataset, AuditorTrainingDataset
+    ):
+        initialization = initialize_residual_contrast(model, dataset, device)
+        configuration["residual_contrast"] = initialization
+        config_path.write_text(json.dumps(configuration, indent=2), encoding="utf-8")
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )

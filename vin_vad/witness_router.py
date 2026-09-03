@@ -75,6 +75,20 @@ def inverse_softplus(value: float) -> float:
     return math.log(math.expm1(value))
 
 
+def bounded_completion_delta(
+    host_score: torch.Tensor,
+    event_anchor: torch.Tensor,
+    authorization: torch.Tensor,
+    intensity: torch.Tensor,
+) -> torch.Tensor:
+    """Interpolate toward a host-confirmed anchor without creating a new peak."""
+    fraction = -torch.expm1(-intensity) * authorization.clamp(0.0, 1.0)
+    target = host_score + fraction * torch.relu(event_anchor - host_score)
+    return torch.logit(target.clamp(1e-6, 1.0 - 1e-6)) - torch.logit(
+        host_score.clamp(1e-6, 1.0 - 1e-6)
+    )
+
+
 class WitnessRouter(nn.Module):
     """One video state routes global suppression and local witness correction."""
 
@@ -127,10 +141,18 @@ class WitnessRouter(nn.Module):
         witness_support = torch.relu(local_raw)
         veto_support = torch.relu(-local_raw)
         event_anchor = masked_topk_anchor(host_clipped, validity)
-        event_gap = torch.relu(
-            torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6)).unsqueeze(1)
-            - torch.logit(host_clipped)
-        ).masked_fill(~validity, 0.0)
+        event_gap = torch.relu(event_anchor.unsqueeze(1) - host_clipped).masked_fill(
+            ~validity, 0.0
+        )
+        positive_delta = bounded_completion_delta(
+            host_clipped,
+            event_anchor.unsqueeze(1),
+            video_probability.unsqueeze(1) * witness_support,
+            eta_anomaly,
+        )
+        negative_delta = -eta_anomaly * (
+            1.0 - video_probability
+        ).unsqueeze(1) * veto_support
         local_shape = (
             video_probability.unsqueeze(1) * witness_support * event_gap
             - (1.0 - video_probability).unsqueeze(1) * veto_support
@@ -138,7 +160,7 @@ class WitnessRouter(nn.Module):
         # q decides the correction direction; neuron evidence decides its support.
         # A non-zero mean is required to repair cross-video ranking, which dominates
         # frame AUC/AP, while the support remains temporally localized.
-        delta_anomaly = eta_anomaly * local_shape
+        delta_anomaly = (positive_delta + negative_delta).masked_fill(~validity, 0.0)
         delta_anomaly = delta_anomaly.masked_fill(~validity, 0.0)
         delta_normal = delta_normal.masked_fill(~validity, 0.0)
 

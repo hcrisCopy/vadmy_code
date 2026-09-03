@@ -4,6 +4,7 @@ import torch
 
 from vin_vad.witness_model import NeuronOnlyRouter
 from vin_vad.witness_router import (
+    bounded_completion_delta,
     WitnessRouter,
     masked_mean,
     masked_topk_anchor,
@@ -51,6 +52,17 @@ def test_event_anchor_uses_standard_weak_mil_topk() -> None:
     torch.testing.assert_close(anchor, torch.tensor([0.9]))
 
 
+def test_bounded_completion_never_overshoots_host_anchor() -> None:
+    host = torch.tensor([[0.1, 0.7]])
+    anchor = torch.tensor([[0.8, 0.8]])
+    delta = bounded_completion_delta(
+        host, anchor, torch.ones_like(host), torch.tensor(2.0)
+    )
+    completed = torch.sigmoid(torch.logit(host) + delta)
+    assert torch.all(completed >= host)
+    assert torch.all(completed <= anchor)
+
+
 def test_padding_does_not_enter_video_pooling_or_router() -> None:
     host, evidence, validity = inputs()
     router = WitnessRouter()
@@ -73,9 +85,7 @@ def test_neuron_only_eta_override_changes_only_correction_strength() -> None:
     weak = router(host, evidence, validity, eta_anomaly_override=0.25)
     strong = router(host, evidence, validity, eta_anomaly_override=0.60)
     torch.testing.assert_close(weak["local_shape"], strong["local_shape"])
-    torch.testing.assert_close(
-        strong["delta_anomaly"],
-        weak["delta_anomaly"] * (0.60 / 0.25),
-        atol=1e-6,
-        rtol=1e-6,
+    assert torch.all(
+        strong["delta_anomaly"].abs()[validity]
+        >= weak["delta_anomaly"].abs()[validity]
     )

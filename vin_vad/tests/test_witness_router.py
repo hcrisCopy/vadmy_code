@@ -50,6 +50,18 @@ def test_video_state_routes_witness_and_veto_support() -> None:
     assert torch.all(abnormal["delta_anomaly"][neighbor_completion] > 0.0)
     assert torch.all(normal["delta_anomaly"][normal["veto_support"] > 0] < 0.0)
     assert torch.any(masked_mean(abnormal["delta_anomaly"], validity).abs() > 1e-5)
+    assert torch.all(abnormal["completion_gate"][validity] >= 0.0)
+    assert torch.all(abnormal["completion_gate"][validity] <= 1.0)
+    shifted = torch.sigmoid(
+        torch.logit(host.clamp(1e-6, 1.0 - 1e-6))
+        + abnormal["delta_normal"]
+        + abnormal["delta_anomaly"]
+    )
+    completed = shifted + abnormal["completion_gate"] * (
+        abnormal["completion_anchor"] - shifted
+    )
+    assert torch.all(completed[validity] >= shifted[validity])
+    assert torch.all(completed[validity] <= abnormal["completion_anchor"][validity])
 
 
 def test_event_anchor_uses_standard_weak_mil_topk() -> None:

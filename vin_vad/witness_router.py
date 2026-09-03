@@ -131,18 +131,25 @@ class WitnessRouter(nn.Module):
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
         direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
+        direct_host = masked_standardize(host_clipped, validity).clamp(-3.0, 3.0)
         witness_support = torch.relu(direct_witness)
         veto_support = torch.relu(-direct_witness)
+        host_support = torch.relu(direct_host)
+        conflict_veto = torch.minimum(host_support, veto_support)
         witness_event_support = masked_local_max(witness_support, validity)
         event_anchor = masked_local_max(host_clipped, validity)
         event_gap = torch.relu(
             torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6))
             - torch.logit(host_clipped)
         ).masked_fill(~validity, 0.0)
+        effective_veto = (
+            normal_authorized.unsqueeze(1) * veto_support
+            + anomaly_authorized.unsqueeze(1) * conflict_veto
+        )
         local_shape = (
             anomaly_authorized.unsqueeze(1)
             * (witness_support + witness_event_support * event_gap)
-            - normal_authorized.unsqueeze(1) * veto_support
+            - effective_veto
         ).masked_fill(~validity, 0.0)
         # q decides the correction direction; neuron evidence decides its support.
         # A non-zero mean is required to repair cross-video ranking, which dominates
@@ -182,6 +189,8 @@ class WitnessRouter(nn.Module):
             "witness_support": witness_support,
             "witness_event_support": witness_event_support,
             "veto_support": veto_support,
+            "conflict_veto": conflict_veto,
+            "effective_veto": effective_veto,
             "event_anchor": event_anchor,
             "event_gap": event_gap,
             "completion_anchor": completion_anchor,

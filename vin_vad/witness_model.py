@@ -16,6 +16,22 @@ from vin_vad.witness_router import (
 from vin_vad.witness_temporal import WitnessTemporalReadout
 
 
+def masked_temporal_mean(
+    values: torch.Tensor, validity: torch.Tensor, width: int
+) -> torch.Tensor:
+    if values.shape != validity.shape or width <= 0 or width % 2 == 0:
+        raise ValueError("values/validity must share [B,T] and width must be positive odd")
+    mask = validity.unsqueeze(1).to(values.dtype)
+    kernel = torch.ones(1, 1, width, dtype=values.dtype, device=values.device)
+    numerator = F.conv1d(
+        (values * validity.to(values.dtype)).unsqueeze(1),
+        kernel,
+        padding=width // 2,
+    )
+    denominator = F.conv1d(mask, kernel, padding=width // 2).clamp_min(1.0)
+    return (numerator / denominator).squeeze(1).masked_fill(~validity, 0.0)
+
+
 class WitnessExpert(nn.Module):
     """Neuron-only path: its API intentionally has no host-score argument."""
 
@@ -31,9 +47,25 @@ class WitnessExpert(nn.Module):
         neuron_keep_mask: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         neuron = self.neurons(hidden, validity, neuron_keep_mask)
-        logits = self.temporal(neuron["temporal_input"], validity)
+        primary_logits = self.temporal(neuron["temporal_input"], validity)
+        layer_weight = self.neurons.layers * neuron["layer_probability"].view(1, 1, -1)
+        normality_raw = (neuron["normality_layer_evidence"] * layer_weight).sum(dim=-1)
+        normality_view = masked_standardize(normality_raw, validity).clamp(-3.0, 3.0)
+        short_context = masked_temporal_mean(normality_view, validity, width=13)
+        long_context = masked_temporal_mean(normality_view, validity, width=25)
+        context_view = masked_standardize(
+            0.5 * (short_context + long_context), validity
+        ).clamp(-3.0, 3.0)
+        logits = primary_logits + normality_view + context_view
         evidence = torch.sigmoid(logits).masked_fill(~validity, 0.0)
-        return {**neuron, "evidence_logits": logits, "evidence": evidence}
+        return {
+            **neuron,
+            "primary_evidence": torch.sigmoid(primary_logits).masked_fill(~validity, 0.0),
+            "normality_evidence": torch.sigmoid(normality_view).masked_fill(~validity, 0.0),
+            "context_evidence": torch.sigmoid(context_view).masked_fill(~validity, 0.0),
+            "evidence_logits": logits,
+            "evidence": evidence,
+        }
 
 
 class WitnessVAD(nn.Module):

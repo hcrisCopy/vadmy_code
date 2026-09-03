@@ -66,3 +66,25 @@ def test_temporal_padding_never_changes_valid_output() -> None:
     second = module(changed, validity)
     torch.testing.assert_close(first[validity], second[validity])
     assert torch.equal(second[~validity], torch.zeros_like(second[~validity]))
+
+
+def test_role_aware_jury_exposes_three_views() -> None:
+    hidden, validity = sample_hidden()
+    expert = WitnessExpert()
+    expert.neurons.set_normal_reference(torch.zeros(12, 768), torch.ones(12, 768))
+    result = expert(hidden, validity)
+    for name in ("primary_evidence", "normality_evidence", "context_evidence"):
+        assert result[name].shape == validity.shape
+        assert torch.equal(result[name][~validity], torch.zeros_like(result[name][~validity]))
+
+
+def test_role_aware_jury_ignores_padded_hidden_content() -> None:
+    hidden, validity = sample_hidden()
+    expert = WitnessExpert()
+    expert.neurons.set_normal_reference(torch.zeros(12, 768), torch.ones(12, 768))
+    first = expert(hidden, validity)
+    changed = hidden.clone()
+    changed[~validity] = torch.randn_like(changed[~validity]) * 1000
+    second = expert(changed, validity)
+    for name in ("primary_evidence", "normality_evidence", "context_evidence", "evidence"):
+        torch.testing.assert_close(first[name][validity], second[name][validity])

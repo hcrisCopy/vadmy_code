@@ -126,13 +126,15 @@ class WitnessRouter(nn.Module):
         direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
         witness_support = torch.relu(direct_witness)
         veto_support = torch.relu(-direct_witness)
+        witness_event_support = masked_local_max(witness_support, validity)
         event_anchor = masked_local_max(host_clipped, validity)
         event_gap = torch.relu(
             torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6))
             - torch.logit(host_clipped)
         ).masked_fill(~validity, 0.0)
         local_shape = (
-            video_probability.unsqueeze(1) * witness_support * (1.0 + event_gap)
+            video_probability.unsqueeze(1)
+            * (witness_support + witness_event_support * event_gap)
             - (1.0 - video_probability).unsqueeze(1) * veto_support
         ).masked_fill(~validity, 0.0)
         # q decides the correction direction; neuron evidence decides its support.
@@ -161,6 +163,7 @@ class WitnessRouter(nn.Module):
             "delta_anomaly": delta_anomaly,
             "local_shape": local_shape,
             "witness_support": witness_support,
+            "witness_event_support": witness_event_support,
             "veto_support": veto_support,
             "event_anchor": event_anchor,
             "event_gap": event_gap,

@@ -56,14 +56,10 @@ class WitnessExpert(nn.Module):
             normality_raw - self.neurons.normal_score_threshold
         ) / self.neurons.normal_score_std
         normality_logits = normality_logits.masked_fill(~validity, 0.0)
-        # The context role must verify whether primary witnesses form a temporal
-        # event.  Normality remains an independent role instead of being counted
-        # twice through both the normality and context votes.
-        primary_layers = neuron["temporal_input"]
         context_input = torch.cat(
             [
-                masked_temporal_mean(primary_layers, validity, width=9),
-                masked_temporal_mean(primary_layers, validity, width=25),
+                masked_temporal_mean(normality_layers, validity, width=9),
+                masked_temporal_mean(normality_layers, validity, width=25),
             ],
             dim=-1,
         )

@@ -80,7 +80,7 @@ for dataset in $DATASETS; do
       --videos-per-class 0 \
       --num-workers 4 \
       --cache-training-data \
-      --active-neurons 128 \
+      --active-neurons 32 \
       --temporal-width 64 \
       --eta-normal 1.0 \
       --eta-anomaly 0.25 \

@@ -66,3 +66,27 @@ def test_temporal_padding_never_changes_valid_output() -> None:
     second = module(changed, validity)
     torch.testing.assert_close(first[validity], second[validity])
     assert torch.equal(second[~validity], torch.zeros_like(second[~validity]))
+
+
+def test_role_jury_has_distinct_auditable_views() -> None:
+    hidden, validity = sample_hidden()
+    expert = WitnessExpert()
+    mask = torch.zeros(12, 768)
+    mask[:, :32] = 1.0
+    expert.neurons.set_normal_role(
+        torch.zeros(12, 768),
+        torch.ones(12, 768),
+        mask,
+        torch.ones(12, 768),
+        mask,
+    )
+    result = expert(hidden, validity)
+    for name in (
+        "primary_evidence",
+        "normality_evidence",
+        "context_evidence",
+        "positive_agreement",
+        "negative_agreement",
+    ):
+        assert result[name].shape == validity.shape
+        assert torch.equal(result[name][~validity], torch.zeros_like(result[name][~validity]))

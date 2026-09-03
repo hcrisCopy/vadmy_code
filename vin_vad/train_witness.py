@@ -24,6 +24,80 @@ from vin_vad.witness_losses import variant_objective
 from vin_vad.witness_model import build_witness_variant
 
 
+@torch.no_grad()
+def fit_role_disentangled_reference(
+    model: torch.nn.Module,
+    dataset: AuditorTrainingDataset,
+    normal_indices: list[int],
+    device: torch.device,
+) -> dict[str, int]:
+    """Identify normal-deviation neurons from training bags only.
+
+    Normal snippets define the reference distribution.  Positive/negative bags
+    then rank upper and lower tail deviations, without assigning positive labels
+    to every snippet in an abnormal video.
+    """
+    neurons = model.expert.neurons
+    total = torch.zeros(
+        neurons.layers, neurons.dimensions, dtype=torch.float64, device=device
+    )
+    square = torch.zeros_like(total)
+    snippet_count = 0
+    for index in tqdm(normal_indices, desc="fit normal neuron moments", unit="video"):
+        hidden = dataset[index]["hidden"].to(device, non_blocking=True)
+        normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
+        total += normalized.sum(dim=0)
+        square += normalized.square().sum(dim=0)
+        snippet_count += len(normalized)
+    mean = total / max(snippet_count, 1)
+    variance = (square / max(snippet_count, 1) - mean.square()).clamp_min(1e-4)
+    standard_deviation = variance.sqrt()
+
+    class_sum = torch.zeros(
+        2, 2, neurons.layers, neurons.dimensions, dtype=torch.float64, device=device
+    )
+    class_square = torch.zeros_like(class_sum)
+    class_count = torch.zeros(2, dtype=torch.float64, device=device)
+    for index in tqdm(range(len(dataset)), desc="rank role neurons", unit="video"):
+        item = dataset[index]
+        hidden = item["hidden"].to(device, non_blocking=True)
+        normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
+        deviation = (normalized - mean) / standard_deviation
+        tail_count = min(len(deviation), max(1, len(deviation) // 16 + 1))
+        upper = torch.topk(deviation, tail_count, dim=0).values.mean(dim=0)
+        lower = torch.topk(-deviation, tail_count, dim=0).values.mean(dim=0)
+        summary = torch.stack([upper, lower])
+        label = int(item["label"])
+        class_sum[label] += summary
+        class_square[label] += summary.square()
+        class_count[label] += 1
+    class_mean = class_sum / class_count[:, None, None, None].clamp_min(1.0)
+    class_variance = (
+        class_square / class_count[:, None, None, None].clamp_min(1.0)
+        - class_mean.square()
+    ).clamp_min(1e-6)
+    effect = torch.relu(
+        (class_mean[1] - class_mean[0])
+        / torch.sqrt(class_variance[0] + class_variance[1])
+    )
+    best_effect, best_direction = effect.max(dim=0)
+    active_per_layer = min(neurons.active, neurons.dimensions)
+    selected = torch.topk(best_effect, active_per_layer, dim=-1).indices
+    mask = torch.zeros_like(best_effect).scatter_(-1, selected, 1.0)
+    direction = torch.where(best_direction == 0, 1.0, -1.0)
+    weight = best_effect * mask
+    weight = weight / (
+        weight.sum(dim=-1, keepdim=True) / active_per_layer
+    ).clamp_min(1e-6)
+    neurons.set_normal_role(
+        mean.float(), standard_deviation.float(), mask.float(), direction.float(), weight.float()
+    )
+    return {
+        "normal_reference_snippets": snippet_count,
+        "normal_role_neurons_per_layer": active_per_layer,
+    }
+
+
 def seed_everything(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -62,7 +136,12 @@ def ensure_training_paths(manifest: Path, output: Path) -> None:
 
 def comparable_configuration(config: dict[str, object]) -> dict[str, object]:
     """Git provenance is recorded but is not a training hyperparameter."""
-    comparable = {key: value for key, value in config.items() if key != "git_commit"}
+    derived = {
+        "git_commit",
+        "normal_reference_snippets",
+        "normal_role_neurons_per_layer",
+    }
+    comparable = {key: value for key, value in config.items() if key not in derived}
     comparable.setdefault("variant", "w6")
     comparable.setdefault("num_workers", 0)
     comparable.setdefault("cache_training_data", False)
@@ -258,6 +337,15 @@ def main() -> None:
         eta_normal=args.eta_normal,
         eta_anomaly=args.eta_anomaly,
     ).to(device)
+    if (
+        args.variant == "w6"
+        and not (args.resume and last_path.exists())
+        and isinstance(dataset, AuditorTrainingDataset)
+    ):
+        configuration.update(
+            fit_role_disentangled_reference(model, dataset, normal_indices, device)
+        )
+        config_path.write_text(json.dumps(configuration, indent=2), encoding="utf-8")
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )

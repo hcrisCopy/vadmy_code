@@ -4,6 +4,7 @@ import math
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 
 def masked_mean(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
@@ -45,6 +46,18 @@ def masked_topk_anchor(values: torch.Tensor, validity: torch.Tensor) -> torch.Te
     return torch.stack(anchors)
 
 
+def masked_local_max(
+    values: torch.Tensor, validity: torch.Tensor, width: int = 41
+) -> torch.Tensor:
+    if values.shape != validity.shape or width <= 0 or width % 2 == 0:
+        raise ValueError("values/validity must share [B,T] and width must be positive odd")
+    masked = values.masked_fill(~validity, -torch.inf)
+    pooled = F.max_pool1d(
+        masked.unsqueeze(1), kernel_size=width, stride=1, padding=width // 2
+    ).squeeze(1)
+    return pooled.masked_fill(~validity, 0.0)
+
+
 def masked_correlation(first: torch.Tensor, second: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
     outputs = []
     for left, right, mask in zip(first, second, validity):
@@ -81,11 +94,6 @@ class WitnessRouter(nn.Module):
     def __init__(self, eta_normal: float = 1.0, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
         super().__init__()
         self.video_head = nn.Linear(10, 1)
-        self.local_head = nn.Sequential(
-            nn.Conv1d(4, local_width, kernel_size=1),
-            nn.GELU(),
-            nn.Conv1d(local_width, 1, kernel_size=1),
-        )
         self.raw_eta_normal = nn.Parameter(torch.tensor(inverse_softplus(eta_normal)))
         self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
 
@@ -115,24 +123,16 @@ class WitnessRouter(nn.Module):
 
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
-        local_input = torch.stack(
-            [host_clipped, evidence_clipped, host_clipped - evidence_clipped, host_clipped * evidence_clipped],
-            dim=1,
-        )
         direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
-        local_raw = torch.tanh(
-            self.local_head(local_input).squeeze(1) + direct_witness
-        )
-        local_raw = local_raw.masked_fill(~validity, 0.0)
-        witness_support = torch.relu(local_raw)
-        veto_support = torch.relu(-local_raw)
-        event_anchor = masked_topk_anchor(host_clipped, validity)
+        witness_support = torch.relu(direct_witness)
+        veto_support = torch.relu(-direct_witness)
+        event_anchor = masked_local_max(host_clipped, validity)
         event_gap = torch.relu(
-            torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6)).unsqueeze(1)
+            torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6))
             - torch.logit(host_clipped)
         ).masked_fill(~validity, 0.0)
         local_shape = (
-            video_probability.unsqueeze(1) * witness_support * event_gap
+            video_probability.unsqueeze(1) * witness_support * (1.0 + event_gap)
             - (1.0 - video_probability).unsqueeze(1) * veto_support
         ).masked_fill(~validity, 0.0)
         # q decides the correction direction; neuron evidence decides its support.

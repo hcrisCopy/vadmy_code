@@ -51,6 +51,9 @@ def fit_role_disentangled_reference(
     )
     class_square = torch.zeros_like(class_sum)
     class_count = torch.zeros(2, dtype=torch.float64, device=device)
+    residual_sum = torch.zeros_like(class_sum)
+    residual_square = torch.zeros_like(class_sum)
+    residual_count = torch.zeros(2, dtype=torch.float64, device=device)
     for index in tqdm(range(len(dataset)), desc="rank role neurons", unit="video"):
         item = dataset[index]
         hidden = item["hidden"].to(device, non_blocking=True)
@@ -67,32 +70,54 @@ def fit_role_disentangled_reference(
         class_sum[label] += summary
         class_square[label] += summary.square()
         class_count[label] += 1
-    class_mean = class_sum / class_count[:, None, None, None].clamp_min(1.0)
-    class_variance = (
-        class_square / class_count[:, None, None, None].clamp_min(1.0)
-        - class_mean.square()
-    ).clamp_min(1e-6)
-    effect = torch.relu(
-        (class_mean[1] - class_mean[0])
-        / torch.sqrt(class_variance[0] + class_variance[1])
-    )
-    best_effect, best_direction = effect.max(dim=0)
-    active_per_layer = min(neurons.active, neurons.dimensions)
-    selected = torch.topk(best_effect, active_per_layer, dim=-1).indices
-    mask = torch.zeros_like(best_effect).scatter_(-1, selected, 1.0)
-    direction = torch.where(best_direction == 0, 1.0, -1.0)
-    weight = best_effect * mask
-    weight = weight / (
-        weight.sum(dim=-1, keepdim=True) / active_per_layer
-    ).clamp_min(1e-6)
+        host_score = item["host_score"].to(device, non_blocking=True).double()
+        host_bag = torch.topk(host_score, tail_count).values.mean().clamp(0.0, 1.0)
+        residual = (host_bag - float(label)).abs()
+        residual_sum[label] += residual * summary
+        residual_square[label] += residual * summary.square()
+        residual_count[label] += residual
 
-    role_weight = mask * weight
+    def class_effect(
+        total: torch.Tensor,
+        square_total: torch.Tensor,
+        count: torch.Tensor,
+    ) -> torch.Tensor:
+        mean_value = total / count[:, None, None, None].clamp_min(1e-6)
+        variance_value = (
+            square_total / count[:, None, None, None].clamp_min(1e-6)
+            - mean_value.square()
+        ).clamp_min(1e-6)
+        return torch.relu(
+            (mean_value[1] - mean_value[0])
+            / torch.sqrt(variance_value[0] + variance_value[1])
+        )
+
+    def role_definition(effect: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        best_effect, best_direction = effect.max(dim=0)
+        selected = torch.topk(best_effect, active_per_layer, dim=-1).indices
+        mask = torch.zeros_like(best_effect).scatter_(-1, selected, 1.0)
+        direction = torch.where(best_direction == 0, 1.0, -1.0)
+        weight = best_effect * mask
+        weight = weight / (
+            weight.sum(dim=-1, keepdim=True) / active_per_layer
+        ).clamp_min(1e-6)
+        return mask, direction, weight
+
+    active_per_layer = min(neurons.active, neurons.dimensions)
+    normal_mask, normal_direction, normal_weight = role_definition(
+        class_effect(class_sum, class_square, class_count)
+    )
+    primary_mask, primary_direction, primary_weight = role_definition(
+        class_effect(residual_sum, residual_square, residual_count)
+    )
+
+    role_weight = normal_mask * normal_weight
     normal_scores = []
     for index in tqdm(normal_indices, desc="calibrate normality score", unit="video"):
         hidden = dataset[index]["hidden"].to(device, non_blocking=True)
         normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
         deviation = (normalized - mean) / standard_deviation
-        directional = torch.relu(deviation * direction)
+        directional = torch.relu(deviation * normal_direction)
         layer_score = (directional * role_weight).sum(dim=-1) / role_weight.sum(
             dim=-1
         ).clamp_min(1e-6)
@@ -104,15 +129,21 @@ def fit_role_disentangled_reference(
     neurons.set_normal_role(
         mean.float(),
         standard_deviation.float(),
-        mask.float(),
-        direction.float(),
-        weight.float(),
+        normal_mask.float(),
+        normal_direction.float(),
+        normal_weight.float(),
         score_threshold.float(),
         score_std.float(),
+    )
+    neurons.set_primary_role(
+        primary_mask.float(),
+        primary_direction.float(),
+        primary_weight.float(),
     )
     return {
         "normal_reference_snippets": snippet_count,
         "normal_role_neurons_per_layer": active_per_layer,
+        "primary_role_neurons_per_layer": active_per_layer,
     }
 
 
@@ -154,7 +185,12 @@ def ensure_training_paths(manifest: Path, output: Path) -> None:
 
 def comparable_configuration(config: dict[str, object]) -> dict[str, object]:
     """Git provenance is recorded but is not a training hyperparameter."""
-    derived = {"git_commit", "normal_reference_snippets", "normal_role_neurons_per_layer"}
+    derived = {
+        "git_commit",
+        "normal_reference_snippets",
+        "normal_role_neurons_per_layer",
+        "primary_role_neurons_per_layer",
+    }
     comparable = {key: value for key, value in config.items() if key not in derived}
     comparable.setdefault("variant", "w6")
     comparable.setdefault("num_workers", 0)

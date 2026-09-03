@@ -68,6 +68,22 @@ class SignedTopKWitnessNeurons(nn.Module):
         )
         self.normal_role_ready.fill_(True)
 
+    @torch.no_grad()
+    def set_primary_role(
+        self,
+        mask: torch.Tensor,
+        direction: torch.Tensor,
+        weight: torch.Tensor,
+    ) -> None:
+        expected = self.gate_logits.shape
+        if any(value.shape != expected for value in (mask, direction, weight)):
+            raise ValueError("primary-role tensors must all have shape [layers, dimensions]")
+        selected = mask.to(self.gate_logits) > 0
+        self.gate_logits.copy_(torch.where(selected, 4.0, -4.0))
+        self.signed_weights.copy_(
+            direction.to(self.signed_weights) * weight.to(self.signed_weights)
+        )
+
     def gates(self, neuron_keep_mask: torch.Tensor | None = None) -> torch.Tensor:
         soft = torch.sigmoid(self.gate_logits)
         indices = torch.topk(self.gate_logits, k=self.active, dim=-1).indices

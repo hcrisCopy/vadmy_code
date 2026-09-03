@@ -39,6 +39,21 @@ def temporal_smoothness(score: torch.Tensor, validity: torch.Tensor) -> torch.Te
     return difference[pair_mask].mean()
 
 
+def complementary_witness_score(
+    evidence: torch.Tensor, host_score: torch.Tensor, validity: torch.Tensor
+) -> torch.Tensor:
+    """Measure anomaly probability supplied where the frozen host is uncertain.
+
+    The host is detached because it assigns weak-label responsibility but is
+    never optimized.  A witness receives little credit for rediscovering an
+    already-high host peak and full credit for evidence in a host blind spot.
+    """
+    if evidence.shape != host_score.shape or validity.shape != evidence.shape:
+        raise ValueError("evidence, host_score and validity must share [B,T]")
+    score = evidence * (1.0 - host_score.detach().clamp(0.0, 1.0))
+    return score.masked_fill(~validity, 0.0)
+
+
 def witness_objective(
     result: dict[str, torch.Tensor],
     host_score: torch.Tensor,
@@ -57,9 +72,12 @@ def witness_objective(
     corrected = result["corrected_score"]
     video_loss = F.binary_cross_entropy(result["video_probability"], labels.to(evidence.dtype))
     residual = (labels - topk_bag_probability(host_score, validity)).abs().detach()
-    neuron_per_video = per_video_mil(evidence, validity, labels)
+    complementary = complementary_witness_score(evidence, host_score, validity)
+    neuron_per_video = per_video_mil(complementary, validity, labels)
     neuron_loss = (residual * neuron_per_video).sum() / residual.sum().clamp_min(1e-6)
-    neuron_loss = neuron_loss + rank_weight * ranking_loss(evidence, validity, labels, rank_margin)
+    neuron_loss = neuron_loss + rank_weight * ranking_loss(
+        complementary, validity, labels, rank_margin
+    )
     neuron_loss = neuron_loss + smooth_weight * temporal_smoothness(evidence, validity)
     final_loss = per_video_mil(corrected, validity, labels).mean()
     normal_mask = labels <= 0.5
@@ -165,11 +183,12 @@ def variant_objective(
             raise ValueError("w2 requires a sparsity surrogate")
         evidence = result["evidence"]
         residual = (labels - topk_bag_probability(host_score, validity)).abs().detach()
+        complementary = complementary_witness_score(evidence, host_score, validity)
         neuron_loss = (
-            residual * per_video_mil(evidence, validity, labels)
+            residual * per_video_mil(complementary, validity, labels)
         ).sum() / residual.sum().clamp_min(1e-6)
         neuron_loss = neuron_loss + rank_weight * ranking_loss(
-            evidence, validity, labels, rank_margin
+            complementary, validity, labels, rank_margin
         )
         neuron_loss = neuron_loss + smooth_weight * temporal_smoothness(
             evidence, validity

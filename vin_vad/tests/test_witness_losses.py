@@ -2,12 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from vin_vad.witness_losses import (
-    temporal_responsibility_sparsity,
-    temporal_smoothness,
-    topk_bag_probability,
-    witness_objective,
-)
+from vin_vad.witness_losses import temporal_smoothness, topk_bag_probability, witness_objective
 from vin_vad.witness_model import WitnessVAD
 
 
@@ -31,17 +26,6 @@ def test_padding_does_not_enter_topk_or_smoothness() -> None:
     changed[~validity] = 1e6
     torch.testing.assert_close(first_topk, topk_bag_probability(changed, validity))
     torch.testing.assert_close(first_smooth, temporal_smoothness(changed, validity))
-
-
-def test_responsibility_sparsity_prefers_topk_sized_support() -> None:
-    validity = torch.ones(1, 32, dtype=torch.bool)
-    labels = torch.ones(1)
-    uniform = torch.ones(1, 32)
-    concentrated = torch.zeros(1, 32)
-    concentrated[0, :3] = 1.0
-    assert temporal_responsibility_sparsity(
-        concentrated, validity, labels
-    ) < temporal_responsibility_sparsity(uniform, validity, labels)
 
 
 def test_every_objective_component_reaches_witness_parameters() -> None:

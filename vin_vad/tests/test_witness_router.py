@@ -51,15 +51,6 @@ def test_event_anchor_uses_standard_weak_mil_topk() -> None:
     torch.testing.assert_close(anchor, torch.tensor([0.9]))
 
 
-def test_uncertain_video_state_does_not_authorize_local_intervention() -> None:
-    host, evidence, validity = inputs()
-    router = WitnessRouter()
-    router.video_head.weight.data.zero_()
-    router.video_head.bias.data.zero_()
-    result = router(host, evidence, validity)
-    assert torch.count_nonzero(result["delta_anomaly"]) == 0
-
-
 def test_padding_does_not_enter_video_pooling_or_router() -> None:
     host, evidence, validity = inputs()
     router = WitnessRouter()

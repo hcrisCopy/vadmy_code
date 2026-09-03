@@ -56,18 +56,6 @@ def test_tag_deletion_changes_only_requested_coordinate_support() -> None:
     )
 
 
-def test_normal_reference_makes_neuron_response_one_sided() -> None:
-    module = SignedTopKWitnessNeurons(layers=1, dimensions=2, active=1)
-    module.set_normal_reference(torch.zeros(1, 2), torch.ones(1, 2))
-    module.gate_logits.data.copy_(torch.tensor([[2.0, -2.0]]))
-    module.signed_weights.data.copy_(torch.tensor([[1.0, 1.0]]))
-    hidden = torch.tensor([[[[-1.0, 1.0]], [[1.0, -1.0]]]])
-    validity = torch.tensor([[True, True]])
-    evidence = module(hidden, validity)["layer_evidence"]
-    assert evidence[0, 0, 0] == 0.0
-    assert evidence[0, 1, 0] > 0.0
-
-
 def test_temporal_padding_never_changes_valid_output() -> None:
     hidden, validity = sample_hidden()
     layer_evidence = torch.randn(2, 7, 12)

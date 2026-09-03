@@ -8,16 +8,15 @@ from pathlib import Path
 import pandas as pd
 
 
-def select_best(rows: list[dict[str, object]], dataset: str) -> dict[str, object]:
-    metric = "pooled_auc" if dataset == "ucf" else "pooled_ap"
+def select_final(rows: list[dict[str, object]]) -> dict[str, object]:
     if not rows:
         raise ValueError("checkpoint selection received no evaluated epochs")
-    return max(rows, key=lambda row: (float(row[metric]), -int(row["epoch"])))
+    return max(rows, key=lambda row: int(row["epoch"]))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Select the Witness-VAD checkpoint using the baseline test protocol"
+        description="Select the pre-registered final Witness-VAD checkpoint"
     )
     parser.add_argument("--dataset", required=True, choices=("ucf", "xd"))
     parser.add_argument("--variant", required=True, choices=("w1", "w2", "w6"))
@@ -46,7 +45,7 @@ def main() -> None:
                 "metrics_path": str(metrics_path),
             }
         )
-    best = select_best(rows, args.dataset)
+    best = select_final(rows)
     source = training / "checkpoints" / f"epoch_{int(best['epoch']):03d}.pt"
     if not source.exists():
         raise FileNotFoundError(source)
@@ -58,8 +57,8 @@ def main() -> None:
     result = {
         "dataset": args.dataset,
         "variant": args.variant,
-        "selection_policy": "test_primary_metric_best",
-        "selection_metric": metric,
+        "selection_policy": "fixed_final_epoch",
+        "selection_metric": "epoch",
         "best_epoch": int(best["epoch"]),
         "best_value": float(best[metric]),
         "source_checkpoint": str(source),
@@ -73,7 +72,7 @@ def main() -> None:
         "# Witness-VAD checkpoint selection\n\n"
         f"- Dataset: {args.dataset}\n"
         f"- Variant: {args.variant}\n"
-        f"- Protocol: baseline-compatible test {metric} best\n"
+        "- Protocol: fixed final epoch; test metrics are reporting-only\n"
         f"- Best epoch: {result['best_epoch']}\n"
         f"- Best {metric}: {result['best_value']:.6f}\n",
         encoding="utf-8",

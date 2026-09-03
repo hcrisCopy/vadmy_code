@@ -95,42 +95,19 @@ for dataset in $DATASETS; do
       --weight-decay 0.0001 \
       --seed 42 \
       --device cuda \
-      --retain-epoch-checkpoints \
       "${RESUME_ARGS[@]}"
-
-    for epoch in $(seq 1 20); do
-      epoch_tag="$(printf '%03d' "$epoch")"
-      python -m vin_vad.evaluate_witness \
-        --dataset "$dataset" \
-        --variant "$variant" \
-        --test-manifest "$test_manifest" \
-        --checkpoint "$OUT/$dataset/$variant/training/checkpoints/epoch_${epoch_tag}.pt" \
-        --host-metrics "$host_metrics" \
-        --gt-path "$ground_truth" \
-        --out-dir "$OUT/$dataset/$variant/selection/epoch_${epoch_tag}" \
-        --target-tpr 0.95 \
-        --device cuda \
-        --selection-policy test_primary_metric_best \
-        --no-curve-cache
-    done
-
-    python -m vin_vad.select_witness_checkpoint \
-      --dataset "$dataset" \
-      --variant "$variant" \
-      --training-dir "$OUT/$dataset/$variant/training" \
-      --selection-dir "$OUT/$dataset/$variant/selection"
 
     python -m vin_vad.evaluate_witness \
       --dataset "$dataset" \
       --variant "$variant" \
       --test-manifest "$test_manifest" \
-      --checkpoint "$OUT/$dataset/$variant/training/checkpoints/best.pt" \
+      --checkpoint "$OUT/$dataset/$variant/training/checkpoints/last.pt" \
       --host-metrics "$host_metrics" \
       --gt-path "$ground_truth" \
       --out-dir "$OUT/$dataset/$variant/evaluation" \
       --target-tpr 0.95 \
       --device cuda \
-      --selection-policy test_primary_metric_best
+      --selection-policy last_checkpoint_only
   done
 done
 
@@ -145,7 +122,10 @@ primary_metrics = {"ucf": "pooled_auc", "xd": "pooled_ap"}
 for dataset in sys.argv[2:]:
     primary = primary_metrics[dataset]
     host = json.loads((root / dataset / "w0" / "evaluation" / "metrics.json").read_text())[primary]
-    full = json.loads((root / dataset / "w6" / "evaluation" / "metrics.json").read_text())[primary]
+    full_metrics = json.loads((root / dataset / "w6" / "evaluation" / "metrics.json").read_text())
+    if full_metrics["test_used_for_selection"]:
+        raise RuntimeError(f"{dataset}: test data must not select the checkpoint")
+    full = full_metrics[primary]
     rows.append(100.0 * (full - host) - 1.0)
 metric = min(rows)
 (root / "target_margin.json").write_text(

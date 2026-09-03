@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import torch
 from torch.nn import functional as F
 
@@ -39,6 +41,25 @@ def temporal_smoothness(score: torch.Tensor, validity: torch.Tensor) -> torch.Te
     return difference[pair_mask].mean()
 
 
+def temporal_responsibility_sparsity(
+    evidence: torch.Tensor, validity: torch.Tensor, labels: torch.Tensor
+) -> torch.Tensor:
+    """Penalize responsibility support wider than the registered MIL top-k."""
+    penalties = []
+    for row, mask, label in zip(evidence, validity, labels):
+        if label <= 0.5:
+            continue
+        valid = row[mask].clamp_min(1e-8)
+        responsibility = valid / valid.sum()
+        entropy = -(responsibility * responsibility.log()).sum()
+        count = min(valid.numel(), int(valid.numel() / 16 + 1))
+        excess = torch.relu(entropy - math.log(count))
+        penalties.append(valid.numel() * excess / math.log(max(2, valid.numel())))
+    if not penalties:
+        return evidence.sum() * 0.0
+    return torch.stack(penalties).mean()
+
+
 def witness_objective(
     result: dict[str, torch.Tensor],
     host_score: torch.Tensor,
@@ -72,16 +93,10 @@ def witness_objective(
         ).mean()
     else:
         dense_normal = evidence.sum() * 0.0
-    abnormal_mask = labels > 0.5
-    if abnormal_mask.any():
-        temporal_sparse = (
-            evidence * validity.to(evidence.dtype)
-        ).sum(dim=1)[abnormal_mask].mean()
-    else:
-        temporal_sparse = evidence.sum() * 0.0
+    temporal_sparse = temporal_responsibility_sparsity(evidence, validity, labels)
     # Sparse coordinates alone do not imply sparse temporal responsibility.
     # Reuse the registered sparsity coefficient for the standard weak-MIL event
-    # prior, expressed as score mass so long diffuse activations are penalized.
+    # prior. Entropy makes it invariant to a trivial rescaling of all scores.
     sparse_loss = sparsity + temporal_sparse
     total = (
         video_loss
@@ -180,11 +195,8 @@ def variant_objective(
         else:
             dense_evidence = zero
         dense_normal = dense_corrected + dense_evidence
-        abnormal_mask = labels > 0.5
-        temporal_sparse = (
-            (evidence * validity.to(evidence.dtype)).sum(dim=1)[abnormal_mask].mean()
-            if abnormal_mask.any()
-            else zero
+        temporal_sparse = temporal_responsibility_sparsity(
+            evidence, validity, labels
         )
         sparse_loss = sparsity + temporal_sparse
         total = (

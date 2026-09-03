@@ -4,7 +4,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from vin_vad.witness_neurons import SignedTopKWitnessNeurons
+from vin_vad.witness_neurons import SignedTopKWitnessNeurons, cross_layer_consensus
 from vin_vad.witness_router import (
     WitnessRouter,
     inverse_softplus,
@@ -33,7 +33,13 @@ class WitnessExpert(nn.Module):
         neuron = self.neurons(hidden, validity, neuron_keep_mask)
         logits = self.temporal(neuron["temporal_input"], validity)
         evidence = torch.sigmoid(logits).masked_fill(~validity, 0.0)
-        return {**neuron, "evidence_logits": logits, "evidence": evidence}
+        consensus = cross_layer_consensus(neuron["layer_evidence"], validity)
+        return {
+            **neuron,
+            "evidence_logits": logits,
+            "evidence": evidence,
+            "cross_layer_consensus": consensus,
+        }
 
 
 class WitnessVAD(nn.Module):
@@ -61,6 +67,7 @@ class WitnessVAD(nn.Module):
         routed = self.router(
             host_score,
             expert["evidence"],
+            expert["cross_layer_consensus"],
             validity,
             eta_normal_override=eta_normal_override,
             eta_anomaly_override=eta_anomaly_override,
@@ -111,6 +118,7 @@ class NeuronOnlyRouter(nn.Module):
         self,
         host_score: torch.Tensor,
         evidence: torch.Tensor,
+        cross_layer_consensus: torch.Tensor,
         validity: torch.Tensor,
         eta_anomaly_override: float | None = None,
     ) -> dict[str, torch.Tensor]:
@@ -131,7 +139,7 @@ class NeuronOnlyRouter(nn.Module):
             torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6)).unsqueeze(1)
             - torch.logit(host_clipped)
         ).masked_fill(~validity, 0.0)
-        local_shape = witness_support * event_gap - veto_support
+        local_shape = witness_support * cross_layer_consensus * event_gap - veto_support
         eta_anomaly = (
             F.softplus(self.raw_eta_anomaly)
             if eta_anomaly_override is None
@@ -150,6 +158,7 @@ class NeuronOnlyRouter(nn.Module):
             "veto_support": veto_support,
             "event_anchor": event_anchor,
             "event_gap": event_gap,
+            "cross_layer_consensus": cross_layer_consensus,
             "corrected_score": corrected.clamp(0.0, 1.0).masked_fill(~validity, 0.0),
         }
 
@@ -173,6 +182,7 @@ class NeuronOnlyWitnessVAD(nn.Module):
             **self.router(
                 host_score,
                 expert["evidence"],
+                expert["cross_layer_consensus"],
                 validity,
                 eta_anomaly_override=eta_anomaly_override,
             ),

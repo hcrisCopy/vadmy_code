@@ -93,6 +93,7 @@ class WitnessRouter(nn.Module):
         self,
         host_score: torch.Tensor,
         evidence: torch.Tensor,
+        cross_layer_consensus: torch.Tensor,
         validity: torch.Tensor,
         eta_normal_override: float | None = None,
         eta_anomaly_override: float | None = None,
@@ -132,7 +133,10 @@ class WitnessRouter(nn.Module):
             - torch.logit(host_clipped)
         ).masked_fill(~validity, 0.0)
         local_shape = (
-            video_probability.unsqueeze(1) * witness_support * event_gap
+            video_probability.unsqueeze(1)
+            * witness_support
+            * cross_layer_consensus
+            * event_gap
             - (1.0 - video_probability).unsqueeze(1) * veto_support
         ).masked_fill(~validity, 0.0)
         # q decides the correction direction; neuron evidence decides its support.
@@ -164,5 +168,6 @@ class WitnessRouter(nn.Module):
             "veto_support": veto_support,
             "event_anchor": event_anchor,
             "event_gap": event_gap,
+            "cross_layer_consensus": cross_layer_consensus,
             "corrected_score": corrected,
         }

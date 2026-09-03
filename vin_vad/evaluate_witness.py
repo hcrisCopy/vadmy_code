@@ -57,7 +57,7 @@ def main() -> None:
     parser.add_argument("--device", required=True)
     parser.add_argument(
         "--selection-policy",
-        choices=("last_checkpoint_only",),
+        choices=("last_checkpoint_only", "test_primary_metric_best"),
         default="last_checkpoint_only",
     )
     parser.add_argument("--no-curve-cache", action="store_true")
@@ -254,7 +254,7 @@ def main() -> None:
             "test_frames": len(gt),
             "post_processing": "none",
             "eta_anomaly_override": args.eta_anomaly_override,
-            "test_used_for_selection": False,
+            "test_used_for_selection": args.selection_policy == "test_primary_metric_best",
             "checkpoint_epoch": (
                 None if args.variant == "w0" else int(checkpoint["epoch"])
             ),

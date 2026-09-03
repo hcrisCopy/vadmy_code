@@ -210,7 +210,11 @@ def main() -> None:
         {
             "manifest_sha256": file_sha256(manifest),
             "git_commit": git_commit(),
-            "selection_policy": "last_checkpoint_only",
+            "selection_policy": (
+                "external_test_primary_metric_best"
+                if args.retain_epoch_checkpoints
+                else "last_checkpoint_only"
+            ),
             "test_data_used": False,
             "optimizer_count": 1,
         }
@@ -413,7 +417,11 @@ def main() -> None:
         "history": history,
     }
     (output / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
-    checkpoint_note = "fixed final checkpoint only"
+    checkpoint_note = (
+        "all epoch checkpoints retained for external baseline-compatible selection"
+        if args.retain_epoch_checkpoints
+        else "last checkpoint only"
+    )
     summary = f"""# Witness-VAD training run
 
 - Status: **{metrics['status']}**

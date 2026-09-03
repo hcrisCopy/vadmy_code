@@ -14,12 +14,7 @@ class WitnessTemporalReadout(nn.Module):
         self.output = nn.Conv1d(width, 1, kernel_size=1)
         self.activation = nn.GELU()
 
-    def forward(
-        self,
-        layer_evidence: torch.Tensor,
-        validity: torch.Tensor,
-        return_features: bool = False,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, layer_evidence: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
         if layer_evidence.ndim != 3 or validity.shape != layer_evidence.shape[:2]:
             raise ValueError("layer_evidence must be [B,T,L] and validity [B,T]")
         mask = validity.unsqueeze(1).to(layer_evidence.dtype)
@@ -27,7 +22,4 @@ class WitnessTemporalReadout(nn.Module):
         value = self.activation(self.first(value)) * mask
         value = self.activation(self.second(value)) * mask
         logits = self.output(value).squeeze(1)
-        logits = logits.masked_fill(~validity, 0.0)
-        if return_features:
-            return logits, value.transpose(1, 2).masked_fill(~validity.unsqueeze(-1), 0.0)
-        return logits
+        return logits.masked_fill(~validity, 0.0)

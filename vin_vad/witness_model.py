@@ -11,7 +11,7 @@ from vin_vad.witness_router import (
     masked_mean,
     masked_standardize,
     masked_summary,
-    masked_topk_anchor,
+    masked_event_anchor,
 )
 from vin_vad.witness_temporal import WitnessTemporalReadout
 
@@ -126,9 +126,9 @@ class NeuronOnlyRouter(nn.Module):
         ).masked_fill(~validity, 0.0)
         witness_support = torch.relu(raw)
         veto_support = torch.relu(-raw)
-        event_anchor = masked_topk_anchor(host_clipped, validity)
+        event_anchor = masked_event_anchor(host_clipped, validity)
         event_gap = torch.relu(
-            torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6)).unsqueeze(1)
+            torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6))
             - torch.logit(host_clipped)
         ).masked_fill(~validity, 0.0)
         local_shape = witness_support * event_gap - veto_support

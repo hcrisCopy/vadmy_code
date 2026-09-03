@@ -6,8 +6,8 @@ from vin_vad.witness_model import NeuronOnlyRouter
 from vin_vad.witness_router import (
     WitnessRouter,
     masked_mean,
-    masked_topk_anchor,
     video_summary,
+    witness_propagated_anchor,
 )
 
 
@@ -44,11 +44,12 @@ def test_video_state_routes_witness_and_veto_support() -> None:
     assert torch.any(masked_mean(abnormal["delta_anomaly"], validity).abs() > 1e-5)
 
 
-def test_event_anchor_uses_standard_weak_mil_topk() -> None:
-    score = torch.tensor([[0.1, 0.9, 0.7, 0.2, 99.0]])
+def test_event_anchor_propagates_peak_inside_witness_boundary() -> None:
+    score = torch.tensor([[0.1, 0.9, 0.1, 0.2, 99.0]])
+    support = torch.tensor([[1.0, 1.0, 1.0, 0.0, 1.0]])
     validity = torch.tensor([[True, True, True, True, False]])
-    anchor = masked_topk_anchor(score, validity)
-    torch.testing.assert_close(anchor, torch.tensor([0.9]))
+    anchor = witness_propagated_anchor(score, support, validity)
+    torch.testing.assert_close(anchor, torch.tensor([[0.9, 0.9, 0.9, 0.2, 0.0]]))
 
 
 def test_padding_does_not_enter_video_pooling_or_router() -> None:

@@ -4,6 +4,7 @@ import math
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 
 def masked_mean(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
@@ -16,6 +17,19 @@ def masked_standardize(values: torch.Tensor, validity: torch.Tensor) -> torch.Te
     centered = (values - mean).masked_fill(~validity, 0.0)
     variance = masked_mean(centered.square(), validity).unsqueeze(1)
     return (centered / torch.sqrt(variance + 1e-6)).masked_fill(~validity, 0.0)
+
+
+def masked_event_anchor(
+    values: torch.Tensor, validity: torch.Tensor, width: int = 41
+) -> torch.Tensor:
+    """Return the strongest frozen-host support in each local event neighborhood."""
+    if values.shape != validity.shape or validity.dtype != torch.bool:
+        raise ValueError("values and boolean validity must share [B,T]")
+    if width <= 0 or width % 2 == 0:
+        raise ValueError("event width must be a positive odd integer")
+    masked = values.masked_fill(~validity, -torch.inf).unsqueeze(1)
+    anchor = F.max_pool1d(masked, kernel_size=width, stride=1, padding=width // 2)
+    return anchor.squeeze(1).masked_fill(~validity, 0.0)
 
 
 def masked_summary(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
@@ -126,31 +140,26 @@ class WitnessRouter(nn.Module):
         local_raw = local_raw.masked_fill(~validity, 0.0)
         witness_support = torch.relu(local_raw)
         veto_support = torch.relu(-local_raw)
-        event_anchor = masked_topk_anchor(host_clipped, validity)
-        event_gap = torch.relu(
-            torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6)).unsqueeze(1)
-            - torch.logit(host_clipped)
-        ).masked_fill(~validity, 0.0)
-        local_shape = (
-            video_probability.unsqueeze(1) * witness_support * event_gap
-            - (1.0 - video_probability).unsqueeze(1) * veto_support
-        ).masked_fill(~validity, 0.0)
-        # q decides the correction direction; neuron evidence decides its support.
-        # A non-zero mean is required to repair cross-video ranking, which dominates
-        # frame AUC/AP, while the support remains temporally localized.
-        delta_anomaly = eta_anomaly * local_shape
-        delta_anomaly = delta_anomaly.masked_fill(~validity, 0.0)
+        veto_delta = -eta_anomaly * (1.0 - video_probability).unsqueeze(1) * veto_support
+        veto_delta = veto_delta.masked_fill(~validity, 0.0)
         delta_normal = delta_normal.masked_fill(~validity, 0.0)
 
         host_logit = torch.logit(host_clipped)
-        base = torch.sigmoid(host_logit)
-        shifted = torch.sigmoid(host_logit + delta_normal + delta_anomaly)
-        corrected = host_score + shifted - base
+        host_base = torch.sigmoid(host_logit)
+        routed_base = torch.sigmoid(host_logit + delta_normal + veto_delta)
+        event_anchor = masked_event_anchor(routed_base, validity)
+        event_gap = torch.relu(event_anchor - routed_base).masked_fill(~validity, 0.0)
+        completion_gate = video_probability.unsqueeze(1) * witness_support
+        completion = completion_gate * event_gap
+        corrected = host_score + routed_base + completion - host_base
         corrected = corrected.clamp(0.0, 1.0).masked_fill(~validity, 0.0)
         if eta_normal_override == 0.0 and eta_anomaly_override == 0.0:
             # The explicit ablation contract is bitwise identity, not merely
             # numerical closeness after logit/sigmoid round trips.
             corrected = host_score.masked_fill(~validity, 0.0)
+        delta_anomaly = (routed_base + completion - torch.sigmoid(host_logit + delta_normal)).masked_fill(
+            ~validity, 0.0
+        )
         return {
             "summary": summary,
             "video_logit": video_logit,
@@ -159,10 +168,11 @@ class WitnessRouter(nn.Module):
             "eta_anomaly": eta_anomaly,
             "delta_normal": delta_normal,
             "delta_anomaly": delta_anomaly,
-            "local_shape": local_shape,
+            "local_shape": completion_gate,
             "witness_support": witness_support,
             "veto_support": veto_support,
             "event_anchor": event_anchor,
             "event_gap": event_gap,
+            "completion_gate": completion_gate,
             "corrected_score": corrected,
         }

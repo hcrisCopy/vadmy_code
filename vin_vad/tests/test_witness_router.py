@@ -5,6 +5,7 @@ import torch
 from vin_vad.witness_model import NeuronOnlyRouter
 from vin_vad.witness_router import (
     WitnessRouter,
+    masked_event_anchor,
     masked_mean,
     masked_topk_anchor,
     video_summary,
@@ -51,6 +52,13 @@ def test_event_anchor_uses_standard_weak_mil_topk() -> None:
     torch.testing.assert_close(anchor, torch.tensor([0.9]))
 
 
+def test_local_event_anchor_excludes_padding() -> None:
+    score = torch.tensor([[0.1, 0.9, 0.2, 99.0]])
+    validity = torch.tensor([[True, True, True, False]])
+    anchor = masked_event_anchor(score, validity, width=3)
+    torch.testing.assert_close(anchor, torch.tensor([[0.9, 0.9, 0.9, 0.0]]))
+
+
 def test_padding_does_not_enter_video_pooling_or_router() -> None:
     host, evidence, validity = inputs()
     router = WitnessRouter()
@@ -67,15 +75,11 @@ def test_padding_does_not_enter_video_pooling_or_router() -> None:
         torch.testing.assert_close(first[name], second[name])
 
 
-def test_neuron_only_eta_override_changes_only_correction_strength() -> None:
+def test_neuron_only_eta_override_strengthens_only_veto() -> None:
     host, evidence, validity = inputs()
     router = NeuronOnlyRouter(eta_anomaly=0.25)
     weak = router(host, evidence, validity, eta_anomaly_override=0.25)
     strong = router(host, evidence, validity, eta_anomaly_override=0.60)
     torch.testing.assert_close(weak["local_shape"], strong["local_shape"])
-    torch.testing.assert_close(
-        strong["delta_anomaly"],
-        weak["delta_anomaly"] * (0.60 / 0.25),
-        atol=1e-6,
-        rtol=1e-6,
-    )
+    veto = weak["veto_support"] > 0
+    assert torch.all(strong["corrected_score"][veto] <= weak["corrected_score"][veto])

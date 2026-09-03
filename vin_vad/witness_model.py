@@ -9,7 +9,6 @@ from vin_vad.witness_router import (
     WitnessRouter,
     inverse_softplus,
     masked_mean,
-    masked_event_anchor,
     masked_standardize,
     masked_summary,
     masked_topk_anchor,
@@ -127,29 +126,30 @@ class NeuronOnlyRouter(nn.Module):
         ).masked_fill(~validity, 0.0)
         witness_support = torch.relu(raw)
         veto_support = torch.relu(-raw)
+        event_anchor = masked_topk_anchor(host_clipped, validity)
+        event_gap = torch.relu(
+            torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6)).unsqueeze(1)
+            - torch.logit(host_clipped)
+        ).masked_fill(~validity, 0.0)
+        local_shape = witness_support * event_gap - veto_support
         eta_anomaly = (
             F.softplus(self.raw_eta_anomaly)
             if eta_anomaly_override is None
             else host_score.new_tensor(eta_anomaly_override)
         )
-        host_logit = torch.logit(host_clipped)
-        vetoed = torch.sigmoid(host_logit - eta_anomaly * veto_support)
-        event_anchor = masked_event_anchor(vetoed, validity)
-        event_gap = torch.relu(event_anchor - vetoed).masked_fill(~validity, 0.0)
-        completion = witness_support * event_gap
-        corrected = host_score + vetoed + completion - host_clipped
-        delta = (vetoed + completion - host_clipped).masked_fill(~validity, 0.0)
+        delta = eta_anomaly * local_shape
+        clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
+        corrected = host_score + torch.sigmoid(torch.logit(clipped) + delta) - clipped
         return {
             "video_probability": torch.ones(host_score.shape[0], device=host_score.device),
             "eta_anomaly": eta_anomaly,
             "delta_normal": torch.zeros_like(delta),
             "delta_anomaly": delta,
-            "local_shape": witness_support,
+            "local_shape": local_shape,
             "witness_support": witness_support,
             "veto_support": veto_support,
             "event_anchor": event_anchor,
             "event_gap": event_gap,
-            "completion_gate": witness_support,
             "corrected_score": corrected.clamp(0.0, 1.0).masked_fill(~validity, 0.0),
         }
 

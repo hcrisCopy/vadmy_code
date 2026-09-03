@@ -7,7 +7,7 @@ from torch import nn
 
 
 class SignedTopKWitnessNeurons(nn.Module):
-    """Sparse signed coordinates over all CLIP CLS hidden-state layers.
+    """One globally sparse signed set over all CLIP CLS coordinates.
 
     The hard top-k mask defines the auditable neuron set in the forward pass;
     its soft surrogate carries gradients to the gate logits.
@@ -15,21 +15,22 @@ class SignedTopKWitnessNeurons(nn.Module):
 
     def __init__(self, layers: int = 12, dimensions: int = 768, active: int = 32) -> None:
         super().__init__()
-        if not 0 < active <= dimensions:
-            raise ValueError("active must be in [1, dimensions]")
+        if not 0 < active <= layers * dimensions:
+            raise ValueError("active must be in [1, layers * dimensions]")
         self.layers = int(layers)
         self.dimensions = int(dimensions)
         self.active = int(active)
         self.normalization = nn.LayerNorm(dimensions, elementwise_affine=False)
-        self.gate_logits = nn.Parameter(torch.zeros(layers, dimensions))
+        self.gate_logits = nn.Parameter(torch.empty(layers, dimensions))
         self.signed_weights = nn.Parameter(torch.empty(layers, dimensions))
         self.layer_logits = nn.Parameter(torch.zeros(layers))
+        nn.init.normal_(self.gate_logits, mean=0.0, std=1e-3)
         nn.init.normal_(self.signed_weights, mean=0.0, std=0.02)
 
     def gates(self, neuron_keep_mask: torch.Tensor | None = None) -> torch.Tensor:
         soft = torch.sigmoid(self.gate_logits)
-        indices = torch.topk(self.gate_logits, k=self.active, dim=-1).indices
-        hard = torch.zeros_like(soft).scatter_(-1, indices, 1.0)
+        flat_indices = torch.topk(self.gate_logits.flatten(), k=self.active).indices
+        hard = torch.zeros_like(soft).flatten().scatter_(0, flat_indices, 1.0).view_as(soft)
         straight_through = hard + soft - soft.detach()
         if neuron_keep_mask is not None:
             if neuron_keep_mask.shape != straight_through.shape:

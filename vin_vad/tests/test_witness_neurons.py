@@ -82,6 +82,12 @@ def test_role_jury_has_distinct_auditable_views() -> None:
         torch.tensor(0.4),
         torch.tensor(0.2),
     )
+    torch.testing.assert_close(
+        (expert.neurons.gates().detach() > 0.5).to(mask), mask
+    )
+    torch.testing.assert_close(
+        expert.neurons.signed_weights.detach(), mask
+    )
     result = expert(hidden, validity)
     for name in (
         "primary_evidence",

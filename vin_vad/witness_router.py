@@ -131,9 +131,11 @@ class WitnessRouter(nn.Module):
             torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6)).unsqueeze(1)
             - torch.logit(host_clipped)
         ).masked_fill(~validity, 0.0)
+        anomaly_authorization = torch.relu(2.0 * video_probability - 1.0)
+        normal_authorization = torch.relu(1.0 - 2.0 * video_probability)
         local_shape = (
-            video_probability.unsqueeze(1) * witness_support * event_gap
-            - (1.0 - video_probability).unsqueeze(1) * veto_support
+            anomaly_authorization.unsqueeze(1) * witness_support * event_gap
+            - normal_authorization.unsqueeze(1) * veto_support
         ).masked_fill(~validity, 0.0)
         # q decides the correction direction; neuron evidence decides its support.
         # A non-zero mean is required to repair cross-video ranking, which dominates
@@ -164,5 +166,7 @@ class WitnessRouter(nn.Module):
             "veto_support": veto_support,
             "event_anchor": event_anchor,
             "event_gap": event_gap,
+            "anomaly_authorization": anomaly_authorization,
+            "normal_authorization": normal_authorization,
             "corrected_score": corrected,
         }

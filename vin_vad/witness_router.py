@@ -4,6 +4,7 @@ import math
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 
 def masked_mean(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
@@ -63,17 +64,55 @@ def inverse_softplus(value: float) -> float:
     return math.log(math.expm1(value))
 
 
+class LocalWitnessCorrection(nn.Module):
+    """Locate host failures from witness disagreement and short-term dynamics."""
+
+    def __init__(self, width: int = 16) -> None:
+        super().__init__()
+        self.body = nn.Sequential(
+            nn.Conv1d(6, width, kernel_size=3, padding=1),
+            nn.GELU(),
+            nn.Conv1d(width, width, kernel_size=3, padding=2, dilation=2),
+            nn.GELU(),
+            nn.Conv1d(width, 1, kernel_size=1),
+        )
+
+    def forward(
+        self,
+        host_score: torch.Tensor,
+        evidence: torch.Tensor,
+        validity: torch.Tensor,
+    ) -> torch.Tensor:
+        host_logit = torch.logit(host_score.clamp(1e-5, 1.0 - 1e-5))
+        evidence_logit = torch.logit(evidence.clamp(1e-5, 1.0 - 1e-5))
+        host_logit = host_logit.masked_fill(~validity, 0.0)
+        evidence_logit = evidence_logit.masked_fill(~validity, 0.0)
+        host_change = F.pad(host_logit[:, 1:] - host_logit[:, :-1], (1, 0))
+        evidence_change = F.pad(
+            evidence_logit[:, 1:] - evidence_logit[:, :-1], (1, 0)
+        )
+        features = torch.stack(
+            [
+                host_logit,
+                evidence_logit,
+                host_logit - evidence_logit,
+                host_logit * torch.tanh(evidence_logit),
+                host_change,
+                evidence_change,
+            ],
+            dim=1,
+        )
+        features = features * validity.unsqueeze(1).to(features.dtype)
+        return self.body(features).squeeze(1).masked_fill(~validity, 0.0)
+
+
 class WitnessRouter(nn.Module):
     """One video state routes global suppression and local witness correction."""
 
     def __init__(self, eta_normal: float = 1.0, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
         super().__init__()
         self.video_head = nn.Linear(10, 1)
-        self.local_head = nn.Sequential(
-            nn.Conv1d(4, local_width, kernel_size=1),
-            nn.GELU(),
-            nn.Conv1d(local_width, 1, kernel_size=1),
-        )
+        self.local_head = LocalWitnessCorrection(local_width)
         self.raw_eta_normal = nn.Parameter(torch.tensor(inverse_softplus(eta_normal)))
         self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
 
@@ -103,13 +142,9 @@ class WitnessRouter(nn.Module):
 
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
-        local_input = torch.stack(
-            [host_clipped, evidence_clipped, host_clipped - evidence_clipped, host_clipped * evidence_clipped],
-            dim=1,
-        )
         direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
         local_raw = torch.tanh(
-            self.local_head(local_input).squeeze(1) + direct_witness
+            self.local_head(host_clipped, evidence_clipped, validity) + direct_witness
         )
         local_raw = local_raw.masked_fill(~validity, 0.0)
         witness_support = torch.relu(local_raw)

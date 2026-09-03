@@ -82,30 +82,6 @@ def video_summary(host_score: torch.Tensor, evidence: torch.Tensor, validity: to
     return torch.cat([host, neuron, correlation, disagreement], dim=1)
 
 
-def role_video_summary(
-    host_score: torch.Tensor,
-    role_evidence: torch.Tensor,
-    validity: torch.Tensor,
-) -> torch.Tensor:
-    """Keep role identity until the video-level authorization decision."""
-    if (
-        role_evidence.ndim != 3
-        or role_evidence.shape[:2] != host_score.shape
-        or role_evidence.shape[-1] != 3
-        or validity.shape != host_score.shape
-    ):
-        raise ValueError("role evidence must be [B,T,3] beside host [B,T]")
-    role_means = torch.stack(
-        [masked_mean(role_evidence[:, :, index], validity) for index in range(3)],
-        dim=1,
-    )
-    role_tops = torch.stack(
-        [masked_summary(role_evidence[:, :, index], validity)[:, 2] for index in range(3)],
-        dim=1,
-    )
-    return torch.cat([masked_summary(host_score, validity), role_means, role_tops], dim=1)
-
-
 def inverse_softplus(value: float) -> float:
     if value <= 0.0:
         raise ValueError("softplus target must be positive")
@@ -128,13 +104,8 @@ class WitnessRouter(nn.Module):
         validity: torch.Tensor,
         eta_normal_override: float | None = None,
         eta_anomaly_override: float | None = None,
-        role_evidence: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
-        summary = (
-            video_summary(host_score, evidence, validity)
-            if role_evidence is None
-            else role_video_summary(host_score, role_evidence, validity)
-        )
+        summary = video_summary(host_score, evidence, validity)
         video_logit = self.video_head(summary).squeeze(1)
         video_probability = torch.sigmoid(video_logit)
         hard_authorization = (video_probability >= 0.5).to(video_probability.dtype)

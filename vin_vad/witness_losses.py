@@ -57,8 +57,7 @@ def witness_objective(
     corrected = result["corrected_score"]
     video_loss = F.binary_cross_entropy(result["video_probability"], labels.to(evidence.dtype))
     residual = (labels - topk_bag_probability(host_score, validity)).abs().detach()
-    neuron_per_video = per_video_mil(evidence, validity, labels)
-    neuron_loss = (residual * neuron_per_video).sum() / residual.sum().clamp_min(1e-6)
+    neuron_loss = per_video_mil(evidence, validity, labels).mean()
     neuron_loss = neuron_loss + rank_weight * ranking_loss(evidence, validity, labels, rank_margin)
     neuron_loss = neuron_loss + smooth_weight * temporal_smoothness(evidence, validity)
     final_loss = per_video_mil(corrected, validity, labels).mean()

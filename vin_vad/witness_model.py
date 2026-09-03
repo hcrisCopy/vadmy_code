@@ -106,10 +106,19 @@ class WitnessVAD(nn.Module):
         eta_anomaly_override: float | None = None,
     ) -> dict[str, torch.Tensor]:
         expert = self.expert(hidden, validity, neuron_keep_mask)
+        role_evidence = torch.stack(
+            [
+                expert["primary_evidence"],
+                expert["normality_evidence"],
+                expert["context_evidence"],
+            ],
+            dim=-1,
+        ).detach()
         routed = self.router(
             host_score,
             expert["evidence"],
             validity,
+            role_evidence=role_evidence,
             eta_normal_override=eta_normal_override,
             eta_anomaly_override=eta_anomaly_override,
         )

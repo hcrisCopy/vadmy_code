@@ -20,6 +20,7 @@ class SignedTopKWitnessNeurons(nn.Module):
         self.layers = int(layers)
         self.dimensions = int(dimensions)
         self.active = int(active)
+        self.normalization = nn.LayerNorm(dimensions, elementwise_affine=False)
         self.gate_logits = nn.Parameter(torch.empty(layers, dimensions))
         self.signed_weights = nn.Parameter(torch.empty(layers, dimensions))
         self.layer_logits = nn.Parameter(torch.zeros(layers))
@@ -51,10 +52,7 @@ class SignedTopKWitnessNeurons(nn.Module):
             )
         if validity.shape != hidden.shape[:2] or validity.dtype != torch.bool:
             raise ValueError("validity must be a boolean [B,T] tensor")
-        # Preserve each CLS token's activation magnitude for neuron-level
-        # intervention.  Per-token LayerNorm erased exactly that signal; removing
-        # only the common offset keeps coordinates comparable without rescaling.
-        normalized = hidden - hidden.mean(dim=-1, keepdim=True)
+        normalized = self.normalization(hidden)
         gate = self.gates(neuron_keep_mask)
         coordinate_weights = gate * self.signed_weights
         layer_evidence = torch.einsum(

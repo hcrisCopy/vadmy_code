@@ -78,6 +78,24 @@ def test_video_state_routes_witness_and_veto_support() -> None:
     assert torch.all(completed[validity] <= abnormal["completion_anchor"][validity])
 
 
+def test_positive_role_consensus_authorizes_event_completion() -> None:
+    router = WitnessRouter()
+    with torch.no_grad():
+        router.video_head.weight.zero_()
+        router.video_head.bias.fill_(10.0)
+    host = torch.tensor([[0.10, 0.80, 0.20]])
+    evidence = torch.tensor([[0.90, 0.10, 0.80]])
+    validity = torch.ones_like(host, dtype=torch.bool)
+    consensus = torch.tensor([[0.00, 1.00, 0.25]])
+
+    result = router(host, evidence, validity, positive_consensus=consensus)
+
+    assert result["completion_consensus"][0, 0].item() == 0.0
+    assert result["completion_gate"][0, 0].item() == 0.0
+    assert result["completion_consensus"][0, 2] <= consensus[0, 2]
+    assert result["completion_gate"][0, 2].item() > 0.0
+
+
 def test_event_anchor_uses_standard_weak_mil_topk() -> None:
     score = torch.tensor([[0.1, 0.9, 0.7, 0.2, 99.0]])
     validity = torch.tensor([[True, True, True, True, False]])

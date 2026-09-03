@@ -104,7 +104,10 @@ class WitnessRouter(nn.Module):
         validity: torch.Tensor,
         eta_normal_override: float | None = None,
         eta_anomaly_override: float | None = None,
+        positive_consensus: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
+        if positive_consensus is not None and positive_consensus.shape != host_score.shape:
+            raise ValueError("positive_consensus must share the [B,T] host-score shape")
         summary = video_summary(host_score, evidence, validity)
         video_logit = self.video_head(summary).squeeze(1)
         video_probability = torch.sigmoid(video_logit)
@@ -167,8 +170,16 @@ class WitnessRouter(nn.Module):
         # point-authorized convex step completes only locations that carry their
         # own witness support and can never overshoot the local event peak.
         completion_anchor = masked_local_max(shifted, validity)
+        completion_consensus = (
+            witness_support
+            if positive_consensus is None
+            else torch.minimum(
+                witness_support,
+                positive_consensus.clamp_min(0.0),
+            )
+        ).masked_fill(~validity, 0.0)
         completion_gate = (
-            anomaly_authorized.unsqueeze(1) * witness_support.clamp(max=1.0)
+            anomaly_authorized.unsqueeze(1) * completion_consensus.clamp(max=1.0)
         ).masked_fill(~validity, 0.0)
         completed = shifted + completion_gate * (completion_anchor - shifted)
         corrected = host_score + completed - base
@@ -196,6 +207,7 @@ class WitnessRouter(nn.Module):
             "event_anchor": event_anchor,
             "event_gap": event_gap,
             "completion_anchor": completion_anchor,
+            "completion_consensus": completion_consensus,
             "completion_gate": completion_gate,
             "corrected_score": corrected,
         }

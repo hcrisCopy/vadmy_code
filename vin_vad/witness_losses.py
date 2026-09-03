@@ -39,21 +39,6 @@ def temporal_smoothness(score: torch.Tensor, validity: torch.Tensor) -> torch.Te
     return difference[pair_mask].mean()
 
 
-def correction_need_loss(
-    probability: torch.Tensor,
-    labels: torch.Tensor,
-    host_score: torch.Tensor,
-    validity: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Supervise routing where the frozen host leaves correction work to do."""
-    residual = (labels - topk_bag_probability(host_score, validity)).abs().detach()
-    per_video = F.binary_cross_entropy(
-        probability, labels.to(probability.dtype), reduction="none"
-    )
-    loss = (residual * per_video).sum() / residual.sum().clamp_min(1e-6)
-    return loss, residual
-
-
 def witness_objective(
     result: dict[str, torch.Tensor],
     host_score: torch.Tensor,
@@ -70,9 +55,8 @@ def witness_objective(
 ) -> dict[str, torch.Tensor]:
     evidence = result["evidence"]
     corrected = result["corrected_score"]
-    video_loss, residual = correction_need_loss(
-        result["video_probability"], labels, host_score, validity
-    )
+    video_loss = F.binary_cross_entropy(result["video_probability"], labels.to(evidence.dtype))
+    residual = (labels - topk_bag_probability(host_score, validity)).abs().detach()
     neuron_per_video = per_video_mil(evidence, validity, labels)
     neuron_loss = (residual * neuron_per_video).sum() / residual.sum().clamp_min(1e-6)
     neuron_loss = neuron_loss + rank_weight * ranking_loss(evidence, validity, labels, rank_margin)
@@ -162,8 +146,8 @@ def variant_objective(
         dense_corrected = zero
 
     if variant == "w1":
-        video_loss, residual = correction_need_loss(
-            result["video_probability"], labels, host_score, validity
+        video_loss = F.binary_cross_entropy(
+            result["video_probability"], labels.to(corrected.dtype)
         )
         total = video_loss + lambda_final * final_loss + lambda_normal * dense_corrected
         return {
@@ -173,7 +157,7 @@ def variant_objective(
             "final_mil": final_loss,
             "dense_normal": dense_corrected,
             "sparse": zero,
-            "host_residual": residual.mean(),
+            "host_residual": zero,
         }
 
     if variant == "w2":

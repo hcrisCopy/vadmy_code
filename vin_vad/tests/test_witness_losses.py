@@ -2,12 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from vin_vad.witness_losses import (
-    correction_need_loss,
-    temporal_smoothness,
-    topk_bag_probability,
-    witness_objective,
-)
+from vin_vad.witness_losses import temporal_smoothness, topk_bag_probability, witness_objective
 from vin_vad.witness_model import WitnessVAD
 
 
@@ -31,16 +26,6 @@ def test_padding_does_not_enter_topk_or_smoothness() -> None:
     changed[~validity] = 1e6
     torch.testing.assert_close(first_topk, topk_bag_probability(changed, validity))
     torch.testing.assert_close(first_smooth, temporal_smoothness(changed, validity))
-
-
-def test_router_supervision_prioritizes_frozen_host_errors() -> None:
-    labels = torch.tensor([1.0, 1.0])
-    host = torch.tensor([[0.1, 0.0], [0.9, 0.0]])
-    validity = torch.tensor([[True, False], [True, False]])
-    probability = torch.tensor([0.5, 0.5])
-    loss, residual = correction_need_loss(probability, labels, host, validity)
-    torch.testing.assert_close(residual, torch.tensor([0.9, 0.1]))
-    torch.testing.assert_close(loss, torch.tensor(0.6931472))
 
 
 def test_every_objective_component_reaches_witness_parameters() -> None:

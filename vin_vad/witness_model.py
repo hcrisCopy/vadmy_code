@@ -31,9 +31,16 @@ class WitnessExpert(nn.Module):
         neuron_keep_mask: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         neuron = self.neurons(hidden, validity, neuron_keep_mask)
-        logits = self.temporal(neuron["temporal_input"], validity)
+        logits, temporal_features = self.temporal(
+            neuron["temporal_input"], validity, return_features=True
+        )
         evidence = torch.sigmoid(logits).masked_fill(~validity, 0.0)
-        return {**neuron, "evidence_logits": logits, "evidence": evidence}
+        return {
+            **neuron,
+            "evidence_logits": logits,
+            "evidence": evidence,
+            "temporal_features": temporal_features,
+        }
 
 
 class WitnessVAD(nn.Module):
@@ -46,7 +53,11 @@ class WitnessVAD(nn.Module):
     ) -> None:
         super().__init__()
         self.expert = WitnessExpert(active=active, temporal_width=temporal_width)
-        self.router = WitnessRouter(eta_normal=eta_normal, eta_anomaly=eta_anomaly)
+        self.router = WitnessRouter(
+            eta_normal=eta_normal,
+            eta_anomaly=eta_anomaly,
+            witness_width=temporal_width,
+        )
 
     def forward(
         self,
@@ -62,6 +73,7 @@ class WitnessVAD(nn.Module):
             host_score,
             expert["evidence"],
             validity,
+            witness_features=expert["temporal_features"],
             eta_normal_override=eta_normal_override,
             eta_anomaly_override=eta_anomaly_override,
         )
@@ -98,10 +110,13 @@ class HostVideoOnlyVAD(nn.Module):
 class NeuronOnlyRouter(nn.Module):
     """W2: no video state; signed neuron evidence supplies local correction."""
 
-    def __init__(self, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
+    def __init__(
+        self, eta_anomaly: float = 0.25, local_width: int = 16, witness_width: int = 64
+    ) -> None:
         super().__init__()
+        self.witness_width = int(witness_width)
         self.local_head = nn.Sequential(
-            nn.Conv1d(4, local_width, kernel_size=1),
+            nn.Conv1d(4 + self.witness_width, local_width, kernel_size=1),
             nn.GELU(),
             nn.Conv1d(local_width, 1, kernel_size=1),
         )
@@ -113,13 +128,21 @@ class NeuronOnlyRouter(nn.Module):
         evidence: torch.Tensor,
         validity: torch.Tensor,
         eta_anomaly_override: float | None = None,
+        witness_features: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
-        features = torch.stack(
+        score_features = torch.stack(
             [host_clipped, evidence_clipped, host_clipped - evidence_clipped, host_clipped * evidence_clipped],
             dim=1,
         )
+        if witness_features is None:
+            witness_features = host_score.new_zeros(
+                *host_score.shape, self.witness_width
+            )
+        if witness_features.shape != (*host_score.shape, self.witness_width):
+            raise ValueError("witness_features must have shape [B,T,witness_width]")
+        features = torch.cat([score_features, witness_features.transpose(1, 2)], dim=1)
         direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
         raw = torch.tanh(
             self.local_head(features).squeeze(1) + direct_witness
@@ -158,7 +181,9 @@ class NeuronOnlyWitnessVAD(nn.Module):
     def __init__(self, active: int = 32, temporal_width: int = 64, eta_anomaly: float = 0.25) -> None:
         super().__init__()
         self.expert = WitnessExpert(active=active, temporal_width=temporal_width)
-        self.router = NeuronOnlyRouter(eta_anomaly=eta_anomaly)
+        self.router = NeuronOnlyRouter(
+            eta_anomaly=eta_anomaly, witness_width=temporal_width
+        )
 
     def forward(
         self,
@@ -175,6 +200,7 @@ class NeuronOnlyWitnessVAD(nn.Module):
                 expert["evidence"],
                 validity,
                 eta_anomaly_override=eta_anomaly_override,
+                witness_features=expert["temporal_features"],
             ),
         }
 

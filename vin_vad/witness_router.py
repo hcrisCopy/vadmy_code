@@ -78,11 +78,18 @@ def inverse_softplus(value: float) -> float:
 class WitnessRouter(nn.Module):
     """One video state routes global suppression and local witness correction."""
 
-    def __init__(self, eta_normal: float = 1.0, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
+    def __init__(
+        self,
+        eta_normal: float = 1.0,
+        eta_anomaly: float = 0.25,
+        local_width: int = 16,
+        witness_width: int = 64,
+    ) -> None:
         super().__init__()
+        self.witness_width = int(witness_width)
         self.video_head = nn.Linear(10, 1)
         self.local_head = nn.Sequential(
-            nn.Conv1d(4, local_width, kernel_size=1),
+            nn.Conv1d(4 + self.witness_width, local_width, kernel_size=1),
             nn.GELU(),
             nn.Conv1d(local_width, 1, kernel_size=1),
         )
@@ -96,6 +103,7 @@ class WitnessRouter(nn.Module):
         validity: torch.Tensor,
         eta_normal_override: float | None = None,
         eta_anomaly_override: float | None = None,
+        witness_features: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         summary = video_summary(host_score, evidence, validity)
         video_logit = self.video_head(summary).squeeze(1)
@@ -115,9 +123,18 @@ class WitnessRouter(nn.Module):
 
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
-        local_input = torch.stack(
+        score_features = torch.stack(
             [host_clipped, evidence_clipped, host_clipped - evidence_clipped, host_clipped * evidence_clipped],
             dim=1,
+        )
+        if witness_features is None:
+            witness_features = host_score.new_zeros(
+                *host_score.shape, self.witness_width
+            )
+        if witness_features.shape != (*host_score.shape, self.witness_width):
+            raise ValueError("witness_features must have shape [B,T,witness_width]")
+        local_input = torch.cat(
+            [score_features, witness_features.transpose(1, 2)], dim=1
         )
         direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
         local_raw = torch.tanh(

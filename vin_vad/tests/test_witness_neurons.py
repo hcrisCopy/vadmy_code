@@ -37,6 +37,16 @@ def test_neuron_only_api_and_output_do_not_depend_on_host() -> None:
     assert "host" not in expert.forward.__annotations__
 
 
+def test_expert_exposes_shared_temporal_context() -> None:
+    hidden, validity = sample_hidden()
+    result = WitnessExpert()(hidden, validity)
+    assert result["temporal_features"].shape == (2, 7, 64)
+    assert torch.equal(
+        result["temporal_features"][~validity],
+        torch.zeros_like(result["temporal_features"][~validity]),
+    )
+
+
 def test_tag_deletion_changes_only_requested_coordinate_support() -> None:
     hidden, validity = sample_hidden()
     module = SignedTopKWitnessNeurons(active=32)

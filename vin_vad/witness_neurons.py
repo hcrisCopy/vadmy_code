@@ -78,10 +78,6 @@ class SignedTopKWitnessNeurons(nn.Module):
         expected = self.gate_logits.shape
         if any(value.shape != expected for value in (mask, direction, weight)):
             raise ValueError("primary-role tensors must all have shape [layers, dimensions]")
-        if bool(self.normal_role_ready) and torch.any(
-            (mask.to(self.normal_role_mask) > 0) & (self.normal_role_mask > 0)
-        ):
-            raise ValueError("primary and normality roles must use disjoint coordinates")
         selected = mask.to(self.gate_logits) > 0
         self.gate_logits.copy_(torch.where(selected, 4.0, -4.0))
         self.signed_weights.copy_(
@@ -89,15 +85,8 @@ class SignedTopKWitnessNeurons(nn.Module):
         )
 
     def gates(self, neuron_keep_mask: torch.Tensor | None = None) -> torch.Tensor:
-        if bool(self.normal_role_ready):
-            eligible = self.normal_role_mask <= 0
-            if torch.any(eligible.sum(dim=-1) < self.active):
-                raise RuntimeError("normality role leaves too few coordinates for primary witnesses")
-        else:
-            eligible = torch.ones_like(self.gate_logits, dtype=torch.bool)
-        soft = torch.sigmoid(self.gate_logits) * eligible.to(self.gate_logits.dtype)
-        ranking_logits = self.gate_logits.masked_fill(~eligible, -torch.inf)
-        indices = torch.topk(ranking_logits, k=self.active, dim=-1).indices
+        soft = torch.sigmoid(self.gate_logits)
+        indices = torch.topk(self.gate_logits, k=self.active, dim=-1).indices
         hard = torch.zeros_like(soft).scatter_(-1, indices, 1.0)
         straight_through = hard + soft - soft.detach()
         if neuron_keep_mask is not None:

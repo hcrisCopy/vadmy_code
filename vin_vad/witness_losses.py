@@ -71,6 +71,9 @@ def witness_objective(
         role_losses.append(role_loss)
     neuron_loss = torch.stack(role_losses).mean()
     final_loss = per_video_mil(corrected, validity, labels).mean()
+    final_loss = final_loss + rank_weight * ranking_loss(
+        corrected, validity, labels, rank_margin
+    )
     normal_mask = labels <= 0.5
     if normal_mask.any():
         normal_evidence = torch.stack(
@@ -152,6 +155,9 @@ def variant_objective(
     corrected = result["corrected_score"]
     zero = corrected.sum() * 0.0
     final_loss = per_video_mil(corrected, validity, labels).mean()
+    final_loss = final_loss + rank_weight * ranking_loss(
+        corrected, validity, labels, rank_margin
+    )
     normal_mask = labels <= 0.5
     if normal_mask.any():
         corrected_normal = -torch.log1p(-corrected.clamp(max=1.0 - 1e-6))

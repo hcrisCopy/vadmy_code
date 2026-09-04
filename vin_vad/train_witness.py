@@ -71,19 +71,11 @@ def fit_role_disentangled_reference(
         class_square[label] += summary.square()
         class_count[label] += 1
         host_score = item["host_score"].to(device, non_blocking=True).double()
-        point_residual = (
-            1.0 - host_score if label == 1 else host_score
-        ).clamp(0.0, 1.0)
-        residual_deviation = deviation * point_residual[:, None, None]
-        residual_summary = torch.stack(
-            [
-                torch.topk(residual_deviation, tail_count, dim=0).values.mean(dim=0),
-                torch.topk(-residual_deviation, tail_count, dim=0).values.mean(dim=0),
-            ]
-        )
-        residual_sum[label] += residual_summary
-        residual_square[label] += residual_summary.square()
-        residual_count[label] += 1
+        host_bag = torch.topk(host_score, tail_count).values.mean().clamp(0.0, 1.0)
+        residual = (host_bag - float(label)).abs()
+        residual_sum[label] += residual * summary
+        residual_square[label] += residual * summary.square()
+        residual_count[label] += residual
 
     def class_effect(
         total: torch.Tensor,

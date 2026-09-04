@@ -22,6 +22,25 @@ def per_video_mil(score: torch.Tensor, validity: torch.Tensor, labels: torch.Ten
     return F.binary_cross_entropy(bag, labels.to(score.dtype), reduction="none")
 
 
+def class_balanced_residual_mean(
+    losses: torch.Tensor,
+    residual: torch.Tensor,
+    labels: torch.Tensor,
+) -> torch.Tensor:
+    """Keep host-error priority within each class without class domination."""
+    class_losses = []
+    for positive in (False, True):
+        selected = (labels > 0.5) == positive
+        if selected.any():
+            weights = residual[selected]
+            class_losses.append(
+                (weights * losses[selected]).sum() / weights.sum().clamp_min(1e-6)
+            )
+    if not class_losses:
+        return losses.sum() * 0.0
+    return torch.stack(class_losses).mean()
+
+
 def ranking_loss(score: torch.Tensor, validity: torch.Tensor, labels: torch.Tensor, margin: float) -> torch.Tensor:
     bag = topk_bag_probability(score, validity)
     normal = bag[labels <= 0.5]
@@ -61,7 +80,9 @@ def witness_objective(
     role_losses = []
     for role_evidence in role_curves:
         role_per_video = per_video_mil(role_evidence, validity, labels)
-        role_loss = (residual * role_per_video).sum() / residual.sum().clamp_min(1e-6)
+        role_loss = class_balanced_residual_mean(
+            role_per_video, residual, labels
+        )
         role_loss = role_loss + rank_weight * ranking_loss(
             role_evidence, validity, labels, rank_margin
         )
@@ -179,9 +200,11 @@ def variant_objective(
             raise ValueError("w2 requires a sparsity surrogate")
         evidence = result["evidence"]
         residual = (labels - topk_bag_probability(host_score, validity)).abs().detach()
-        neuron_loss = (
-            residual * per_video_mil(evidence, validity, labels)
-        ).sum() / residual.sum().clamp_min(1e-6)
+        neuron_loss = class_balanced_residual_mean(
+            per_video_mil(evidence, validity, labels),
+            residual,
+            labels,
+        )
         neuron_loss = neuron_loss + rank_weight * ranking_loss(
             evidence, validity, labels, rank_margin
         )

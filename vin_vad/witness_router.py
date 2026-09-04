@@ -202,11 +202,15 @@ class WitnessRouter(nn.Module):
 
         host_logit = torch.logit(host_clipped)
         base = torch.sigmoid(host_logit)
-        shifted = torch.sigmoid(host_logit + delta_normal + delta_anomaly)
+        shifted_logit = host_logit + delta_normal + delta_anomaly
+        shifted = torch.sigmoid(shifted_logit)
         # The consensus residual seeds missed event positions.  A second,
         # point-authorized convex step completes only locations that carry their
         # own witness support and can never overshoot the local event peak.
-        completion_anchor = masked_local_max(shifted, validity)
+        completion_anchor_logit = masked_local_max(shifted_logit, validity)
+        completion_anchor = torch.sigmoid(completion_anchor_logit).masked_fill(
+            ~validity, 0.0
+        )
         negative_completion_veto = (
             torch.zeros_like(host_score)
             if negative_consensus is None
@@ -217,7 +221,10 @@ class WitnessRouter(nn.Module):
             * witness_support.clamp(max=1.0)
             * (1.0 - negative_completion_veto)
         ).masked_fill(~validity, 0.0)
-        completed = shifted + completion_gate * (completion_anchor - shifted)
+        completed_logit = shifted_logit + completion_gate * (
+            completion_anchor_logit - shifted_logit
+        )
+        completed = torch.sigmoid(completed_logit).masked_fill(~validity, 0.0)
         corrected = host_score + completed - base
         corrected = corrected.clamp(0.0, 1.0).masked_fill(~validity, 0.0)
         if eta_normal_override == 0.0 and eta_anomaly_override == 0.0:
@@ -248,5 +255,6 @@ class WitnessRouter(nn.Module):
             "completion_anchor": completion_anchor,
             "negative_completion_veto": negative_completion_veto,
             "completion_gate": completion_gate,
+            "completed_score": completed,
             "corrected_score": corrected,
         }

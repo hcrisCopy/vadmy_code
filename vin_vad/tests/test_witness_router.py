@@ -53,6 +53,11 @@ def test_video_state_routes_witness_and_veto_support() -> None:
     assert torch.all(
         abnormal["complementary_support"] <= abnormal["host_miss_support"]
     )
+    assert torch.all(abnormal["host_witness_agreement"] <= abnormal["witness_support"])
+    assert torch.all(abnormal["host_witness_agreement"] <= abnormal["host_support"])
+    assert torch.all(
+        abnormal["host_witness_agreement"] * abnormal["complementary_support"] == 0.0
+    )
     completion = (abnormal["witness_support"] > 0) & (abnormal["event_gap"] > 0)
     assert torch.all(abnormal["delta_anomaly"][completion] > 0.0)
     neighbor_completion = (

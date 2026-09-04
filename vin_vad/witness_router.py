@@ -208,7 +208,7 @@ class WitnessRouter(nn.Module):
         ).masked_fill(~validity, 0.0)
         completion_gate = (
             anomaly_authorized.unsqueeze(1)
-            * witness_support.clamp(max=1.0)
+            * complementary_support.clamp(max=1.0)
             * (1.0 - negative_completion_veto)
         ).masked_fill(~validity, 0.0)
         completed = shifted + completion_gate * (completion_anchor - shifted)

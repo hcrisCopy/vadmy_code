@@ -66,6 +66,10 @@ def test_video_state_routes_witness_and_veto_support() -> None:
     assert torch.any(masked_mean(abnormal["delta_anomaly"], validity).abs() > 1e-5)
     assert torch.all(abnormal["completion_gate"][validity] >= 0.0)
     assert torch.all(abnormal["completion_gate"][validity] <= 1.0)
+    assert torch.all(
+        abnormal["completion_gate"][validity]
+        <= abnormal["host_miss_support"][validity]
+    )
     shifted = torch.sigmoid(
         torch.logit(host.clamp(1e-6, 1.0 - 1e-6))
         + abnormal["delta_normal"]

@@ -112,7 +112,7 @@ def fit_role_disentangled_reference(
     )
 
     role_weight = normal_mask * normal_weight
-    normal_scores = []
+    normal_layer_scores = []
     for index in tqdm(normal_indices, desc="calibrate normality score", unit="video"):
         hidden = dataset[index]["hidden"].to(device, non_blocking=True)
         normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
@@ -121,9 +121,11 @@ def fit_role_disentangled_reference(
         layer_score = (directional * role_weight).sum(dim=-1) / role_weight.sum(
             dim=-1
         ).clamp_min(1e-6)
-        score = layer_score.mean(dim=-1)
-        normal_scores.append(score)
-    normal_score = torch.cat(normal_scores)
+        normal_layer_scores.append(layer_score)
+    normal_layer_score = torch.cat(normal_layer_scores)
+    layer_score_mean = normal_layer_score.mean(dim=0)
+    layer_score_std = normal_layer_score.std(dim=0, unbiased=False).clamp_min(1e-2)
+    normal_score = ((normal_layer_score - layer_score_mean) / layer_score_std).mean(dim=-1)
     score_threshold = torch.quantile(normal_score, 0.95)
     score_std = normal_score.std(unbiased=False).clamp_min(1e-2)
     neurons.set_normal_role(
@@ -132,6 +134,8 @@ def fit_role_disentangled_reference(
         normal_mask.float(),
         normal_direction.float(),
         normal_weight.float(),
+        layer_score_mean.float(),
+        layer_score_std.float(),
         score_threshold.float(),
         score_std.float(),
     )

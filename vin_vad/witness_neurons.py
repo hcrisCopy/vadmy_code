@@ -26,6 +26,8 @@ class SignedTopKWitnessNeurons(nn.Module):
         self.register_buffer("normal_role_mask", torch.zeros(layers, dimensions))
         self.register_buffer("normal_role_direction", torch.ones(layers, dimensions))
         self.register_buffer("normal_role_weight", torch.zeros(layers, dimensions))
+        self.register_buffer("normal_layer_score_mean", torch.zeros(layers))
+        self.register_buffer("normal_layer_score_std", torch.ones(layers))
         self.register_buffer("normal_score_threshold", torch.tensor(0.0))
         self.register_buffer("normal_score_std", torch.tensor(1.0))
         self.register_buffer("normal_role_ready", torch.tensor(False))
@@ -43,17 +45,27 @@ class SignedTopKWitnessNeurons(nn.Module):
         mask: torch.Tensor,
         direction: torch.Tensor,
         weight: torch.Tensor,
+        layer_score_mean: torch.Tensor,
+        layer_score_std: torch.Tensor,
         score_threshold: torch.Tensor,
         score_std: torch.Tensor,
     ) -> None:
         expected = self.normal_mean.shape
         if any(value.shape != expected for value in (mean, standard_deviation, mask, direction, weight)):
             raise ValueError("normal-role tensors must all have shape [layers, dimensions]")
+        if layer_score_mean.shape != (self.layers,) or layer_score_std.shape != (self.layers,):
+            raise ValueError("normal layer-score statistics must have shape [layers]")
         self.normal_mean.copy_(mean.to(self.normal_mean))
         self.normal_std.copy_(standard_deviation.to(self.normal_std).clamp_min(1e-4))
         self.normal_role_mask.copy_(mask.to(self.normal_role_mask))
         self.normal_role_direction.copy_(direction.to(self.normal_role_direction))
         self.normal_role_weight.copy_(weight.to(self.normal_role_weight))
+        self.normal_layer_score_mean.copy_(
+            layer_score_mean.to(self.normal_layer_score_mean)
+        )
+        self.normal_layer_score_std.copy_(
+            layer_score_std.to(self.normal_layer_score_std).clamp_min(1e-4)
+        )
         self.normal_score_threshold.copy_(
             score_threshold.to(self.normal_score_threshold)
         )
@@ -130,18 +142,24 @@ class SignedTopKWitnessNeurons(nn.Module):
                 deviation * self.normal_role_direction.view(1, 1, self.layers, self.dimensions)
             )
             role_weight = self.normal_role_mask * self.normal_role_weight
-            normality_layer_evidence = (
+            raw_normality_layer_evidence = (
                 directional_deviation * role_weight.view(1, 1, self.layers, self.dimensions)
             ).sum(dim=-1) / role_weight.sum(dim=-1).clamp_min(1e-6).view(1, 1, self.layers)
+            normality_layer_evidence = (
+                raw_normality_layer_evidence
+                - self.normal_layer_score_mean.view(1, 1, self.layers)
+            ) / self.normal_layer_score_std.view(1, 1, self.layers)
             normality_layer_evidence = normality_layer_evidence.masked_fill(
                 ~validity.unsqueeze(-1), 0.0
             )
         else:
+            raw_normality_layer_evidence = torch.zeros_like(layer_evidence)
             normality_layer_evidence = torch.zeros_like(layer_evidence)
         layer_probability = torch.softmax(self.layer_logits, dim=0)
         temporal_input = layer_evidence * (self.layers * layer_probability.view(1, 1, -1))
         return {
             "layer_evidence": layer_evidence,
+            "raw_normality_layer_evidence": raw_normality_layer_evidence,
             "normality_layer_evidence": normality_layer_evidence,
             "temporal_input": temporal_input,
             "gates": gate,

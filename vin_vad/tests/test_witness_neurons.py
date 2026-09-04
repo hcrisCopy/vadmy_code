@@ -79,6 +79,8 @@ def test_role_jury_has_distinct_auditable_views() -> None:
         mask,
         torch.ones(12, 768),
         mask,
+        torch.arange(12, dtype=torch.float32),
+        torch.full((12,), 2.0),
         torch.tensor(0.4),
         torch.tensor(0.2),
     )
@@ -97,6 +99,13 @@ def test_role_jury_has_distinct_auditable_views() -> None:
     )
     torch.testing.assert_close(expert.neurons.normal_role_mask, mask)
     result = expert(hidden, validity)
+    expected_normality = (
+        result["raw_normality_layer_evidence"]
+        - torch.arange(12, dtype=torch.float32).view(1, 1, 12)
+    ) / 2.0
+    torch.testing.assert_close(
+        result["normality_layer_evidence"][validity], expected_normality[validity]
+    )
     for name in (
         "primary_evidence",
         "normality_evidence",

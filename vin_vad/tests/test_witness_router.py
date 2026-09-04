@@ -110,6 +110,8 @@ def test_negative_role_consensus_cannot_be_undone_by_event_completion() -> None:
 
     assert result["witness_support"][0, 0].item() > 0.0
     assert result["completion_gate"][0, 0].item() == 0.0
+    assert result["completion_source"][0, 0].item() == 0.0
+    assert torch.all(result["completion_anchor"] >= result["completion_source"])
     assert result["completion_gate"][0, 1] <= 0.75
 
 

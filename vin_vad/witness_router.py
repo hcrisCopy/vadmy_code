@@ -200,12 +200,16 @@ class WitnessRouter(nn.Module):
         # The consensus residual seeds missed event positions.  A second,
         # point-authorized convex step completes only locations that carry their
         # own witness support and can never overshoot the local event peak.
-        completion_anchor = masked_local_max(shifted, validity)
         negative_completion_veto = (
             torch.zeros_like(host_score)
             if negative_consensus is None
             else negative_consensus.clamp(0.0, 1.0)
         ).masked_fill(~validity, 0.0)
+        # A unanimously rejected location keeps its frozen-host score, but it
+        # cannot become a peak that propagates completion into its neighbors.
+        completion_source = shifted * (1.0 - negative_completion_veto)
+        completion_neighbor_anchor = masked_local_max(completion_source, validity)
+        completion_anchor = torch.maximum(shifted, completion_neighbor_anchor)
         completion_gate = (
             anomaly_authorized.unsqueeze(1)
             * witness_support.clamp(max=1.0)
@@ -240,6 +244,8 @@ class WitnessRouter(nn.Module):
             "event_anchor": event_anchor,
             "event_gap": event_gap,
             "completion_anchor": completion_anchor,
+            "completion_source": completion_source,
+            "completion_neighbor_anchor": completion_neighbor_anchor,
             "negative_completion_veto": negative_completion_veto,
             "completion_gate": completion_gate,
             "corrected_score": corrected,

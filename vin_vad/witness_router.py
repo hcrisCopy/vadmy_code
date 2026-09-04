@@ -165,16 +165,6 @@ class WitnessRouter(nn.Module):
         complementary_support = torch.minimum(
             witness_support, host_miss_support
         )
-        # A unanimous local witness may rescue a false-normal video decision.
-        # The two authorizations remain complementary: every location is routed
-        # between anomaly completion and normal veto with no extra branch.
-        local_anomaly_authorized = (
-            anomaly_authorized.unsqueeze(1)
-            + normal_authorized.unsqueeze(1) * positive_normal_protection
-        )
-        local_normal_authorized = (
-            normal_authorized.unsqueeze(1) * (1.0 - positive_normal_protection)
-        )
         witness_event_support = masked_local_max(witness_support, validity)
         event_anchor = masked_local_max(host_clipped, validity)
         event_gap = torch.relu(
@@ -182,14 +172,14 @@ class WitnessRouter(nn.Module):
             - torch.logit(host_clipped)
         ).masked_fill(~validity, 0.0)
         local_shape = (
-            local_anomaly_authorized
+            anomaly_authorized.unsqueeze(1)
             * (
                 witness_support
                 + complementary_support
                 + witness_event_support * event_gap
                 - consensus_conflict_veto
             )
-            - local_normal_authorized * veto_support
+            - normal_authorized.unsqueeze(1) * veto_support
         ).masked_fill(~validity, 0.0)
         # q decides the correction direction; neuron evidence decides its support.
         # A non-zero mean is required to repair cross-video ranking, which dominates
@@ -206,7 +196,7 @@ class WitnessRouter(nn.Module):
         # own witness support and can never overshoot the local event peak.
         completion_anchor = masked_local_max(shifted, validity)
         completion_gate = (
-            local_anomaly_authorized * witness_support.clamp(max=1.0)
+            anomaly_authorized.unsqueeze(1) * witness_support.clamp(max=1.0)
         ).masked_fill(~validity, 0.0)
         completed = shifted + completion_gate * (completion_anchor - shifted)
         corrected = host_score + completed - base
@@ -226,8 +216,6 @@ class WitnessRouter(nn.Module):
             "delta_normal": delta_normal,
             "delta_anomaly": delta_anomaly,
             "positive_normal_protection": positive_normal_protection,
-            "local_anomaly_authorized": local_anomaly_authorized,
-            "local_normal_authorized": local_normal_authorized,
             "local_shape": local_shape,
             "witness_support": witness_support,
             "host_miss_support": host_miss_support,

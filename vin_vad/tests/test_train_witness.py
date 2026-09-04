@@ -8,6 +8,7 @@ from vin_vad.data import HostScoreTrainingDataset
 from vin_vad.train_witness import (
     balanced_indices,
     comparable_configuration,
+    event_coherent_directional_summary,
     merge_balanced_batches,
 )
 from vin_vad.select_witness_checkpoint import select_best
@@ -18,6 +19,21 @@ def test_balanced_indices_are_fixed_and_class_complete() -> None:
     normal, abnormal = balanced_indices(frame, per_class=2)
     assert normal == [0, 2]
     assert abnormal == [1, 3]
+
+
+def test_event_summary_uses_one_shared_snippet_for_every_coordinate() -> None:
+    deviation = torch.tensor(
+        [
+            [[4.0, 4.0, 0.0, 0.0]],
+            [[0.0, 0.0, -3.0, -3.0]],
+            [[1.0, 1.0, 1.0, 1.0]],
+        ]
+    )
+    summary = event_coherent_directional_summary(
+        deviation, tail_count=1, active_per_layer=2
+    )
+    torch.testing.assert_close(summary[0], torch.tensor([[4.0, 4.0, 0.0, 0.0]]))
+    torch.testing.assert_close(summary[1], torch.zeros(1, 4))
 
 
 def test_merge_balanced_batches_preserves_padding_and_labels() -> None:

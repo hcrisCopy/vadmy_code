@@ -56,14 +56,9 @@ class WitnessExpert(nn.Module):
             normality_raw - self.neurons.normal_score_threshold
         ) / self.neurons.normal_score_std
         normality_logits = normality_logits.masked_fill(~validity, 0.0)
-        # Context is not a second normality vote.  It verifies whether a local
-        # primary-witness event remains exceptional against the video's broader
-        # normal envelope.  The cross-role construction keeps the same 24 input
-        # channels and parameter count as the previous two-scale readout.
-        primary_layers = neuron["temporal_input"]
         context_input = torch.cat(
             [
-                masked_temporal_mean(primary_layers, validity, width=9),
+                masked_temporal_mean(normality_layers, validity, width=9),
                 masked_temporal_mean(normality_layers, validity, width=25),
             ],
             dim=-1,

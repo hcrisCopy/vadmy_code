@@ -24,31 +24,6 @@ from vin_vad.witness_losses import variant_objective
 from vin_vad.witness_model import build_witness_variant
 
 
-def event_coherent_directional_summary(
-    deviation: torch.Tensor, tail_count: int, active_per_layer: int
-) -> torch.Tensor:
-    """Summarize every coordinate on one shared set of salient snippets."""
-    if deviation.ndim != 3:
-        raise ValueError("deviation must have shape [time, layers, dimensions]")
-    if not 0 < tail_count <= len(deviation):
-        raise ValueError("tail_count must select at least one available snippet")
-    coordinate_count = min(active_per_layer, deviation.shape[-1])
-    if coordinate_count <= 0:
-        raise ValueError("active_per_layer must be positive")
-    sparse_layer_salience = torch.topk(
-        deviation.abs(), coordinate_count, dim=-1
-    ).values.mean(dim=-1)
-    snippet_salience = sparse_layer_salience.mean(dim=-1)
-    event_indices = torch.topk(snippet_salience, tail_count).indices
-    event_deviation = deviation.index_select(0, event_indices)
-    return torch.stack(
-        [
-            torch.relu(event_deviation).mean(dim=0),
-            torch.relu(-event_deviation).mean(dim=0),
-        ]
-    )
-
-
 @torch.no_grad()
 def fit_role_disentangled_reference(
     model: torch.nn.Module,
@@ -71,7 +46,6 @@ def fit_role_disentangled_reference(
     variance = (square / max(snippet_count, 1) - mean.square()).clamp_min(1e-4)
     standard_deviation = variance.sqrt()
 
-    active_per_layer = min(neurons.active, neurons.dimensions)
     class_sum = torch.zeros(
         2, 2, neurons.layers, neurons.dimensions, dtype=torch.float64, device=device
     )
@@ -86,27 +60,21 @@ def fit_role_disentangled_reference(
         normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
         deviation = (normalized - mean) / standard_deviation
         tail_count = min(len(deviation), max(1, len(deviation) // 16 + 1))
-        coordinate_summary = torch.stack(
+        summary = torch.stack(
             [
                 torch.topk(deviation, tail_count, dim=0).values.mean(dim=0),
                 torch.topk(-deviation, tail_count, dim=0).values.mean(dim=0),
             ]
         )
-        event_summary = event_coherent_directional_summary(
-            deviation, tail_count, active_per_layer
-        )
         label = int(item["label"])
-        class_sum[label] += coordinate_summary
-        class_square[label] += coordinate_summary.square()
+        class_sum[label] += summary
+        class_square[label] += summary.square()
         class_count[label] += 1
         host_score = item["host_score"].to(device, non_blocking=True).double()
         host_bag = torch.topk(host_score, tail_count).values.mean().clamp(0.0, 1.0)
         residual = (host_bag - float(label)).abs()
-        # Primary witnesses must co-occur on one candidate event.  Otherwise
-        # independent per-coordinate maxima can fabricate a witness set whose
-        # members never fire together at any time in the video.
-        residual_sum[label] += residual * event_summary
-        residual_square[label] += residual * event_summary.square()
+        residual_sum[label] += residual * summary
+        residual_square[label] += residual * summary.square()
         residual_count[label] += residual
 
     def class_effect(
@@ -135,6 +103,7 @@ def fit_role_disentangled_reference(
         ).clamp_min(1e-6)
         return mask, direction, weight
 
+    active_per_layer = min(neurons.active, neurons.dimensions)
     normal_mask, normal_direction, normal_weight = role_definition(
         class_effect(class_sum, class_square, class_count)
     )

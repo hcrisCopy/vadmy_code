@@ -3,6 +3,9 @@ from __future__ import annotations
 import torch
 from torch.nn import functional as F
 
+from vin_vad.witness_router import masked_mean
+
+
 def topk_bag_probability(score: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
     outputs = []
     for row, mask in zip(score, validity):
@@ -34,16 +37,6 @@ def temporal_smoothness(score: torch.Tensor, validity: torch.Tensor) -> torch.Te
     if not pair_mask.any():
         return score.sum() * 0.0
     return difference[pair_mask].mean()
-
-
-def dense_normal_mean(
-    values: torch.Tensor, validity: torch.Tensor, labels: torch.Tensor
-) -> torch.Tensor:
-    """Average trusted normal evidence per valid snippet, not per video."""
-    normal_validity = validity & (labels <= 0.5).unsqueeze(1)
-    if not normal_validity.any():
-        return values.sum() * 0.0
-    return values[normal_validity].mean()
 
 
 def witness_objective(
@@ -87,11 +80,10 @@ def witness_objective(
             ]
         ).mean(dim=0)
         normal_corrected = -torch.log1p(-corrected.clamp(max=1.0 - 1e-6))
-        dense_normal = dense_normal_mean(
-            normal_evidence + normal_corrected,
-            validity,
-            labels,
-        )
+        dense_normal = (
+            masked_mean(normal_evidence, validity)[normal_mask]
+            + masked_mean(normal_corrected, validity)[normal_mask]
+        ).mean()
     else:
         dense_normal = evidence.sum() * 0.0
     abnormal_mask = labels > 0.5
@@ -163,9 +155,7 @@ def variant_objective(
     normal_mask = labels <= 0.5
     if normal_mask.any():
         corrected_normal = -torch.log1p(-corrected.clamp(max=1.0 - 1e-6))
-        dense_corrected = dense_normal_mean(
-            corrected_normal, validity, labels
-        )
+        dense_corrected = masked_mean(corrected_normal, validity)[normal_mask].mean()
     else:
         dense_corrected = zero
 
@@ -200,9 +190,7 @@ def variant_objective(
         )
         if normal_mask.any():
             evidence_normal = -torch.log1p(-evidence.clamp(max=1.0 - 1e-6))
-            dense_evidence = dense_normal_mean(
-                evidence_normal, validity, labels
-            )
+            dense_evidence = masked_mean(evidence_normal, validity)[normal_mask].mean()
         else:
             dense_evidence = zero
         dense_normal = dense_corrected + dense_evidence

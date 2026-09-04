@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import torch
 
-from vin_vad.witness_losses import temporal_smoothness, topk_bag_probability, witness_objective
+from vin_vad.witness_losses import (
+    authorization_ranking_loss,
+    temporal_smoothness,
+    topk_bag_probability,
+    witness_objective,
+)
 from vin_vad.witness_model import WitnessVAD
 
 
@@ -26,6 +31,15 @@ def test_padding_does_not_enter_topk_or_smoothness() -> None:
     changed[~validity] = 1e6
     torch.testing.assert_close(first_topk, topk_bag_probability(changed, validity))
     torch.testing.assert_close(first_smooth, temporal_smoothness(changed, validity))
+
+
+def test_authorization_ranking_penalizes_cross_class_misordering() -> None:
+    labels = torch.tensor([0.0, 0.0, 1.0, 1.0])
+    ordered = torch.tensor([-2.0, -1.0, 1.0, 2.0])
+    reversed_order = -ordered
+    assert authorization_ranking_loss(ordered, labels) < authorization_ranking_loss(
+        reversed_order, labels
+    )
 
 
 def test_every_objective_component_reaches_witness_parameters() -> None:

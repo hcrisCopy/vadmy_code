@@ -104,8 +104,11 @@ class WitnessRouter(nn.Module):
         validity: torch.Tensor,
         eta_normal_override: float | None = None,
         eta_anomaly_override: float | None = None,
+        positive_consensus: torch.Tensor | None = None,
         negative_consensus: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
+        if positive_consensus is not None and positive_consensus.shape != host_score.shape:
+            raise ValueError("positive_consensus must share the [B,T] host-score shape")
         if negative_consensus is not None and negative_consensus.shape != host_score.shape:
             raise ValueError("negative_consensus must share the [B,T] host-score shape")
         summary = video_summary(host_score, evidence, validity)
@@ -129,7 +132,19 @@ class WitnessRouter(nn.Module):
             else host_score.new_tensor(eta_anomaly_override)
         )
         delta_normal_video = eta_normal * torch.minimum(video_logit, torch.zeros_like(video_logit))
-        delta_normal = delta_normal_video.unsqueeze(1).expand_as(host_score)
+        # A video-level normal decision is weak supervision, so it cannot safely
+        # erase a location where every independent witness role agrees on an
+        # anomaly.  Positive consensus only protects the frozen host here; it
+        # does not create anomaly score by itself.
+        positive_normal_protection = (
+            torch.zeros_like(host_score)
+            if positive_consensus is None
+            else positive_consensus.clamp(0.0, 1.0)
+        ).masked_fill(~validity, 0.0)
+        delta_normal = (
+            delta_normal_video.unsqueeze(1).expand_as(host_score)
+            * (1.0 - positive_normal_protection)
+        )
 
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
@@ -200,6 +215,7 @@ class WitnessRouter(nn.Module):
             "eta_anomaly": eta_anomaly,
             "delta_normal": delta_normal,
             "delta_anomaly": delta_anomaly,
+            "positive_normal_protection": positive_normal_protection,
             "local_shape": local_shape,
             "witness_support": witness_support,
             "host_miss_support": host_miss_support,

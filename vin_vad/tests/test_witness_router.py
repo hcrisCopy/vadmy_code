@@ -96,6 +96,29 @@ def test_negative_role_consensus_vetoes_only_host_conflicts() -> None:
     assert result["consensus_conflict_veto"][0, 2].item() == 0.0
 
 
+def test_positive_consensus_only_protects_normal_route_from_suppression() -> None:
+    router = WitnessRouter()
+    with torch.no_grad():
+        router.video_head.weight.zero_()
+        router.video_head.bias.fill_(-2.0)
+    host = torch.tensor([[0.10, 0.90, 0.20]])
+    evidence = torch.tensor([[0.20, 0.80, 0.30]])
+    validity = torch.ones_like(host, dtype=torch.bool)
+    consensus = torch.tensor([[0.00, 1.00, 0.25]])
+
+    protected = router(host, evidence, validity, positive_consensus=consensus)
+    unprotected = router(host, evidence, validity)
+
+    assert protected["delta_normal"][0, 1].item() == 0.0
+    torch.testing.assert_close(
+        protected["delta_normal"][0, 2],
+        unprotected["delta_normal"][0, 2] * 0.75,
+    )
+    torch.testing.assert_close(
+        protected["delta_anomaly"], unprotected["delta_anomaly"]
+    )
+
+
 def test_event_anchor_uses_standard_weak_mil_topk() -> None:
     score = torch.tensor([[0.1, 0.9, 0.7, 0.2, 99.0]])
     validity = torch.tensor([[True, True, True, True, False]])

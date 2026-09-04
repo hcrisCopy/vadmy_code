@@ -31,17 +31,6 @@ def ranking_loss(score: torch.Tensor, validity: torch.Tensor, labels: torch.Tens
     return F.softplus(margin - abnormal[:, None] + normal[None, :]).mean()
 
 
-def authorization_ranking_loss(
-    video_logit: torch.Tensor, labels: torch.Tensor
-) -> torch.Tensor:
-    """Rank abnormal authorization above normal without another margin knob."""
-    normal = video_logit[labels <= 0.5]
-    abnormal = video_logit[labels > 0.5]
-    if normal.numel() == 0 or abnormal.numel() == 0:
-        return video_logit.sum() * 0.0
-    return F.softplus(normal[None, :] - abnormal[:, None]).mean()
-
-
 def temporal_smoothness(score: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
     pair_mask = validity[:, 1:] & validity[:, :-1]
     difference = (score[:, 1:] - score[:, :-1]).square()
@@ -66,13 +55,7 @@ def witness_objective(
 ) -> dict[str, torch.Tensor]:
     evidence = result["evidence"]
     corrected = result["corrected_score"]
-    # BCE fixes the absolute normal/anomaly decision boundary.  Pairwise
-    # logistic ranking fixes the cross-video ordering that decides whether the
-    # frozen host receives the correct correction route.  Balanced batches
-    # contain both classes, so this adds no mining rule or tunable margin.
-    video_loss = F.binary_cross_entropy(
-        result["video_probability"], labels.to(evidence.dtype)
-    ) + authorization_ranking_loss(result["video_logit"], labels)
+    video_loss = F.binary_cross_entropy(result["video_probability"], labels.to(evidence.dtype))
     residual = (labels - topk_bag_probability(host_score, validity)).abs().detach()
     role_curves = [evidence, result["primary_evidence"], result["context_evidence"]]
     role_losses = []

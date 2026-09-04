@@ -140,11 +140,17 @@ class WitnessRouter(nn.Module):
         # erase a location where every independent witness role agrees on an
         # anomaly.  Positive consensus only protects the frozen host here; it
         # does not create anomaly score by itself.
-        positive_normal_protection = (
-            torch.zeros_like(host_score)
-            if positive_consensus is None
-            else positive_consensus.clamp(0.0, 1.0)
-        ).masked_fill(~validity, 0.0)
+        if positive_consensus is None:
+            positive_normal_protection = torch.zeros_like(host_score)
+        else:
+            bounded_positive = positive_consensus.clamp(0.0, 1.0)
+            hard_positive = (bounded_positive > 0.0).to(bounded_positive.dtype)
+            positive_normal_protection = (
+                hard_positive + bounded_positive - bounded_positive.detach()
+            )
+        positive_normal_protection = positive_normal_protection.masked_fill(
+            ~validity, 0.0
+        )
         delta_normal = (
             delta_normal_video.unsqueeze(1).expand_as(host_score)
             * (1.0 - positive_normal_protection)

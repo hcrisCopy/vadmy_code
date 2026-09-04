@@ -148,10 +148,8 @@ def test_positive_consensus_only_protects_normal_route_from_suppression() -> Non
     unprotected = router(host, evidence, validity)
 
     assert protected["delta_normal"][0, 1].item() == 0.0
-    torch.testing.assert_close(
-        protected["delta_normal"][0, 2],
-        unprotected["delta_normal"][0, 2] * 0.75,
-    )
+    assert protected["delta_normal"][0, 2].item() == 0.0
+    torch.testing.assert_close(protected["delta_normal"][0, 0], unprotected["delta_normal"][0, 0])
     torch.testing.assert_close(
         protected["delta_anomaly"], unprotected["delta_anomaly"]
     )

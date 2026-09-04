@@ -51,9 +51,9 @@ def fit_role_disentangled_reference(
     )
     class_square = torch.zeros_like(class_sum)
     class_count = torch.zeros(2, dtype=torch.float64, device=device)
-    residual_cross = torch.zeros_like(class_sum[0])
-    residual_total = torch.zeros((), dtype=torch.float64, device=device)
-    residual_square_total = torch.zeros_like(residual_total)
+    residual_sum = torch.zeros_like(class_sum)
+    residual_square = torch.zeros_like(class_sum)
+    residual_count = torch.zeros(2, dtype=torch.float64, device=device)
     for index in tqdm(range(len(dataset)), desc="rank role neurons", unit="video"):
         item = dataset[index]
         hidden = item["hidden"].to(device, non_blocking=True)
@@ -72,10 +72,10 @@ def fit_role_disentangled_reference(
         class_count[label] += 1
         host_score = item["host_score"].to(device, non_blocking=True).double()
         host_bag = torch.topk(host_score, tail_count).values.mean().clamp(0.0, 1.0)
-        signed_residual = float(label) - host_bag
-        residual_cross += signed_residual * summary
-        residual_total += signed_residual
-        residual_square_total += signed_residual.square()
+        residual = (host_bag - float(label)).abs()
+        residual_sum[label] += residual * summary
+        residual_square[label] += residual * summary.square()
+        residual_count[label] += residual
 
     def class_effect(
         total: torch.Tensor,
@@ -103,26 +103,12 @@ def fit_role_disentangled_reference(
         ).clamp_min(1e-6)
         return mask, direction, weight
 
-    sample_count = class_count.sum().clamp_min(1.0)
-    feature_mean = class_sum.sum(dim=0) / sample_count
-    feature_variance = (
-        class_square.sum(dim=0) / sample_count - feature_mean.square()
-    ).clamp_min(1e-6)
-    residual_mean = residual_total / sample_count
-    residual_variance = (
-        residual_square_total / sample_count - residual_mean.square()
-    ).clamp_min(1e-6)
-    residual_effect = torch.relu(
-        (residual_cross / sample_count - feature_mean * residual_mean)
-        / torch.sqrt(feature_variance * residual_variance)
-    )
-
     active_per_layer = min(neurons.active, neurons.dimensions)
     normal_mask, normal_direction, normal_weight = role_definition(
         class_effect(class_sum, class_square, class_count)
     )
     primary_mask, primary_direction, primary_weight = role_definition(
-        residual_effect
+        class_effect(residual_sum, residual_square, residual_count)
     )
 
     role_weight = normal_mask * normal_weight

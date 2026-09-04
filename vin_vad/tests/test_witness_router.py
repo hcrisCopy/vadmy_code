@@ -96,6 +96,22 @@ def test_negative_role_consensus_vetoes_only_host_conflicts() -> None:
     assert result["consensus_conflict_veto"][0, 2].item() == 0.0
 
 
+def test_negative_consensus_strengthens_only_normal_route_veto() -> None:
+    router = WitnessRouter()
+    with torch.no_grad():
+        router.video_head.weight.zero_()
+        router.video_head.bias.fill_(-10.0)
+    host = torch.tensor([[0.10, 0.90, 0.20]])
+    evidence = torch.tensor([[0.90, 0.80, 0.70]])
+    validity = torch.ones_like(host, dtype=torch.bool)
+    consensus = torch.tensor([[0.00, 0.75, 0.00]])
+
+    result = router(host, evidence, validity, negative_consensus=consensus)
+
+    assert result["normal_consensus_veto"][0, 1] >= 0.75
+    assert result["delta_anomaly"][0, 1].item() < 0.0
+
+
 def test_negative_role_consensus_cannot_be_undone_by_event_completion() -> None:
     router = WitnessRouter()
     with torch.no_grad():

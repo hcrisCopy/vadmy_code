@@ -171,6 +171,14 @@ class WitnessRouter(nn.Module):
                 negative_consensus.clamp_min(0.0),
             )
         ).masked_fill(~validity, 0.0)
+        normal_consensus_veto = (
+            veto_support
+            if negative_consensus is None
+            else torch.maximum(
+                veto_support,
+                negative_consensus.clamp(0.0, 1.0),
+            )
+        ).masked_fill(~validity, 0.0)
         host_miss_support = torch.relu(-direct_host)
         complementary_support = torch.minimum(
             witness_support, host_miss_support
@@ -189,7 +197,7 @@ class WitnessRouter(nn.Module):
                 + witness_event_support * event_gap
                 - consensus_conflict_veto
             )
-            - normal_authorized.unsqueeze(1) * veto_support
+            - normal_authorized.unsqueeze(1) * normal_consensus_veto
         ).masked_fill(~validity, 0.0)
         # q decides the correction direction; neuron evidence decides its support.
         # A non-zero mean is required to repair cross-video ranking, which dominates
@@ -243,6 +251,7 @@ class WitnessRouter(nn.Module):
             "witness_event_support": witness_event_support,
             "veto_support": veto_support,
             "consensus_conflict_veto": consensus_conflict_veto,
+            "normal_consensus_veto": normal_consensus_veto,
             "event_anchor": event_anchor,
             "event_gap": event_gap,
             "completion_anchor": completion_anchor,

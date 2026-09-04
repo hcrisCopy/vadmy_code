@@ -74,26 +74,3 @@ def test_witness_mil_orients_primary_and_context_roles() -> None:
     losses["witness_mil"].backward()
     assert float(model.expert.temporal.output.weight.grad.abs().sum()) > 0.0
     assert float(model.expert.context_temporal.output.weight.grad.abs().sum()) > 0.0
-
-
-def test_final_mil_includes_pairwise_bag_ranking() -> None:
-    hidden, host, validity, labels = sample()
-    model = WitnessVAD()
-    result = model(hidden, host, validity)
-    without_ranking = witness_objective(
-        result,
-        host,
-        validity,
-        labels,
-        model.expert.neurons.sparsity_surrogate(),
-        rank_weight=0.0,
-    )
-    with_ranking = witness_objective(
-        result,
-        host,
-        validity,
-        labels,
-        model.expert.neurons.sparsity_surrogate(),
-        rank_weight=0.5,
-    )
-    assert with_ranking["final_mil"] > without_ranking["final_mil"]

@@ -171,17 +171,6 @@ def test_local_event_completion_ignores_padding() -> None:
     torch.testing.assert_close(completed, torch.tensor([[0.9, 0.9, 0.9, 0.0]]))
 
 
-def test_router_uses_one_explicit_odd_local_width() -> None:
-    router = WitnessRouter(local_width=9)
-    assert router.local_width == 9
-    try:
-        WitnessRouter(local_width=8)
-    except ValueError as error:
-        assert "positive odd" in str(error)
-    else:
-        raise AssertionError("an even local width must be rejected")
-
-
 def test_padding_does_not_enter_video_pooling_or_router() -> None:
     host, evidence, validity = inputs()
     router = WitnessRouter()

@@ -91,11 +91,8 @@ def inverse_softplus(value: float) -> float:
 class WitnessRouter(nn.Module):
     """One video state routes global suppression and local witness correction."""
 
-    def __init__(self, eta_normal: float = 1.0, eta_anomaly: float = 0.25, local_width: int = 21) -> None:
+    def __init__(self, eta_normal: float = 1.0, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
         super().__init__()
-        if local_width <= 0 or local_width % 2 == 0:
-            raise ValueError("local_width must be a positive odd integer")
-        self.local_width = int(local_width)
         self.video_head = nn.Linear(10, 1)
         self.raw_eta_normal = nn.Parameter(torch.tensor(inverse_softplus(eta_normal)))
         self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
@@ -172,12 +169,8 @@ class WitnessRouter(nn.Module):
         complementary_support = torch.minimum(
             witness_support, host_miss_support
         )
-        witness_event_support = masked_local_max(
-            witness_support, validity, width=self.local_width
-        )
-        event_anchor = masked_local_max(
-            host_clipped, validity, width=self.local_width
-        )
+        witness_event_support = masked_local_max(witness_support, validity)
+        event_anchor = masked_local_max(host_clipped, validity)
         event_gap = torch.relu(
             torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6))
             - torch.logit(host_clipped)
@@ -207,9 +200,7 @@ class WitnessRouter(nn.Module):
         # The consensus residual seeds missed event positions.  A second,
         # point-authorized convex step completes only locations that carry their
         # own witness support and can never overshoot the local event peak.
-        completion_anchor = masked_local_max(
-            shifted, validity, width=self.local_width
-        )
+        completion_anchor = masked_local_max(shifted, validity)
         negative_completion_veto = (
             torch.zeros_like(host_score)
             if negative_consensus is None

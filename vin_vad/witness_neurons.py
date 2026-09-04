@@ -85,15 +85,8 @@ class SignedTopKWitnessNeurons(nn.Module):
         )
 
     def gates(self, neuron_keep_mask: torch.Tensor | None = None) -> torch.Tensor:
-        if bool(self.normal_role_ready):
-            primary_available = self.normal_role_mask <= 0
-            if torch.any(primary_available.sum(dim=-1) < self.active):
-                raise RuntimeError("normal role leaves too few primary-neuron candidates")
-        else:
-            primary_available = torch.ones_like(self.gate_logits, dtype=torch.bool)
-        soft = torch.sigmoid(self.gate_logits) * primary_available.to(self.gate_logits)
-        ranking_logits = self.gate_logits.masked_fill(~primary_available, -torch.inf)
-        indices = torch.topk(ranking_logits, k=self.active, dim=-1).indices
+        soft = torch.sigmoid(self.gate_logits)
+        indices = torch.topk(self.gate_logits, k=self.active, dim=-1).indices
         hard = torch.zeros_like(soft).scatter_(-1, indices, 1.0)
         straight_through = hard + soft - soft.detach()
         if neuron_keep_mask is not None:

@@ -92,16 +92,9 @@ def fit_role_disentangled_reference(
             / torch.sqrt(variance_value[0] + variance_value[1])
         )
 
-    def role_definition(
-        effect: torch.Tensor, forbidden_mask: torch.Tensor | None = None
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def role_definition(effect: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         best_effect, best_direction = effect.max(dim=0)
-        selection_effect = (
-            best_effect
-            if forbidden_mask is None
-            else best_effect.masked_fill(forbidden_mask > 0, -torch.inf)
-        )
-        selected = torch.topk(selection_effect, active_per_layer, dim=-1).indices
+        selected = torch.topk(best_effect, active_per_layer, dim=-1).indices
         mask = torch.zeros_like(best_effect).scatter_(-1, selected, 1.0)
         direction = torch.where(best_direction == 0, 1.0, -1.0)
         weight = best_effect * mask
@@ -115,8 +108,7 @@ def fit_role_disentangled_reference(
         class_effect(class_sum, class_square, class_count)
     )
     primary_mask, primary_direction, primary_weight = role_definition(
-        class_effect(residual_sum, residual_square, residual_count),
-        forbidden_mask=normal_mask,
+        class_effect(residual_sum, residual_square, residual_count)
     )
 
     role_weight = normal_mask * normal_weight

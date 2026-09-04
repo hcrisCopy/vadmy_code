@@ -96,12 +96,6 @@ def test_role_jury_has_distinct_auditable_views() -> None:
         expert.neurons.signed_weights.detach(), -primary_mask
     )
     torch.testing.assert_close(expert.neurons.normal_role_mask, mask)
-    # Joint training cannot collapse the primary role back into normality.
-    with torch.no_grad():
-        expert.neurons.gate_logits[:, :32] = 100.0
-    selected_primary = expert.neurons.gates().detach() > 0.5
-    assert not torch.any(selected_primary & mask.bool())
-    assert torch.equal(selected_primary.sum(dim=-1), torch.full((12,), 32))
     result = expert(hidden, validity)
     for name in (
         "primary_evidence",

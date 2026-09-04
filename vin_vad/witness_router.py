@@ -141,9 +141,20 @@ class WitnessRouter(nn.Module):
             if positive_consensus is None
             else positive_consensus.clamp(0.0, 1.0)
         ).masked_fill(~validity, 0.0)
+        # Preserve the video-level suppression budget while moving it away from
+        # unanimously witnessed locations.  This separates the reliable global
+        # decision (how much to suppress) from the uncertain temporal question
+        # (where suppression is safe) without adding another correction branch.
+        normal_suppression_allocation = 1.0 - positive_normal_protection
+        allocation_mean = masked_mean(
+            normal_suppression_allocation, validity
+        ).unsqueeze(1).clamp_min(1e-6)
+        normal_suppression_allocation = (
+            normal_suppression_allocation / allocation_mean
+        ).masked_fill(~validity, 0.0)
         delta_normal = (
             delta_normal_video.unsqueeze(1).expand_as(host_score)
-            * (1.0 - positive_normal_protection)
+            * normal_suppression_allocation
         )
 
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
@@ -216,6 +227,7 @@ class WitnessRouter(nn.Module):
             "delta_normal": delta_normal,
             "delta_anomaly": delta_anomaly,
             "positive_normal_protection": positive_normal_protection,
+            "normal_suppression_allocation": normal_suppression_allocation,
             "local_shape": local_shape,
             "witness_support": witness_support,
             "host_miss_support": host_miss_support,

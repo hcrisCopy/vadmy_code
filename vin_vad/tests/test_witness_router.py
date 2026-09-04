@@ -96,6 +96,27 @@ def test_negative_role_consensus_vetoes_only_host_conflicts() -> None:
     assert result["consensus_conflict_veto"][0, 2].item() == 0.0
 
 
+def test_positive_video_confidence_boundedly_scales_only_local_correction() -> None:
+    host, evidence, validity = inputs()
+    router = WitnessRouter()
+    with torch.no_grad():
+        router.video_head.weight.zero_()
+        router.video_head.bias.fill_(2.0)
+    positive = router(host, evidence, validity)
+    expected_gain = 1.0 + torch.tanh(torch.tensor(2.0))
+    torch.testing.assert_close(
+        positive["anomaly_confidence_gain"],
+        torch.full((2,), expected_gain),
+    )
+    assert torch.all(positive["anomaly_confidence_gain"] < 2.0)
+    with torch.no_grad():
+        router.video_head.bias.fill_(-2.0)
+    negative = router(host, evidence, validity)
+    torch.testing.assert_close(
+        negative["anomaly_confidence_gain"], torch.ones(2)
+    )
+
+
 def test_positive_consensus_only_protects_normal_route_from_suppression() -> None:
     router = WitnessRouter()
     with torch.no_grad():

@@ -104,23 +104,11 @@ def fit_role_disentangled_reference(
         return mask, direction, weight
 
     active_per_layer = min(neurons.active, neurons.dimensions)
-    weak_label_effect = class_effect(class_sum, class_square, class_count)
-    host_residual_effect = class_effect(
-        residual_sum, residual_square, residual_count
-    )
     normal_mask, normal_direction, normal_weight = role_definition(
-        weak_label_effect
-    )
-    # A primary witness must satisfy both parts of its functional definition:
-    # it separates abnormal from reliably normal bags, and that separation is
-    # retained on the bags where the frozen host leaves the largest error.
-    # The geometric conjunction prevents either a generic class neuron or a
-    # noisy hard-bag neuron from winning the role by one large score alone.
-    conjunctive_witness_effect = torch.sqrt(
-        weak_label_effect * host_residual_effect
+        class_effect(class_sum, class_square, class_count)
     )
     primary_mask, primary_direction, primary_weight = role_definition(
-        conjunctive_witness_effect
+        class_effect(residual_sum, residual_square, residual_count)
     )
 
     role_weight = normal_mask * normal_weight

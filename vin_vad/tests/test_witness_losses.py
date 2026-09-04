@@ -74,3 +74,18 @@ def test_witness_mil_orients_primary_and_context_roles() -> None:
     losses["witness_mil"].backward()
     assert float(model.expert.temporal.output.weight.grad.abs().sum()) > 0.0
     assert float(model.expert.context_temporal.output.weight.grad.abs().sum()) > 0.0
+
+
+def test_video_route_loss_focuses_on_frozen_host_residuals() -> None:
+    hidden, host, validity, labels = sample()
+    model = WitnessVAD()
+    result = model(hidden, host, validity)
+    losses = witness_objective(
+        result, host, validity, labels, model.expert.neurons.sparsity_surrogate()
+    )
+    residual = (labels - topk_bag_probability(host, validity)).abs()
+    per_bag = torch.nn.functional.binary_cross_entropy(
+        result["video_probability"], labels, reduction="none"
+    )
+    expected = (residual * per_bag).sum() / residual.sum()
+    torch.testing.assert_close(losses["video"], expected)

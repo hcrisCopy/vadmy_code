@@ -71,7 +71,9 @@ def test_video_state_routes_witness_and_veto_support() -> None:
         + abnormal["delta_normal"]
         + abnormal["delta_anomaly"]
     )
-    completed = abnormal["completed_score"]
+    completed = shifted + abnormal["completion_gate"] * (
+        abnormal["completion_anchor"] - shifted
+    )
     assert torch.all(completed[validity] >= shifted[validity])
     assert torch.all(completed[validity] <= abnormal["completion_anchor"][validity])
 

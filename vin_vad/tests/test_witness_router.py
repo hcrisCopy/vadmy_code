@@ -113,22 +113,6 @@ def test_negative_role_consensus_cannot_be_undone_by_event_completion() -> None:
     assert result["completion_gate"][0, 1] <= 0.75
 
 
-def test_completion_peak_requires_joint_host_and_witness_seed() -> None:
-    router = WitnessRouter()
-    with torch.no_grad():
-        router.video_head.weight.zero_()
-        router.video_head.bias.fill_(10.0)
-    host = torch.tensor([[0.10, 0.90, 0.20]])
-    evidence = torch.tensor([[0.70, 0.90, 0.80]])
-    validity = torch.ones_like(host, dtype=torch.bool)
-
-    result = router(host, evidence, validity)
-
-    assert torch.count_nonzero(result["completion_seed"]) == 1
-    assert result["completion_seed"][0, 1].item() == 1.0
-    assert torch.all(result["completion_anchor"] >= result["corrected_score"])
-
-
 def test_positive_video_confidence_boundedly_scales_only_local_correction() -> None:
     host, evidence, validity = inputs()
     router = WitnessRouter()

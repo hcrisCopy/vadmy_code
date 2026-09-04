@@ -206,9 +206,18 @@ class WitnessRouter(nn.Module):
             if negative_consensus is None
             else negative_consensus.clamp(0.0, 1.0)
         ).masked_fill(~validity, 0.0)
+        point_completion_authorization = witness_support.clamp(max=1.0)
+        # Positive role consensus complements rather than gates the point
+        # witness.  The bounded union preserves complementary single-role
+        # discoveries while giving genuinely agreed events stronger authority.
+        completion_authorization = (
+            point_completion_authorization
+            + positive_normal_protection
+            - point_completion_authorization * positive_normal_protection
+        )
         completion_gate = (
             anomaly_authorized.unsqueeze(1)
-            * witness_support.clamp(max=1.0)
+            * completion_authorization
             * (1.0 - negative_completion_veto)
         ).masked_fill(~validity, 0.0)
         completed = shifted + completion_gate * (completion_anchor - shifted)
@@ -240,6 +249,7 @@ class WitnessRouter(nn.Module):
             "event_anchor": event_anchor,
             "event_gap": event_gap,
             "completion_anchor": completion_anchor,
+            "completion_authorization": completion_authorization,
             "negative_completion_veto": negative_completion_veto,
             "completion_gate": completion_gate,
             "corrected_score": corrected,

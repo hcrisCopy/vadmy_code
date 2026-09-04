@@ -139,7 +139,7 @@ def test_positive_consensus_only_protects_normal_route_from_suppression() -> Non
     with torch.no_grad():
         router.video_head.weight.zero_()
         router.video_head.bias.fill_(-2.0)
-    host = torch.tensor([[0.10, 0.90, 0.20]])
+    host = torch.tensor([[0.90, 0.10, 0.80]])
     evidence = torch.tensor([[0.20, 0.80, 0.30]])
     validity = torch.ones_like(host, dtype=torch.bool)
     consensus = torch.tensor([[0.00, 1.00, 0.25]])
@@ -152,9 +152,13 @@ def test_positive_consensus_only_protects_normal_route_from_suppression() -> Non
         protected["delta_normal"][0, 2],
         unprotected["delta_normal"][0, 2] * 0.75,
     )
-    torch.testing.assert_close(
-        protected["delta_anomaly"], unprotected["delta_anomaly"]
-    )
+    rescue = protected["false_normal_rescue"] > 0
+    assert torch.any(rescue)
+    assert torch.all(protected["delta_anomaly"][rescue] > unprotected["delta_anomaly"][rescue])
+    # A false-normal rescue is pointwise only; it never opens event completion.
+    assert torch.all(protected["completion_gate"] == 0.0)
+    assert torch.all(protected["false_normal_rescue"] <= protected["host_miss_support"])
+    assert torch.all(protected["false_normal_rescue"] <= protected["witness_support"])
 
 
 def test_event_anchor_uses_standard_weak_mil_topk() -> None:

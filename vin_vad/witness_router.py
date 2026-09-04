@@ -169,7 +169,6 @@ class WitnessRouter(nn.Module):
         complementary_support = torch.minimum(
             witness_support, host_miss_support
         )
-        host_witness_agreement = torch.minimum(witness_support, host_support)
         witness_event_support = masked_local_max(witness_support, validity)
         event_anchor = masked_local_max(host_clipped, validity)
         event_gap = torch.relu(
@@ -181,7 +180,6 @@ class WitnessRouter(nn.Module):
             * (
                 witness_support
                 + complementary_support
-                + host_witness_agreement
                 + witness_event_support * event_gap
                 - consensus_conflict_veto
             )
@@ -236,7 +234,6 @@ class WitnessRouter(nn.Module):
             "witness_support": witness_support,
             "host_miss_support": host_miss_support,
             "complementary_support": complementary_support,
-            "host_witness_agreement": host_witness_agreement,
             "witness_event_support": witness_event_support,
             "veto_support": veto_support,
             "consensus_conflict_veto": consensus_conflict_veto,

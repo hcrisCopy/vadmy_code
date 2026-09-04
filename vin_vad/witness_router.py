@@ -89,12 +89,11 @@ def inverse_softplus(value: float) -> float:
 
 
 class WitnessRouter(nn.Module):
-    """One video state routes global suppression and local witness correction."""
+    """One video state routes positive and negative local witness correction."""
 
     def __init__(self, eta_normal: float = 1.0, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
         super().__init__()
         self.video_head = nn.Linear(10, 1)
-        self.raw_eta_normal = nn.Parameter(torch.tensor(inverse_softplus(eta_normal)))
         self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
 
     def forward(
@@ -104,11 +103,8 @@ class WitnessRouter(nn.Module):
         validity: torch.Tensor,
         eta_normal_override: float | None = None,
         eta_anomaly_override: float | None = None,
-        positive_consensus: torch.Tensor | None = None,
         negative_consensus: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
-        if positive_consensus is not None and positive_consensus.shape != host_score.shape:
-            raise ValueError("positive_consensus must share the [B,T] host-score shape")
         if negative_consensus is not None and negative_consensus.shape != host_score.shape:
             raise ValueError("negative_consensus must share the [B,T] host-score shape")
         summary = video_summary(host_score, evidence, validity)
@@ -125,30 +121,16 @@ class WitnessRouter(nn.Module):
         # positive confidence only controls the strength of already-localized
         # anomaly correction, so it cannot create a whole-video score offset.
         anomaly_confidence_gain = 1.0 + torch.tanh(torch.relu(video_logit))
-        eta_normal = (
-            torch.nn.functional.softplus(self.raw_eta_normal)
-            if eta_normal_override is None
-            else host_score.new_tensor(eta_normal_override)
-        )
+        eta_normal = host_score.new_tensor(0.0)
         eta_anomaly = (
             torch.nn.functional.softplus(self.raw_eta_anomaly)
             if eta_anomaly_override is None
             else host_score.new_tensor(eta_anomaly_override)
         )
-        delta_normal_video = eta_normal * torch.minimum(video_logit, torch.zeros_like(video_logit))
-        # A video-level normal decision is weak supervision, so it cannot safely
-        # erase a location where every independent witness role agrees on an
-        # anomaly.  Positive consensus only protects the frozen host here; it
-        # does not create anomaly score by itself.
-        positive_normal_protection = (
-            torch.zeros_like(host_score)
-            if positive_consensus is None
-            else positive_consensus.clamp(0.0, 1.0)
-        ).masked_fill(~validity, 0.0)
-        delta_normal = (
-            delta_normal_video.unsqueeze(1).expand_as(host_score)
-            * (1.0 - positive_normal_protection)
-        )
+        # Full correction must be backed by a temporal witness.  Removing the
+        # whole-video offset prevents the video classifier and local veto from
+        # redundantly suppressing the same normal bag.
+        delta_normal = torch.zeros_like(host_score)
 
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
@@ -222,7 +204,6 @@ class WitnessRouter(nn.Module):
             "eta_anomaly": eta_anomaly,
             "delta_normal": delta_normal,
             "delta_anomaly": delta_anomaly,
-            "positive_normal_protection": positive_normal_protection,
             "local_shape": local_shape,
             "witness_support": witness_support,
             "host_miss_support": host_miss_support,

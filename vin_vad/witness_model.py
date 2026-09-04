@@ -70,19 +70,7 @@ class WitnessExpert(nn.Module):
         roles = torch.stack([primary_role, normality_role, context_role], dim=-1)
         positive_agreement = torch.relu(roles).amin(dim=-1)
         negative_agreement = torch.relu(-roles).amin(dim=-1)
-        # Normal bags provide reliable snippet-level negative evidence, whereas
-        # merely leaving their activation envelope is not sufficient evidence
-        # of an anomaly.  The normality role therefore has direct veto authority
-        # only; its positive side can corroborate unanimous authorization but
-        # cannot raise the anomaly curve on its own.
-        anomaly_logit = torch.stack([primary_role, context_role], dim=-1).mean(dim=-1)
-        normality_veto = torch.relu(-normality_role)
-        logits = (
-            anomaly_logit
-            - normality_veto
-            + positive_agreement
-            - negative_agreement
-        )
+        logits = roles.mean(dim=-1) + positive_agreement - negative_agreement
         evidence = torch.sigmoid(logits).masked_fill(~validity, 0.0)
         return {
             **neuron,

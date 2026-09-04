@@ -176,12 +176,12 @@ class WitnessRouter(nn.Module):
         host_logit = torch.logit(host_clipped)
         base = torch.sigmoid(host_logit)
         shifted = torch.sigmoid(host_logit + delta_normal + delta_anomaly)
-        # The consensus residual seeds a temporal event component.  A bounded
-        # neighborhood-authorized convex step completes low-scoring locations
-        # around that seed and can never overshoot the local event peak.
+        # The consensus residual seeds missed event positions.  A second,
+        # point-authorized convex step completes only locations that carry their
+        # own witness support and can never overshoot the local event peak.
         completion_anchor = masked_local_max(shifted, validity)
         completion_gate = (
-            anomaly_authorized.unsqueeze(1) * witness_event_support.clamp(max=1.0)
+            anomaly_authorized.unsqueeze(1) * witness_support.clamp(max=1.0)
         ).masked_fill(~validity, 0.0)
         completed = shifted + completion_gate * (completion_anchor - shifted)
         corrected = host_score + completed - base

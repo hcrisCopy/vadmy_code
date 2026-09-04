@@ -181,12 +181,20 @@ class WitnessRouter(nn.Module):
             torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6))
             - torch.logit(host_clipped)
         ).masked_fill(~validity, 0.0)
+        negative_event_veto = (
+            torch.zeros_like(host_score)
+            if negative_consensus is None
+            else negative_consensus.clamp(0.0, 1.0)
+        ).masked_fill(~validity, 0.0)
+        event_completion_support = (
+            witness_event_support * event_gap * (1.0 - negative_event_veto)
+        )
         local_shape = (
             anomaly_authorized.unsqueeze(1)
             * (
                 witness_support
                 + complementary_support
-                + witness_event_support * event_gap
+                + event_completion_support
                 - consensus_conflict_veto
             )
             - normal_authorized.unsqueeze(1) * veto_support
@@ -245,6 +253,8 @@ class WitnessRouter(nn.Module):
             "consensus_conflict_veto": consensus_conflict_veto,
             "event_anchor": event_anchor,
             "event_gap": event_gap,
+            "negative_event_veto": negative_event_veto,
+            "event_completion_support": event_completion_support,
             "completion_anchor": completion_anchor,
             "negative_completion_veto": negative_completion_veto,
             "completion_gate": completion_gate,

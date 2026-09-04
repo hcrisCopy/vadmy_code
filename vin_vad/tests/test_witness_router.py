@@ -109,6 +109,7 @@ def test_negative_role_consensus_cannot_be_undone_by_event_completion() -> None:
     result = router(host, evidence, validity, negative_consensus=consensus)
 
     assert result["witness_support"][0, 0].item() > 0.0
+    assert result["event_completion_support"][0, 0].item() == 0.0
     assert result["completion_gate"][0, 0].item() == 0.0
     assert result["completion_gate"][0, 1] <= 0.75
 

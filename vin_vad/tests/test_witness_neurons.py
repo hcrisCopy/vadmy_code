@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from vin_vad.witness_model import WitnessExpert, quorum_agreement
+from vin_vad.witness_model import WitnessExpert
 from vin_vad.witness_neurons import SignedTopKWitnessNeurons
 from vin_vad.witness_temporal import WitnessTemporalReadout
 
@@ -66,19 +66,6 @@ def test_temporal_padding_never_changes_valid_output() -> None:
     second = module(changed, validity)
     torch.testing.assert_close(first[validity], second[validity])
     assert torch.equal(second[~validity], torch.zeros_like(second[~validity]))
-
-
-def test_quorum_requires_two_role_votes_and_ignores_one_outlier() -> None:
-    roles = torch.tensor(
-        [
-            [2.0, 1.0, -9.0],
-            [2.0, -1.0, -9.0],
-            [2.0, -1.0, 0.0],
-        ]
-    )
-    positive, negative = quorum_agreement(roles)
-    torch.testing.assert_close(positive, torch.tensor([1.0, 0.0, 0.0]))
-    torch.testing.assert_close(negative, torch.tensor([0.0, 1.0, 0.0]))
 
 
 def test_role_jury_has_distinct_auditable_views() -> None:

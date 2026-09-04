@@ -33,15 +33,6 @@ def masked_temporal_mean(
     )
 
 
-def quorum_agreement(roles: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return the signed 2-of-3 agreement; one role cannot authorize a correction."""
-    if roles.ndim < 1 or roles.shape[-1] != 3:
-        raise ValueError("roles must contain exactly three functional views")
-    positive = torch.relu(roles).median(dim=-1).values
-    negative = torch.relu(-roles).median(dim=-1).values
-    return positive, negative
-
-
 class WitnessExpert(nn.Module):
     """Neuron-only path: its API intentionally has no host-score argument."""
 
@@ -77,7 +68,8 @@ class WitnessExpert(nn.Module):
         normality_role = normality_logits.clamp(-3.0, 3.0)
         context_role = masked_standardize(context_logits, validity).clamp(-3.0, 3.0)
         roles = torch.stack([primary_role, normality_role, context_role], dim=-1)
-        positive_agreement, negative_agreement = quorum_agreement(roles)
+        positive_agreement = torch.relu(roles).amin(dim=-1)
+        negative_agreement = torch.relu(-roles).amin(dim=-1)
         logits = roles.mean(dim=-1) + positive_agreement - negative_agreement
         evidence = torch.sigmoid(logits).masked_fill(~validity, 0.0)
         return {

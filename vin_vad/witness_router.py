@@ -125,6 +125,11 @@ class WitnessRouter(nn.Module):
         # positive confidence only controls the strength of already-localized
         # anomaly correction, so it cannot create a whole-video score offset.
         anomaly_confidence_gain = 1.0 + torch.tanh(torch.relu(video_logit))
+        normal_confidence_gain = 1.0 + torch.tanh(torch.relu(-video_logit))
+        local_confidence_gain = (
+            anomaly_authorized * anomaly_confidence_gain
+            + normal_authorized * normal_confidence_gain
+        )
         eta_normal = (
             torch.nn.functional.softplus(self.raw_eta_normal)
             if eta_normal_override is None
@@ -195,7 +200,7 @@ class WitnessRouter(nn.Module):
         # A non-zero mean is required to repair cross-video ranking, which dominates
         # frame AUC/AP, while the support remains temporally localized.
         delta_anomaly = (
-            eta_anomaly * anomaly_confidence_gain.unsqueeze(1) * local_shape
+            eta_anomaly * local_confidence_gain.unsqueeze(1) * local_shape
         )
         delta_anomaly = delta_anomaly.masked_fill(~validity, 0.0)
         delta_normal = delta_normal.masked_fill(~validity, 0.0)
@@ -231,6 +236,8 @@ class WitnessRouter(nn.Module):
             "anomaly_authorized": anomaly_authorized,
             "normal_authorized": normal_authorized,
             "anomaly_confidence_gain": anomaly_confidence_gain,
+            "normal_confidence_gain": normal_confidence_gain,
+            "local_confidence_gain": local_confidence_gain,
             "eta_normal": eta_normal,
             "eta_anomaly": eta_anomaly,
             "delta_normal": delta_normal,

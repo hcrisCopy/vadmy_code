@@ -132,6 +132,14 @@ def test_positive_video_confidence_boundedly_scales_only_local_correction() -> N
     torch.testing.assert_close(
         negative["anomaly_confidence_gain"], torch.ones(2)
     )
+    expected_normal_gain = 1.0 + torch.tanh(torch.tensor(2.0))
+    torch.testing.assert_close(
+        negative["normal_confidence_gain"],
+        torch.full((2,), expected_normal_gain),
+    )
+    torch.testing.assert_close(
+        negative["local_confidence_gain"], negative["normal_confidence_gain"]
+    )
 
 
 def test_positive_consensus_only_protects_normal_route_from_suppression() -> None:

@@ -175,15 +175,6 @@ class WitnessRouter(nn.Module):
             torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6))
             - torch.logit(host_clipped)
         ).masked_fill(~validity, 0.0)
-        # A false-normal video state may receive only the point's conservative
-        # host-miss residual: all roles must agree locally, witness evidence must
-        # be high, and the frozen host must be low.  This exception cannot open
-        # neighborhood propagation or the later event-completion step.
-        false_normal_rescue = (
-            normal_authorized.unsqueeze(1)
-            * positive_normal_protection
-            * complementary_support
-        ).masked_fill(~validity, 0.0)
         local_shape = (
             anomaly_authorized.unsqueeze(1)
             * (
@@ -193,7 +184,6 @@ class WitnessRouter(nn.Module):
                 - consensus_conflict_veto
             )
             - normal_authorized.unsqueeze(1) * veto_support
-            + false_normal_rescue
         ).masked_fill(~validity, 0.0)
         # q decides the correction direction; neuron evidence decides its support.
         # A non-zero mean is required to repair cross-video ranking, which dominates
@@ -249,7 +239,6 @@ class WitnessRouter(nn.Module):
             "consensus_conflict_veto": consensus_conflict_veto,
             "event_anchor": event_anchor,
             "event_gap": event_gap,
-            "false_normal_rescue": false_normal_rescue,
             "completion_anchor": completion_anchor,
             "negative_completion_veto": negative_completion_veto,
             "completion_gate": completion_gate,

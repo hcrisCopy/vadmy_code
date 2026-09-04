@@ -35,10 +35,7 @@ def test_video_state_routes_witness_and_veto_support() -> None:
     router = WitnessRouter()
     router.video_head.weight.data.zero_()
     router.video_head.bias.data.fill_(8.0)
-    positive_consensus = torch.ones_like(host)
-    abnormal = router(
-        host, evidence, validity, positive_consensus=positive_consensus
-    )
+    abnormal = router(host, evidence, validity)
     assert torch.equal(
         abnormal["anomaly_authorized"],
         torch.ones_like(abnormal["anomaly_authorized"]),
@@ -109,38 +106,11 @@ def test_negative_role_consensus_cannot_be_undone_by_event_completion() -> None:
     validity = torch.ones_like(host, dtype=torch.bool)
     consensus = torch.tensor([[1.00, 0.25, 0.00]])
 
-    result = router(
-        host,
-        evidence,
-        validity,
-        positive_consensus=torch.ones_like(host),
-        negative_consensus=consensus,
-    )
+    result = router(host, evidence, validity, negative_consensus=consensus)
 
     assert result["witness_support"][0, 0].item() > 0.0
     assert result["completion_gate"][0, 0].item() == 0.0
     assert result["completion_gate"][0, 1] <= 0.75
-
-
-def test_completion_peak_requires_host_and_positive_consensus_seed() -> None:
-    router = WitnessRouter()
-    with torch.no_grad():
-        router.video_head.weight.zero_()
-        router.video_head.bias.fill_(10.0)
-    host = torch.tensor([[0.10, 0.90, 0.20]])
-    evidence = torch.tensor([[0.90, 0.80, 0.70]])
-    validity = torch.ones_like(host, dtype=torch.bool)
-    no_seed = router(
-        host, evidence, validity, positive_consensus=torch.zeros_like(host)
-    )
-    seeded = router(
-        host, evidence, validity, positive_consensus=torch.ones_like(host)
-    )
-
-    torch.testing.assert_close(
-        no_seed["completion_anchor"], no_seed["corrected_score"]
-    )
-    assert torch.any(seeded["completion_anchor"] > no_seed["completion_anchor"])
 
 
 def test_positive_video_confidence_boundedly_scales_only_local_correction() -> None:

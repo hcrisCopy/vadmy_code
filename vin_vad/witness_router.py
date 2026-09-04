@@ -145,7 +145,7 @@ class WitnessRouter(nn.Module):
             if positive_consensus is None
             else positive_consensus.clamp(0.0, 1.0)
         ).masked_fill(~validity, 0.0)
-        delta_normal = (
+        candidate_delta_normal = (
             delta_normal_video.unsqueeze(1).expand_as(host_score)
             * (1.0 - positive_normal_protection)
         )
@@ -156,6 +156,11 @@ class WitnessRouter(nn.Module):
         direct_host = masked_standardize(host_clipped, validity).clamp(-3.0, 3.0)
         witness_support = torch.relu(direct_witness)
         veto_support = torch.relu(-direct_witness)
+        # The global normal route fills only locations not already handled by
+        # the local veto.  Their supports are complementary, preventing two
+        # negative corrections from being stacked on the same snippet.
+        local_veto_coverage = veto_support.clamp(max=1.0)
+        delta_normal = candidate_delta_normal * (1.0 - local_veto_coverage)
         host_support = torch.relu(direct_host)
         consensus_conflict_veto = (
             torch.zeros_like(host_support)
@@ -229,6 +234,7 @@ class WitnessRouter(nn.Module):
             "complementary_support": complementary_support,
             "witness_event_support": witness_event_support,
             "veto_support": veto_support,
+            "local_veto_coverage": local_veto_coverage,
             "consensus_conflict_veto": consensus_conflict_veto,
             "event_anchor": event_anchor,
             "event_gap": event_gap,

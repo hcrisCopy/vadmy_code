@@ -106,3 +106,26 @@ def test_role_jury_has_distinct_auditable_views() -> None:
     ):
         assert result[name].shape == validity.shape
         assert torch.equal(result[name][~validity], torch.zeros_like(result[name][~validity]))
+
+
+def test_primary_gate_cannot_reenter_normality_role_during_training() -> None:
+    module = SignedTopKWitnessNeurons(active=32)
+    normal_mask = torch.zeros(12, 768)
+    normal_mask[:, :32] = 1.0
+    module.set_normal_role(
+        torch.zeros(12, 768),
+        torch.ones(12, 768),
+        normal_mask,
+        torch.ones(12, 768),
+        normal_mask,
+        torch.tensor(0.4),
+        torch.tensor(0.2),
+    )
+    primary_mask = torch.zeros(12, 768)
+    primary_mask[:, 32:64] = 1.0
+    module.set_primary_role(primary_mask, torch.ones(12, 768), primary_mask)
+    with torch.no_grad():
+        module.gate_logits[:, :32] = 100.0
+    active = module.gates().detach() > 0.5
+    assert not torch.any(active & (normal_mask > 0))
+    assert torch.equal(active.sum(dim=-1), torch.full((12,), 32))

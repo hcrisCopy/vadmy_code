@@ -92,8 +92,15 @@ def fit_role_disentangled_reference(
             / torch.sqrt(variance_value[0] + variance_value[1])
         )
 
-    def role_definition(effect: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def role_definition(
+        effect: torch.Tensor,
+        forbidden: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         best_effect, best_direction = effect.max(dim=0)
+        if forbidden is not None:
+            if forbidden.shape != best_effect.shape:
+                raise ValueError("forbidden role mask must match one [layer, dimension] grid")
+            best_effect = best_effect.masked_fill(forbidden.to(torch.bool), -torch.inf)
         selected = torch.topk(best_effect, active_per_layer, dim=-1).indices
         mask = torch.zeros_like(best_effect).scatter_(-1, selected, 1.0)
         direction = torch.where(best_direction == 0, 1.0, -1.0)
@@ -107,8 +114,13 @@ def fit_role_disentangled_reference(
     normal_mask, normal_direction, normal_weight = role_definition(
         class_effect(class_sum, class_square, class_count)
     )
+    # Dense-normal bags are the only snippet-level labels that are fully
+    # trustworthy, so their coordinates receive priority.  The residual role
+    # must then find complementary host-error evidence instead of letting one
+    # class-discriminative coordinate vote twice in the role jury.
     primary_mask, primary_direction, primary_weight = role_definition(
-        class_effect(residual_sum, residual_square, residual_count)
+        class_effect(residual_sum, residual_square, residual_count),
+        forbidden=normal_mask,
     )
 
     role_weight = normal_mask * normal_weight

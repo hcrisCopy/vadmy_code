@@ -114,6 +114,7 @@ class WitnessVAD(nn.Module):
             eta_anomaly_override=eta_anomaly_override,
             positive_consensus=expert["positive_agreement"],
             negative_consensus=expert["negative_agreement"],
+            normality_evidence=expert["normality_evidence"],
         )
         return {**expert, **routed}
 

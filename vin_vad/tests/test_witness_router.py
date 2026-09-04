@@ -96,6 +96,23 @@ def test_negative_role_consensus_vetoes_only_host_conflicts() -> None:
     assert result["consensus_conflict_veto"][0, 2].item() == 0.0
 
 
+def test_negative_role_consensus_cannot_be_undone_by_event_completion() -> None:
+    router = WitnessRouter()
+    with torch.no_grad():
+        router.video_head.weight.zero_()
+        router.video_head.bias.fill_(10.0)
+    host = torch.tensor([[0.10, 0.40, 0.20]])
+    evidence = torch.tensor([[0.90, 0.50, 0.20]])
+    validity = torch.ones_like(host, dtype=torch.bool)
+    consensus = torch.tensor([[1.00, 0.25, 0.00]])
+
+    result = router(host, evidence, validity, negative_consensus=consensus)
+
+    assert result["witness_support"][0, 0].item() > 0.0
+    assert result["completion_gate"][0, 0].item() == 0.0
+    assert result["completion_gate"][0, 1] <= 0.75
+
+
 def test_positive_video_confidence_boundedly_scales_only_local_correction() -> None:
     host, evidence, validity = inputs()
     router = WitnessRouter()

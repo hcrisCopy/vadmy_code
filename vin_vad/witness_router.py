@@ -201,8 +201,15 @@ class WitnessRouter(nn.Module):
         # point-authorized convex step completes only locations that carry their
         # own witness support and can never overshoot the local event peak.
         completion_anchor = masked_local_max(shifted, validity)
+        negative_completion_veto = (
+            torch.zeros_like(host_score)
+            if negative_consensus is None
+            else negative_consensus.clamp(0.0, 1.0)
+        ).masked_fill(~validity, 0.0)
         completion_gate = (
-            anomaly_authorized.unsqueeze(1) * witness_support.clamp(max=1.0)
+            anomaly_authorized.unsqueeze(1)
+            * witness_support.clamp(max=1.0)
+            * (1.0 - negative_completion_veto)
         ).masked_fill(~validity, 0.0)
         completed = shifted + completion_gate * (completion_anchor - shifted)
         corrected = host_score + completed - base
@@ -233,6 +240,7 @@ class WitnessRouter(nn.Module):
             "event_anchor": event_anchor,
             "event_gap": event_gap,
             "completion_anchor": completion_anchor,
+            "negative_completion_veto": negative_completion_veto,
             "completion_gate": completion_gate,
             "corrected_score": corrected,
         }

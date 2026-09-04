@@ -93,7 +93,7 @@ class WitnessRouter(nn.Module):
 
     def __init__(self, eta_normal: float = 1.0, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
         super().__init__()
-        self.video_head = nn.Linear(11, 1)
+        self.video_head = nn.Linear(10, 1)
         self.raw_eta_normal = nn.Parameter(torch.tensor(inverse_softplus(eta_normal)))
         self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
 
@@ -112,21 +112,6 @@ class WitnessRouter(nn.Module):
         if negative_consensus is not None and negative_consensus.shape != host_score.shape:
             raise ValueError("negative_consensus must share the [B,T] host-score shape")
         summary = video_summary(host_score, evidence, validity)
-        positive_for_summary = (
-            torch.zeros_like(host_score)
-            if positive_consensus is None
-            else positive_consensus.clamp_min(0.0)
-        )
-        negative_for_summary = (
-            torch.zeros_like(host_score)
-            if negative_consensus is None
-            else negative_consensus.clamp_min(0.0)
-        )
-        consensus_balance = (
-            masked_topk_anchor(positive_for_summary, validity)
-            - masked_mean(negative_for_summary, validity)
-        )
-        summary = torch.cat([summary, consensus_balance.unsqueeze(1)], dim=1)
         video_logit = self.video_head(summary).squeeze(1)
         video_probability = torch.sigmoid(video_logit)
         hard_authorization = (video_probability >= 0.5).to(video_probability.dtype)
@@ -241,7 +226,6 @@ class WitnessRouter(nn.Module):
             corrected = host_score.masked_fill(~validity, 0.0)
         return {
             "summary": summary,
-            "consensus_balance": consensus_balance,
             "video_logit": video_logit,
             "video_probability": video_probability,
             "anomaly_authorized": anomaly_authorized,

@@ -90,9 +90,6 @@ def test_negative_role_consensus_vetoes_only_host_conflicts() -> None:
 
     result = router(host, evidence, validity, negative_consensus=consensus)
 
-    expected_balance = -masked_mean(consensus, validity)
-    torch.testing.assert_close(result["consensus_balance"], expected_balance)
-    assert result["summary"].shape == (1, 11)
     assert result["consensus_conflict_veto"][0, 0].item() == 0.0
     assert result["consensus_conflict_veto"][0, 1].item() > 0.0
     assert result["consensus_conflict_veto"][0, 1] <= consensus[0, 1]

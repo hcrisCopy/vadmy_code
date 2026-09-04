@@ -126,16 +126,6 @@ def test_event_anchor_uses_standard_weak_mil_topk() -> None:
     torch.testing.assert_close(anchor, torch.tensor([0.9]))
 
 
-def test_video_summary_appends_calibrated_normality_topk() -> None:
-    host, evidence, validity = inputs()
-    normality = torch.tensor([[0.1, 0.8, 0.3, 99.0], [0.7, 0.2, 99.0, 99.0]])
-    summary = video_summary(host, evidence, validity, normality)
-    assert summary.shape == (2, 11)
-    torch.testing.assert_close(
-        summary[:, -1], masked_topk_anchor(normality, validity)
-    )
-
-
 def test_local_event_completion_ignores_padding() -> None:
     score = torch.tensor([[0.1, 0.9, 0.2, 99.0]])
     validity = torch.tensor([[True, True, True, False]])

@@ -96,7 +96,7 @@ def test_negative_role_consensus_vetoes_only_host_conflicts() -> None:
     assert result["consensus_conflict_veto"][0, 2].item() == 0.0
 
 
-def test_positive_consensus_reallocates_but_conserves_normal_suppression() -> None:
+def test_positive_consensus_only_protects_normal_route_from_suppression() -> None:
     router = WitnessRouter()
     with torch.no_grad():
         router.video_head.weight.zero_()
@@ -110,10 +110,9 @@ def test_positive_consensus_reallocates_but_conserves_normal_suppression() -> No
     unprotected = router(host, evidence, validity)
 
     assert protected["delta_normal"][0, 1].item() == 0.0
-    assert protected["delta_normal"][0, 0] < unprotected["delta_normal"][0, 0]
     torch.testing.assert_close(
-        masked_mean(protected["delta_normal"], validity),
-        masked_mean(unprotected["delta_normal"], validity),
+        protected["delta_normal"][0, 2],
+        unprotected["delta_normal"][0, 2] * 0.75,
     )
     torch.testing.assert_close(
         protected["delta_anomaly"], unprotected["delta_anomaly"]

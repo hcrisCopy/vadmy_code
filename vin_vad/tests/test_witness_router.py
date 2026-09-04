@@ -126,6 +126,20 @@ def test_event_anchor_uses_standard_weak_mil_topk() -> None:
     torch.testing.assert_close(anchor, torch.tensor([0.9]))
 
 
+def test_calibrated_normality_is_an_additive_video_authorization_residual() -> None:
+    host, evidence, validity = inputs()
+    router = WitnessRouter()
+    base = router(host, evidence, validity)
+    normality = torch.tensor([[0.1, 0.9, 0.2, 0.0], [0.1, 0.2, 0.0, 0.0]])
+    with torch.no_grad():
+        router.normality_authorization_weight.fill_(2.0)
+    augmented = router(
+        host, evidence, validity, normality_evidence=normality
+    )
+    expected = 2.0 * (masked_topk_anchor(normality, validity) - 0.5)
+    torch.testing.assert_close(augmented["video_logit"] - base["video_logit"], expected)
+
+
 def test_local_event_completion_ignores_padding() -> None:
     score = torch.tensor([[0.1, 0.9, 0.2, 99.0]])
     validity = torch.tensor([[True, True, True, False]])

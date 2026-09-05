@@ -95,7 +95,6 @@ for dataset in $DATASETS; do
       --weight-decay 0.0001 \
       --seed 42 \
       --device cuda \
-      --freeze-role-support \
       --retain-epoch-checkpoints \
       "${RESUME_ARGS[@]}"
 

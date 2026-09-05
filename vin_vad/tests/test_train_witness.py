@@ -8,10 +8,8 @@ from vin_vad.data import HostScoreTrainingDataset
 from vin_vad.train_witness import (
     balanced_indices,
     comparable_configuration,
-    freeze_role_support,
     merge_balanced_batches,
 )
-from vin_vad.witness_model import build_witness_variant
 from vin_vad.select_witness_checkpoint import select_best
 
 
@@ -62,15 +60,6 @@ def test_rng_checkpoint_tensors_are_cpu_compatible() -> None:
     state = torch.get_rng_state()
     torch.set_rng_state(state.cpu())
     assert state.dtype == torch.uint8
-
-
-def test_freeze_role_support_keeps_signed_strength_trainable() -> None:
-    model = build_witness_variant("w6")
-    freeze_role_support(model)
-    assert not model.expert.neurons.gate_logits.requires_grad
-    assert model.expert.neurons.signed_weights.requires_grad
-    assert model.expert.temporal.first.weight.requires_grad
-    assert model.router.video_head.weight.requires_grad
 
 
 def test_w1_host_dataset_never_opens_hidden_archive(tmp_path) -> None:

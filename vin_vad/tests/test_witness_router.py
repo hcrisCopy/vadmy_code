@@ -62,6 +62,12 @@ def test_video_state_routes_witness_and_veto_support() -> None:
     )
     assert torch.any(neighbor_completion)
     assert torch.all(abnormal["delta_anomaly"][neighbor_completion] > 0.0)
+    assert torch.all(
+        abnormal["host_event_authorization"][validity]
+        == abnormal["event_anchor"][validity]
+    )
+    assert torch.all(abnormal["host_event_authorization"][validity] >= 0.0)
+    assert torch.all(abnormal["host_event_authorization"][validity] <= 1.0)
     assert torch.all(normal["delta_anomaly"][normal["veto_support"] > 0] < 0.0)
     assert torch.any(masked_mean(abnormal["delta_anomaly"], validity).abs() > 1e-5)
     assert torch.all(abnormal["completion_gate"][validity] >= 0.0)

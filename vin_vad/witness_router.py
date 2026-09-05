@@ -181,12 +181,17 @@ class WitnessRouter(nn.Module):
             torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6))
             - torch.logit(host_clipped)
         ).masked_fill(~validity, 0.0)
+        # Neighbor propagation needs two independent permissions: witness roles
+        # establish the event extent, while the frozen host must establish that
+        # the neighborhood contains an event-like peak.  This suppresses weak
+        # normal peaks without attenuating direct point-wise witness evidence.
+        host_event_authorization = event_anchor.masked_fill(~validity, 0.0)
         local_shape = (
             anomaly_authorized.unsqueeze(1)
             * (
                 witness_support
                 + complementary_support
-                + witness_event_support * event_gap
+                + witness_event_support * host_event_authorization * event_gap
                 - consensus_conflict_veto
             )
             - normal_authorized.unsqueeze(1) * veto_support
@@ -244,6 +249,7 @@ class WitnessRouter(nn.Module):
             "veto_support": veto_support,
             "consensus_conflict_veto": consensus_conflict_veto,
             "event_anchor": event_anchor,
+            "host_event_authorization": host_event_authorization,
             "event_gap": event_gap,
             "completion_anchor": completion_anchor,
             "negative_completion_veto": negative_completion_veto,

@@ -5,7 +5,6 @@ import torch
 from vin_vad.witness_model import NeuronOnlyRouter
 from vin_vad.witness_router import (
     WitnessRouter,
-    masked_bracketed_max,
     masked_local_max,
     masked_mean,
     masked_topk_anchor,
@@ -72,10 +71,11 @@ def test_video_state_routes_witness_and_veto_support() -> None:
         + abnormal["delta_normal"]
         + abnormal["delta_anomaly"]
     )
-    completed = shifted + abnormal["completion_gate"] * abnormal["completion_gap"]
+    completed = shifted + abnormal["completion_gate"] * (
+        abnormal["completion_anchor"] - shifted
+    )
     assert torch.all(completed[validity] >= shifted[validity])
-    upper = torch.maximum(abnormal["completion_anchor"], shifted)
-    assert torch.all(completed[validity] <= upper[validity])
+    assert torch.all(completed[validity] <= abnormal["completion_anchor"][validity])
 
 
 def test_negative_role_consensus_vetoes_only_host_conflicts() -> None:
@@ -167,13 +167,6 @@ def test_local_event_completion_ignores_padding() -> None:
     validity = torch.tensor([[True, True, True, False]])
     completed = masked_local_max(score, validity, width=3)
     torch.testing.assert_close(completed, torch.tensor([[0.9, 0.9, 0.9, 0.0]]))
-
-
-def test_bracketed_completion_fills_only_two_sided_interior_gaps() -> None:
-    score = torch.tensor([[0.9, 0.1, 0.2, 0.8, 0.0]])
-    validity = torch.ones_like(score, dtype=torch.bool)
-    anchor = masked_bracketed_max(score, validity, width=5)
-    torch.testing.assert_close(anchor, torch.tensor([[0.9, 0.8, 0.8, 0.0, 0.0]]))
 
 
 def test_padding_does_not_enter_video_pooling_or_router() -> None:

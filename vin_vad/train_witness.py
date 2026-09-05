@@ -147,32 +147,6 @@ def fit_role_disentangled_reference(
     }
 
 
-@torch.no_grad()
-def load_pretrained_context_role(
-    model: torch.nn.Module,
-    normality_model_path: str,
-    context_student_path: str,
-) -> dict[str, object]:
-    """Load a training-only, independently fitted temporal context verifier."""
-    with np.load(normality_model_path, allow_pickle=False) as normality:
-        normal = {name: np.asarray(normality[name]) for name in normality.files}
-    with np.load(context_student_path, allow_pickle=False) as student:
-        context = {name: np.asarray(student[name]) for name in student.files}
-    model.expert.set_pretrained_context(
-        torch.from_numpy(normal["normal_mean"]),
-        torch.from_numpy(normal["normal_scale"]),
-        torch.from_numpy(normal["indices"]),
-        torch.from_numpy(normal["directions"]),
-        torch.from_numpy(context["mean"]),
-        torch.from_numpy(context["scale"]),
-        torch.from_numpy(context["coef"]),
-        torch.from_numpy(context["intercept"]),
-    )
-    return {
-        "context_role": "frozen_training_only_multiscale_directional_verifier",
-    }
-
-
 def seed_everything(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -216,7 +190,6 @@ def comparable_configuration(config: dict[str, object]) -> dict[str, object]:
         "normal_reference_snippets",
         "normal_role_neurons_per_layer",
         "primary_role_neurons_per_layer",
-        "context_role",
     }
     comparable = {key: value for key, value in config.items() if key not in derived}
     comparable.setdefault("variant", "w6")
@@ -338,8 +311,6 @@ def main() -> None:
     parser.add_argument("--weight-decay", type=float, required=True)
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--device", required=True)
-    parser.add_argument("--context-normality-model", default="")
-    parser.add_argument("--context-student-model", default="")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--retain-epoch-checkpoints", action="store_true")
     args = parser.parse_args()
@@ -424,14 +395,6 @@ def main() -> None:
         configuration.update(
             fit_role_disentangled_reference(model, dataset, normal_indices, device)
         )
-        if args.context_normality_model or args.context_student_model:
-            if not (args.context_normality_model and args.context_student_model):
-                raise ValueError("both pretrained context model paths are required")
-            configuration.update(
-                load_pretrained_context_role(
-                    model, args.context_normality_model, args.context_student_model
-                )
-            )
         config_path.write_text(json.dumps(configuration, indent=2), encoding="utf-8")
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay

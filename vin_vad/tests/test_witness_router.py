@@ -185,6 +185,14 @@ def test_padding_does_not_enter_video_pooling_or_router() -> None:
         torch.testing.assert_close(first[name], second[name])
 
 
+def test_video_summary_exposes_positive_consensus_mass() -> None:
+    host, evidence, validity = inputs()
+    consensus = torch.tensor([[0.0, 0.2, 0.6, 99.0]])
+    summary = video_summary(host, evidence, validity, positive_consensus=consensus)
+    assert summary.shape == (1, 11)
+    torch.testing.assert_close(summary[:, -1], torch.tensor([0.8 / 3.0]))
+
+
 def test_neuron_only_eta_override_changes_only_correction_strength() -> None:
     host, evidence, validity = inputs()
     router = NeuronOnlyRouter(eta_anomaly=0.25)

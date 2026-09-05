@@ -106,14 +106,11 @@ class WitnessRouter(nn.Module):
         eta_anomaly_override: float | None = None,
         positive_consensus: torch.Tensor | None = None,
         negative_consensus: torch.Tensor | None = None,
-        event_evidence: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         if positive_consensus is not None and positive_consensus.shape != host_score.shape:
             raise ValueError("positive_consensus must share the [B,T] host-score shape")
         if negative_consensus is not None and negative_consensus.shape != host_score.shape:
             raise ValueError("negative_consensus must share the [B,T] host-score shape")
-        if event_evidence is not None and event_evidence.shape != host_score.shape:
-            raise ValueError("event_evidence must share the [B,T] host-score shape")
         summary = video_summary(host_score, evidence, validity)
         video_logit = self.video_head(summary).squeeze(1)
         video_probability = torch.sigmoid(video_logit)
@@ -162,14 +159,6 @@ class WitnessRouter(nn.Module):
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
         direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
-        event_evidence_clipped = (
-            evidence_clipped
-            if event_evidence is None
-            else event_evidence.clamp(1e-6, 1.0 - 1e-6)
-        )
-        event_witness = masked_standardize(
-            event_evidence_clipped, validity
-        ).clamp(-3.0, 3.0)
         direct_host = masked_standardize(host_clipped, validity).clamp(-3.0, 3.0)
         witness_support = torch.relu(direct_witness)
         veto_support = torch.relu(-direct_witness)
@@ -186,8 +175,7 @@ class WitnessRouter(nn.Module):
         complementary_support = torch.minimum(
             witness_support, host_miss_support
         )
-        event_point_support = torch.relu(event_witness)
-        witness_event_support = masked_local_max(event_point_support, validity)
+        witness_event_support = masked_local_max(witness_support, validity)
         event_anchor = masked_local_max(host_clipped, validity)
         event_gap = torch.relu(
             torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6))
@@ -226,7 +214,7 @@ class WitnessRouter(nn.Module):
         ).masked_fill(~validity, 0.0)
         completion_gate = (
             anomaly_authorized.unsqueeze(1)
-            * event_point_support.clamp(max=1.0)
+            * witness_support.clamp(max=1.0)
             * (1.0 - negative_completion_veto)
         ).masked_fill(~validity, 0.0)
         completed = shifted + completion_gate * (completion_anchor - shifted)
@@ -253,7 +241,6 @@ class WitnessRouter(nn.Module):
             "host_miss_support": host_miss_support,
             "complementary_support": complementary_support,
             "witness_event_support": witness_event_support,
-            "event_point_support": event_point_support,
             "veto_support": veto_support,
             "consensus_conflict_veto": consensus_conflict_veto,
             "event_anchor": event_anchor,

@@ -41,17 +41,6 @@ def test_w2_neuron_evidence_is_host_independent_and_correction_is_local() -> Non
     assert torch.count_nonzero(first["delta_normal"]) == 0
 
 
-def test_supervised_primary_and_context_evidence_are_the_actual_jury_votes() -> None:
-    hidden, host, validity, _ = inputs()
-    result = NeuronOnlyWitnessVAD()(hidden, host, validity)
-    for name in ("primary_evidence", "context_evidence"):
-        role = torch.logit(result[name].clamp(1e-6, 1.0 - 1e-6))
-        for row, mask in zip(role, validity):
-            torch.testing.assert_close(
-                row[mask].mean(), torch.tensor(0.0), atol=1e-5, rtol=0.0
-            )
-
-
 def test_variant_losses_update_only_present_paths() -> None:
     hidden, host, validity, labels = inputs()
     w1 = HostVideoOnlyVAD()

@@ -24,6 +24,11 @@ from vin_vad.witness_losses import variant_objective
 from vin_vad.witness_model import build_witness_variant
 
 
+def freeze_role_support(model: torch.nn.Module) -> None:
+    """Fix which coordinates are witnesses while learning their signed strength."""
+    model.expert.neurons.gate_logits.requires_grad_(False)
+
+
 @torch.no_grad()
 def fit_role_disentangled_reference(
     model: torch.nn.Module,
@@ -313,12 +318,15 @@ def main() -> None:
     parser.add_argument("--device", required=True)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--retain-epoch-checkpoints", action="store_true")
+    parser.add_argument("--freeze-role-support", action="store_true")
     args = parser.parse_args()
 
     if args.batch_size < 2 or args.batch_size % 2:
         raise ValueError("batch-size must be an even number >=2")
     if args.epochs < 1 or not 0 <= args.stop_after_epoch <= args.epochs:
         raise ValueError("invalid epoch configuration")
+    if args.freeze_role_support and args.variant != "w6":
+        raise ValueError("freeze-role-support is only defined for w6")
     manifest = Path(args.train_manifest)
     output = Path(args.out_dir)
     ensure_training_paths(manifest, output)
@@ -346,6 +354,11 @@ def main() -> None:
             ),
             "test_data_used": False,
             "optimizer_count": 1,
+            "role_support": (
+                "training_effect_frozen"
+                if args.freeze_role_support
+                else "jointly_optimized"
+            ),
         }
     )
     config_path = output / "config.json"
@@ -396,8 +409,12 @@ def main() -> None:
             fit_role_disentangled_reference(model, dataset, normal_indices, device)
         )
         config_path.write_text(json.dumps(configuration, indent=2), encoding="utf-8")
+    if args.freeze_role_support:
+        freeze_role_support(model)
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+        (parameter for parameter in model.parameters() if parameter.requires_grad),
+        lr=args.learning_rate,
+        weight_decay=args.weight_decay,
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.epochs

@@ -96,6 +96,7 @@ class WitnessRouter(nn.Module):
         self.video_head = nn.Linear(10, 1)
         self.raw_eta_normal = nn.Parameter(torch.tensor(inverse_softplus(eta_normal)))
         self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
+        self.raw_eta_event = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
 
     def forward(
         self,
@@ -132,6 +133,11 @@ class WitnessRouter(nn.Module):
         )
         eta_anomaly = (
             torch.nn.functional.softplus(self.raw_eta_anomaly)
+            if eta_anomaly_override is None
+            else host_score.new_tensor(eta_anomaly_override)
+        )
+        eta_event = (
+            torch.nn.functional.softplus(self.raw_eta_event)
             if eta_anomaly_override is None
             else host_score.new_tensor(eta_anomaly_override)
         )
@@ -181,21 +187,25 @@ class WitnessRouter(nn.Module):
             torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6))
             - torch.logit(host_clipped)
         ).masked_fill(~validity, 0.0)
-        local_shape = (
+        direct_shape = (
             anomaly_authorized.unsqueeze(1)
             * (
                 witness_support
                 + complementary_support
-                + witness_event_support * event_gap
                 - consensus_conflict_veto
             )
             - normal_authorized.unsqueeze(1) * veto_support
         ).masked_fill(~validity, 0.0)
+        event_shape = (
+            anomaly_authorized.unsqueeze(1) * witness_event_support * event_gap
+        ).masked_fill(~validity, 0.0)
+        local_shape = direct_shape + event_shape
         # q decides the correction direction; neuron evidence decides its support.
         # A non-zero mean is required to repair cross-video ranking, which dominates
         # frame AUC/AP, while the support remains temporally localized.
         delta_anomaly = (
-            eta_anomaly * anomaly_confidence_gain.unsqueeze(1) * local_shape
+            anomaly_confidence_gain.unsqueeze(1)
+            * (eta_anomaly * direct_shape + eta_event * event_shape)
         )
         delta_anomaly = delta_anomaly.masked_fill(~validity, 0.0)
         delta_normal = delta_normal.masked_fill(~validity, 0.0)
@@ -233,10 +243,13 @@ class WitnessRouter(nn.Module):
             "anomaly_confidence_gain": anomaly_confidence_gain,
             "eta_normal": eta_normal,
             "eta_anomaly": eta_anomaly,
+            "eta_event": eta_event,
             "delta_normal": delta_normal,
             "delta_anomaly": delta_anomaly,
             "positive_normal_protection": positive_normal_protection,
             "local_shape": local_shape,
+            "direct_shape": direct_shape,
+            "event_shape": event_shape,
             "witness_support": witness_support,
             "host_miss_support": host_miss_support,
             "complementary_support": complementary_support,

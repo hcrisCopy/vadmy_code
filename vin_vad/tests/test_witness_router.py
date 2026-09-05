@@ -5,6 +5,7 @@ import torch
 from vin_vad.witness_model import NeuronOnlyRouter
 from vin_vad.witness_router import (
     WitnessRouter,
+    inverse_softplus,
     masked_local_max,
     masked_mean,
     masked_topk_anchor,
@@ -111,6 +112,21 @@ def test_negative_role_consensus_cannot_be_undone_by_event_completion() -> None:
     assert result["witness_support"][0, 0].item() > 0.0
     assert result["completion_gate"][0, 0].item() == 0.0
     assert result["completion_gate"][0, 1] <= 0.75
+
+
+def test_direct_and_event_evidence_use_separate_learned_scales() -> None:
+    host, evidence, validity = inputs()
+    router = WitnessRouter()
+    with torch.no_grad():
+        router.video_head.weight.zero_()
+        router.video_head.bias.fill_(10.0)
+        router.raw_eta_anomaly.fill_(inverse_softplus(0.1))
+        router.raw_eta_event.fill_(inverse_softplus(0.5))
+    result = router(host, evidence, validity)
+    expected = result["anomaly_confidence_gain"].unsqueeze(1) * (
+        0.1 * result["direct_shape"] + 0.5 * result["event_shape"]
+    )
+    torch.testing.assert_close(result["delta_anomaly"], expected)
 
 
 def test_positive_video_confidence_boundedly_scales_only_local_correction() -> None:

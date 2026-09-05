@@ -8,6 +8,7 @@ from vin_vad.data import HostScoreTrainingDataset
 from vin_vad.train_witness import (
     balanced_indices,
     comparable_configuration,
+    functional_role_score,
     merge_balanced_batches,
 )
 from vin_vad.select_witness_checkpoint import select_best
@@ -18,6 +19,15 @@ def test_balanced_indices_are_fixed_and_class_complete() -> None:
     normal, abnormal = balanced_indices(frame, per_class=2)
     assert normal == [0, 2]
     assert abnormal == [1, 3]
+
+
+def test_functional_score_prefers_local_abnormal_and_normal_safe_witnesses() -> None:
+    activation = torch.tensor([[[2.0, 1.0]]])
+    effect = torch.tensor([[[1.0, 1.0]]])
+    concentration = torch.tensor([[[2.0, 1.0]]])
+    normal_activation = torch.tensor([[[0.5, 2.0]]])
+    score = functional_role_score(activation, effect, concentration, normal_activation)
+    assert score[0, 0, 0] > score[0, 0, 1]
 
 
 def test_merge_balanced_batches_preserves_padding_and_labels() -> None:

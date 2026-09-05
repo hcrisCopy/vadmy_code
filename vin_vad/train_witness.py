@@ -24,6 +24,32 @@ from vin_vad.witness_losses import variant_objective
 from vin_vad.witness_model import build_witness_variant
 
 
+def functional_role_score(
+    activation: torch.Tensor,
+    effect: torch.Tensor,
+    concentration: torch.Tensor,
+    normal_activation: torch.Tensor,
+) -> torch.Tensor:
+    """Verify high-effect witnesses for locality and normal safety."""
+    if not (
+        activation.shape
+        == effect.shape
+        == concentration.shape
+        == normal_activation.shape
+    ):
+        raise ValueError("all functional-score tensors must share one shape")
+
+    def relative(value: torch.Tensor) -> torch.Tensor:
+        return value / value.mean(dim=-1, keepdim=True).clamp_min(1e-6)
+
+    return (
+        effect.clamp_min(0.0)
+        * relative(activation.clamp_min(0.0))
+        * relative(concentration.clamp_min(0.0))
+        / (1.0 + relative(normal_activation.clamp_min(0.0)))
+    )
+
+
 @torch.no_grad()
 def fit_role_disentangled_reference(
     model: torch.nn.Module,
@@ -54,6 +80,8 @@ def fit_role_disentangled_reference(
     residual_sum = torch.zeros_like(class_sum)
     residual_square = torch.zeros_like(class_sum)
     residual_count = torch.zeros(2, dtype=torch.float64, device=device)
+    residual_activation_sum = torch.zeros_like(class_sum)
+    residual_concentration_sum = torch.zeros_like(class_sum)
     for index in tqdm(range(len(dataset)), desc="rank role neurons", unit="video"):
         item = dataset[index]
         hidden = item["hidden"].to(device, non_blocking=True)
@@ -76,6 +104,11 @@ def fit_role_disentangled_reference(
         residual_sum[label] += residual * summary
         residual_square[label] += residual * summary.square()
         residual_count[label] += residual
+        directional = torch.stack([torch.relu(deviation), torch.relu(-deviation)])
+        activation = summary.clamp_min(0.0)
+        concentration = activation / directional.mean(dim=1).clamp_min(1e-3)
+        residual_activation_sum[label] += residual * activation
+        residual_concentration_sum[label] += residual * concentration
 
     def class_effect(
         total: torch.Tensor,
@@ -107,9 +140,36 @@ def fit_role_disentangled_reference(
     normal_mask, normal_direction, normal_weight = role_definition(
         class_effect(class_sum, class_square, class_count)
     )
-    primary_mask, primary_direction, primary_weight = role_definition(
-        class_effect(residual_sum, residual_square, residual_count)
+    primary_effect = class_effect(residual_sum, residual_square, residual_count)
+    residual_activation = residual_activation_sum / residual_count[
+        :, None, None, None
+    ].clamp_min(1e-6)
+    residual_concentration = residual_concentration_sum / residual_count[
+        :, None, None, None
+    ].clamp_min(1e-6)
+    primary_score = functional_role_score(
+        residual_activation[1],
+        primary_effect,
+        residual_concentration[1],
+        residual_activation[0],
     )
+    best_effect, best_direction = primary_effect.max(dim=0)
+    aligned_score = primary_score.gather(
+        0, best_direction.unsqueeze(0)
+    ).squeeze(0)
+    candidate_count = min(neurons.dimensions, 2 * active_per_layer)
+    candidates = torch.topk(best_effect, candidate_count, dim=-1).indices
+    candidate_mask = torch.zeros_like(best_effect, dtype=torch.bool).scatter_(
+        -1, candidates, True
+    )
+    verified_ranking = aligned_score.masked_fill(~candidate_mask, -torch.inf)
+    selected = torch.topk(verified_ranking, active_per_layer, dim=-1).indices
+    primary_mask = torch.zeros_like(best_effect).scatter_(-1, selected, 1.0)
+    primary_direction = torch.where(best_direction == 0, 1.0, -1.0)
+    primary_weight = best_effect * primary_mask
+    primary_weight = primary_weight / (
+        primary_weight.sum(dim=-1, keepdim=True) / active_per_layer
+    ).clamp_min(1e-6)
 
     role_weight = normal_mask * normal_weight
     normal_scores = []

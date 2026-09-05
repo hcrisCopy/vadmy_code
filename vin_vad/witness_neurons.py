@@ -126,8 +126,11 @@ class SignedTopKWitnessNeurons(nn.Module):
         layer_evidence = layer_evidence.masked_fill(~validity.unsqueeze(-1), 0.0)
         if bool(self.normal_role_ready):
             assert deviation is not None
+            signed_normality = deviation * self.normal_role_direction.view(
+                1, 1, self.layers, self.dimensions
+            )
             directional_deviation = torch.relu(
-                deviation * self.normal_role_direction.view(1, 1, self.layers, self.dimensions)
+                signed_normality
             )
             role_weight = self.normal_role_mask * self.normal_role_weight
             normality_layer_evidence = (
@@ -136,13 +139,23 @@ class SignedTopKWitnessNeurons(nn.Module):
             normality_layer_evidence = normality_layer_evidence.masked_fill(
                 ~validity.unsqueeze(-1), 0.0
             )
+            context_coordinates = signed_normality.masked_select(
+                self.normal_role_mask.bool().view(1, 1, self.layers, self.dimensions)
+            ).view(hidden.shape[0], hidden.shape[1], self.layers * self.active)
+            context_coordinates = context_coordinates.masked_fill(
+                ~validity.unsqueeze(-1), 0.0
+            )
         else:
             normality_layer_evidence = torch.zeros_like(layer_evidence)
+            context_coordinates = hidden.new_zeros(
+                hidden.shape[0], hidden.shape[1], self.layers * self.active
+            )
         layer_probability = torch.softmax(self.layer_logits, dim=0)
         temporal_input = layer_evidence * (self.layers * layer_probability.view(1, 1, -1))
         return {
             "layer_evidence": layer_evidence,
             "normality_layer_evidence": normality_layer_evidence,
+            "context_coordinates": context_coordinates,
             "temporal_input": temporal_input,
             "gates": gate,
             "coordinate_weights": coordinate_weights,

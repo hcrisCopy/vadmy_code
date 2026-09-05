@@ -58,6 +58,27 @@ def masked_local_max(
     return pooled.masked_fill(~validity, 0.0)
 
 
+def masked_bracketed_max(
+    values: torch.Tensor, validity: torch.Tensor, width: int = 41
+) -> torch.Tensor:
+    """Bound an interior gap by the strongest valid evidence on both sides."""
+    if values.shape != validity.shape or width < 3 or width % 2 == 0:
+        raise ValueError(
+            "values/validity must share [B,T] and width must be odd and at least 3"
+        )
+    radius = width // 2
+    masked = values.masked_fill(~validity, -torch.inf)
+    windows = F.pad(masked, (radius, radius), value=-torch.inf).unfold(
+        1, width, 1
+    )
+    left_anchor = windows[..., :radius].amax(dim=-1)
+    right_anchor = windows[..., radius + 1 :].amax(dim=-1)
+    bracketed = torch.minimum(left_anchor, right_anchor)
+    # A sequence boundary has no two-sided authorization, hence no completion.
+    bracketed = torch.where(torch.isfinite(bracketed), bracketed, values)
+    return bracketed.masked_fill(~validity, 0.0)
+
+
 def masked_correlation(first: torch.Tensor, second: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
     outputs = []
     for left, right, mask in zip(first, second, validity):
@@ -203,10 +224,11 @@ class WitnessRouter(nn.Module):
         host_logit = torch.logit(host_clipped)
         base = torch.sigmoid(host_logit)
         shifted = torch.sigmoid(host_logit + delta_normal + delta_anomaly)
-        # The consensus residual seeds missed event positions.  A second,
-        # point-authorized convex step completes only locations that carry their
-        # own witness support and can never overshoot the local event peak.
-        completion_anchor = masked_local_max(shifted, validity)
+        # Video-level supervision cannot justify expanding one peak into unknown
+        # background. Complete only temporal valleys bracketed by event evidence
+        # on both sides, while point evidence and negative consensus still decide
+        # whether that interior location is authorized.
+        completion_anchor = masked_bracketed_max(shifted, validity)
         negative_completion_veto = (
             torch.zeros_like(host_score)
             if negative_consensus is None
@@ -217,7 +239,8 @@ class WitnessRouter(nn.Module):
             * witness_support.clamp(max=1.0)
             * (1.0 - negative_completion_veto)
         ).masked_fill(~validity, 0.0)
-        completed = shifted + completion_gate * (completion_anchor - shifted)
+        completion_gap = torch.relu(completion_anchor - shifted)
+        completed = shifted + completion_gate * completion_gap
         corrected = host_score + completed - base
         corrected = corrected.clamp(0.0, 1.0).masked_fill(~validity, 0.0)
         if eta_normal_override == 0.0 and eta_anomaly_override == 0.0:
@@ -246,6 +269,7 @@ class WitnessRouter(nn.Module):
             "event_anchor": event_anchor,
             "event_gap": event_gap,
             "completion_anchor": completion_anchor,
+            "completion_gap": completion_gap,
             "negative_completion_veto": negative_completion_veto,
             "completion_gate": completion_gate,
             "corrected_score": corrected,

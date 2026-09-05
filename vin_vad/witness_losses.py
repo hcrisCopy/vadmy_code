@@ -6,19 +6,6 @@ from torch.nn import functional as F
 from vin_vad.witness_router import masked_mean
 
 
-def binary_focal_loss(
-    probability: torch.Tensor, labels: torch.Tensor, gamma: float = 2.0
-) -> torch.Tensor:
-    """Focus video authorization on the few bags it still routes incorrectly."""
-    if gamma < 0.0:
-        raise ValueError("gamma must be non-negative")
-    target = labels.to(probability.dtype)
-    clipped = probability.clamp(1e-6, 1.0 - 1e-6)
-    bce = F.binary_cross_entropy(clipped, target, reduction="none")
-    correct_probability = torch.where(target > 0.5, clipped, 1.0 - clipped)
-    return ((1.0 - correct_probability).pow(gamma) * bce).mean()
-
-
 def topk_bag_probability(score: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
     outputs = []
     for row, mask in zip(score, validity):
@@ -68,7 +55,7 @@ def witness_objective(
 ) -> dict[str, torch.Tensor]:
     evidence = result["evidence"]
     corrected = result["corrected_score"]
-    video_loss = binary_focal_loss(result["video_probability"], labels)
+    video_loss = F.binary_cross_entropy(result["video_probability"], labels.to(evidence.dtype))
     residual = (labels - topk_bag_probability(host_score, validity)).abs().detach()
     role_curves = [evidence, result["primary_evidence"], result["context_evidence"]]
     role_losses = []

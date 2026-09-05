@@ -2,12 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from vin_vad.witness_losses import (
-    binary_focal_loss,
-    temporal_smoothness,
-    topk_bag_probability,
-    witness_objective,
-)
+from vin_vad.witness_losses import temporal_smoothness, topk_bag_probability, witness_objective
 from vin_vad.witness_model import WitnessVAD
 
 
@@ -21,13 +16,6 @@ def sample() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     validity = torch.tensor([[True] * 6 + [False] * 2, [True] * 8])
     labels = torch.tensor([0.0, 1.0])
     return hidden, host, validity, labels
-
-
-def test_focal_authorization_emphasizes_hard_video_routes() -> None:
-    labels = torch.tensor([1.0, 0.0])
-    easy = binary_focal_loss(torch.tensor([0.9, 0.1]), labels)
-    hard = binary_focal_loss(torch.tensor([0.6, 0.4]), labels)
-    assert hard > easy
 
 
 def test_padding_does_not_enter_topk_or_smoothness() -> None:

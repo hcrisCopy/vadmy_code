@@ -102,6 +102,7 @@ class WitnessRouter(nn.Module):
         host_score: torch.Tensor,
         evidence: torch.Tensor,
         validity: torch.Tensor,
+        local_evidence: torch.Tensor | None = None,
         eta_normal_override: float | None = None,
         eta_anomaly_override: float | None = None,
         positive_consensus: torch.Tensor | None = None,
@@ -111,6 +112,8 @@ class WitnessRouter(nn.Module):
             raise ValueError("positive_consensus must share the [B,T] host-score shape")
         if negative_consensus is not None and negative_consensus.shape != host_score.shape:
             raise ValueError("negative_consensus must share the [B,T] host-score shape")
+        if local_evidence is not None and local_evidence.shape != host_score.shape:
+            raise ValueError("local_evidence must share the [B,T] host-score shape")
         summary = video_summary(host_score, evidence, validity)
         video_logit = self.video_head(summary).squeeze(1)
         video_probability = torch.sigmoid(video_logit)
@@ -157,7 +160,8 @@ class WitnessRouter(nn.Module):
         )
 
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
-        evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
+        event_evidence = evidence if local_evidence is None else local_evidence
+        evidence_clipped = event_evidence.clamp(1e-6, 1.0 - 1e-6)
         direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
         direct_host = masked_standardize(host_clipped, validity).clamp(-3.0, 3.0)
         witness_support = torch.relu(direct_witness)

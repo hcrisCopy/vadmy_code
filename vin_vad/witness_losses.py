@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import torch
 from torch.nn import functional as F
 
@@ -39,6 +41,43 @@ def temporal_smoothness(score: torch.Tensor, validity: torch.Tensor) -> torch.Te
     return difference[pair_mask].mean()
 
 
+def consensus_localization_loss(
+    context: torch.Tensor,
+    primary: torch.Tensor,
+    normality: torch.Tensor,
+    validity: torch.Tensor,
+    labels: torch.Tensor,
+    positive_fraction: float = 0.05,
+) -> torch.Tensor:
+    """Turn bag labels into sparse temporal targets using two independent roles."""
+    positive_losses = []
+    negative_losses = []
+    for context_row, primary_row, normality_row, mask, label in zip(
+        context, primary.detach(), normality.detach(), validity, labels
+    ):
+        context_valid = context_row[mask].clamp(1e-6, 1.0 - 1e-6)
+        if label <= 0.5:
+            negative_losses.append(-torch.log1p(-context_valid).mean())
+            continue
+        primary_valid = primary_row[mask]
+        normality_valid = normality_row[mask]
+        primary_z = (primary_valid - primary_valid.mean()) / primary_valid.std(
+            unbiased=False
+        ).clamp_min(1e-6)
+        normality_z = (normality_valid - normality_valid.mean()) / normality_valid.std(
+            unbiased=False
+        ).clamp_min(1e-6)
+        count = max(1, math.ceil(positive_fraction * context_valid.numel()))
+        consensus_indices = torch.topk(primary_z + normality_z, count).indices
+        positive_losses.append(-torch.log(context_valid[consensus_indices]).mean())
+    terms = []
+    if positive_losses:
+        terms.append(torch.stack(positive_losses).mean())
+    if negative_losses:
+        terms.append(torch.stack(negative_losses).mean())
+    return torch.stack(terms).mean() if terms else context.sum() * 0.0
+
+
 def witness_objective(
     result: dict[str, torch.Tensor],
     host_score: torch.Tensor,
@@ -59,7 +98,7 @@ def witness_objective(
     residual = (labels - topk_bag_probability(host_score, validity)).abs().detach()
     role_curves = [evidence, result["primary_evidence"], result["context_evidence"]]
     role_losses = []
-    for role_evidence in role_curves:
+    for role_evidence in role_curves[:2]:
         role_per_video = per_video_mil(role_evidence, validity, labels)
         role_loss = (residual * role_per_video).sum() / residual.sum().clamp_min(1e-6)
         role_loss = role_loss + rank_weight * ranking_loss(
@@ -69,6 +108,18 @@ def witness_objective(
             role_evidence, validity
         )
         role_losses.append(role_loss)
+    context_role = result["context_evidence"]
+    context_loss = consensus_localization_loss(
+        context_role,
+        result["primary_evidence"],
+        result["normality_evidence"],
+        validity,
+        labels,
+    )
+    context_loss = context_loss + smooth_weight * temporal_smoothness(
+        context_role, validity
+    )
+    role_losses.append(context_loss)
     neuron_loss = torch.stack(role_losses).mean()
     final_loss = per_video_mil(corrected, validity, labels).mean()
     normal_mask = labels <= 0.5

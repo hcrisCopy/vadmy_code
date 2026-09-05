@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import torch
 
-from vin_vad.witness_losses import temporal_smoothness, topk_bag_probability, witness_objective
+from vin_vad.witness_losses import (
+    consensus_localization_loss,
+    temporal_smoothness,
+    topk_bag_probability,
+    witness_objective,
+)
 from vin_vad.witness_model import WitnessVAD
 
 
@@ -26,6 +31,20 @@ def test_padding_does_not_enter_topk_or_smoothness() -> None:
     changed[~validity] = 1e6
     torch.testing.assert_close(first_topk, topk_bag_probability(changed, validity))
     torch.testing.assert_close(first_smooth, temporal_smoothness(changed, validity))
+
+
+def test_consensus_localization_rewards_the_agreed_abnormal_position() -> None:
+    validity = torch.ones(2, 4, dtype=torch.bool)
+    labels = torch.tensor([0.0, 1.0])
+    primary = torch.tensor([[0.1] * 4, [0.1, 0.2, 0.9, 0.3]])
+    normality = torch.tensor([[0.1] * 4, [0.2, 0.1, 0.8, 0.3]])
+    aligned = torch.tensor([[0.1] * 4, [0.1, 0.1, 0.9, 0.1]])
+    misplaced = torch.tensor([[0.1] * 4, [0.9, 0.1, 0.1, 0.1]])
+    assert consensus_localization_loss(
+        aligned, primary, normality, validity, labels
+    ) < consensus_localization_loss(
+        misplaced, primary, normality, validity, labels
+    )
 
 
 def test_every_objective_component_reaches_witness_parameters() -> None:

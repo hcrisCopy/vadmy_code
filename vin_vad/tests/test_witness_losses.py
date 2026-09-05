@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import torch
 
-from vin_vad.witness_losses import temporal_smoothness, topk_bag_probability, witness_objective
+from vin_vad.witness_losses import (
+    normal_intervention_regret,
+    temporal_smoothness,
+    topk_bag_probability,
+    witness_objective,
+)
 from vin_vad.witness_model import WitnessVAD
 
 
@@ -16,6 +21,17 @@ def sample() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     validity = torch.tensor([[True] * 6 + [False] * 2, [True] * 8])
     labels = torch.tensor([0.0, 1.0])
     return hidden, host, validity, labels
+
+
+def test_normal_intervention_regret_uses_only_harmful_normal_bag_increases() -> None:
+    host = torch.tensor([[0.4, 0.6], [0.2, 0.3]])
+    corrected = torch.tensor([[0.3, 0.8], [0.9, 0.9]])
+    validity = torch.ones_like(host, dtype=torch.bool)
+    labels = torch.tensor([0.0, 1.0])
+    torch.testing.assert_close(
+        normal_intervention_regret(corrected, host, validity, labels),
+        torch.tensor(0.1),
+    )
 
 
 def test_padding_does_not_enter_topk_or_smoothness() -> None:

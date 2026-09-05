@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import hashlib
 import json
 import random
@@ -23,25 +22,6 @@ from vin_vad.data import (
 )
 from vin_vad.witness_losses import variant_objective
 from vin_vad.witness_model import build_witness_variant
-from vin_vad.witness_router import masked_standardize
-
-
-def sparse_context_teacher_mask(
-    score: torch.Tensor,
-    validity: torch.Tensor,
-    labels: torch.Tensor,
-    positive_fraction: float = 0.05,
-) -> torch.Tensor:
-    """Select sparse abnormal snippets; normal bags are supervised separately."""
-    selected = torch.zeros_like(validity)
-    for row, mask, label, output in zip(score, validity, labels, selected):
-        if float(label) <= 0.5:
-            continue
-        valid_indices = torch.nonzero(mask, as_tuple=False).squeeze(1)
-        count = max(1, int(np.ceil(positive_fraction * len(valid_indices))))
-        local = torch.topk(row[valid_indices], k=count).indices
-        output[valid_indices[local]] = True
-    return selected
 
 
 @torch.no_grad()
@@ -439,7 +419,6 @@ def main() -> None:
         torch.cuda.set_rng_state_all([state.cpu() for state in saved["cuda_rng"]])
         print(f"resume from completed epoch {start_epoch}", flush=True)
 
-    context_teacher = None
     for epoch in range(start_epoch, args.epochs):
         if args.stop_after_epoch and epoch >= args.stop_after_epoch:
             break
@@ -460,12 +439,6 @@ def main() -> None:
         steps = min(len(normal_loader), len(abnormal_loader))
         if steps == 0:
             raise RuntimeError("balanced data loaders produced zero batches")
-        if args.variant == "w6" and epoch >= args.epochs // 2 and context_teacher is None:
-            # First learn a weak-label primary witness.  Freeze it before asking
-            # the context role to localize sparse consensus events; otherwise
-            # teacher and student drift together and reinforce arbitrary peaks.
-            context_teacher = copy.deepcopy(model.expert).eval()
-            context_teacher.requires_grad_(False)
         model.train()
         if device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(device)
@@ -501,21 +474,6 @@ def main() -> None:
                 if args.variant == "w1"
                 else model(hidden, host_score, validity)
             )
-            if context_teacher is not None:
-                with torch.no_grad():
-                    teacher = context_teacher(hidden, validity)
-                    primary = torch.logit(
-                        teacher["primary_evidence"].clamp(1e-5, 1.0 - 1e-5)
-                    )
-                    normality = torch.logit(
-                        teacher["normality_evidence"].clamp(1e-5, 1.0 - 1e-5)
-                    )
-                    teacher_score = masked_standardize(
-                        primary, validity
-                    ) + 3.0 * masked_standardize(normality, validity)
-                    result["context_positive_mask"] = sparse_context_teacher_mask(
-                        teacher_score, validity, labels
-                    )
             expert = getattr(model, "expert", None)
             sparsity = (
                 None

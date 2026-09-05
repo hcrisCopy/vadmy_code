@@ -31,6 +31,24 @@ def ranking_loss(score: torch.Tensor, validity: torch.Tensor, labels: torch.Tens
     return F.softplus(margin - abnormal[:, None] + normal[None, :]).mean()
 
 
+def host_no_regret_ranking_loss(
+    corrected: torch.Tensor,
+    host_score: torch.Tensor,
+    validity: torch.Tensor,
+    labels: torch.Tensor,
+) -> torch.Tensor:
+    """Prevent correction from shrinking frozen-host abnormal/normal bag gaps."""
+    corrected_bag = topk_bag_probability(corrected, validity)
+    host_bag = topk_bag_probability(host_score, validity).detach()
+    normal = labels <= 0.5
+    abnormal = labels > 0.5
+    if not normal.any() or not abnormal.any():
+        return corrected_bag.sum() * 0.0
+    host_gap = host_bag[abnormal, None] - host_bag[None, normal]
+    corrected_gap = corrected_bag[abnormal, None] - corrected_bag[None, normal]
+    return torch.relu(host_gap - corrected_gap).mean()
+
+
 def temporal_smoothness(score: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
     pair_mask = validity[:, 1:] & validity[:, :-1]
     difference = (score[:, 1:] - score[:, :-1]).square()
@@ -71,6 +89,13 @@ def witness_objective(
         role_losses.append(role_loss)
     neuron_loss = torch.stack(role_losses).mean()
     final_loss = per_video_mil(corrected, validity, labels).mean()
+    # Weak-MIL BCE repairs uncertain video pairs. This one-sided constraint only
+    # prevents the witness correction from damaging pair order already supplied
+    # by the frozen host; unlike a second absolute margin, it is zero once the
+    # corrected output is no worse than its host.
+    final_loss = final_loss + rank_weight * host_no_regret_ranking_loss(
+        corrected, host_score, validity, labels
+    )
     normal_mask = labels <= 0.5
     if normal_mask.any():
         normal_evidence = torch.stack(

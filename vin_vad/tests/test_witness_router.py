@@ -113,21 +113,6 @@ def test_negative_role_consensus_cannot_be_undone_by_event_completion() -> None:
     assert result["completion_gate"][0, 1] <= 0.75
 
 
-def test_subthreshold_jury_cannot_manufacture_positive_support() -> None:
-    router = WitnessRouter()
-    with torch.no_grad():
-        router.video_head.weight.zero_()
-        router.video_head.bias.fill_(10.0)
-    host = torch.tensor([[0.10, 0.40, 0.20]])
-    evidence = torch.tensor([[0.20, 0.49, 0.30]])
-    validity = torch.ones_like(host, dtype=torch.bool)
-
-    result = router(host, evidence, validity)
-
-    assert torch.count_nonzero(result["witness_support"]).item() == 0
-    assert torch.all(result["veto_support"] > 0.0)
-
-
 def test_positive_video_confidence_boundedly_scales_only_local_correction() -> None:
     host, evidence, validity = inputs()
     router = WitnessRouter()

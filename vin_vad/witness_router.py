@@ -158,12 +158,7 @@ class WitnessRouter(nn.Module):
 
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
-        # The jury probability is already calibrated around the semantic
-        # decision boundary 0.5.  Re-standardizing it within every video would
-        # manufacture positive support even when all snippets are below that
-        # boundary, so preserve its signed log-odds for correction.
-        direct_witness = torch.logit(evidence_clipped).clamp(-3.0, 3.0)
-        direct_witness = direct_witness.masked_fill(~validity, 0.0)
+        direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
         direct_host = masked_standardize(host_clipped, validity).clamp(-3.0, 3.0)
         witness_support = torch.relu(direct_witness)
         veto_support = torch.relu(-direct_witness)

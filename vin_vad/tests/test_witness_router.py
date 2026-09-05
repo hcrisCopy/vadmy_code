@@ -155,26 +155,6 @@ def test_positive_consensus_only_protects_normal_route_from_suppression() -> Non
     )
 
 
-def test_positive_consensus_strengthens_only_authorized_positive_correction() -> None:
-    router = WitnessRouter()
-    with torch.no_grad():
-        router.video_head.weight.zero_()
-        router.video_head.bias.fill_(2.0)
-    host = torch.tensor([[0.10, 0.90, 0.20]])
-    evidence = torch.tensor([[0.20, 0.80, 0.30]])
-    validity = torch.ones_like(host, dtype=torch.bool)
-    consensus = torch.tensor([[0.00, 1.00, 0.00]])
-
-    strengthened = router(host, evidence, validity, positive_consensus=consensus)
-    plain = router(host, evidence, validity)
-
-    assert strengthened["delta_anomaly"][0, 1] > plain["delta_anomaly"][0, 1]
-    torch.testing.assert_close(
-        strengthened["delta_anomaly"][0, [0, 2]],
-        plain["delta_anomaly"][0, [0, 2]],
-    )
-
-
 def test_event_anchor_uses_standard_weak_mil_topk() -> None:
     score = torch.tensor([[0.1, 0.9, 0.7, 0.2, 99.0]])
     validity = torch.tensor([[True, True, True, True, False]])

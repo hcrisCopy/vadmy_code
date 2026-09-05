@@ -24,25 +24,6 @@ from vin_vad.witness_losses import variant_objective
 from vin_vad.witness_model import build_witness_variant
 
 
-def pairwise_rank_error_responsibility(
-    host_bag_score: torch.Tensor, labels: torch.Tensor
-) -> torch.Tensor:
-    """Assign each training bag its share of frozen-host ranking inversions."""
-    if host_bag_score.ndim != 1 or labels.shape != host_bag_score.shape:
-        raise ValueError("host_bag_score and labels must be equal-length vectors")
-    normal_mask = labels == 0
-    abnormal_mask = labels == 1
-    if not torch.any(normal_mask) or not torch.any(abnormal_mask):
-        raise ValueError("both normal and abnormal bags are required")
-    inversions = (
-        host_bag_score[normal_mask, None] >= host_bag_score[None, abnormal_mask]
-    ).to(host_bag_score.dtype)
-    responsibility = torch.zeros_like(host_bag_score)
-    responsibility[normal_mask] = inversions.mean(dim=1)
-    responsibility[abnormal_mask] = inversions.mean(dim=0)
-    return responsibility
-
-
 @torch.no_grad()
 def fit_role_disentangled_reference(
     model: torch.nn.Module,
@@ -73,9 +54,6 @@ def fit_role_disentangled_reference(
     residual_sum = torch.zeros_like(class_sum)
     residual_square = torch.zeros_like(class_sum)
     residual_count = torch.zeros(2, dtype=torch.float64, device=device)
-    role_summaries = []
-    role_labels = []
-    host_bag_scores = []
     for index in tqdm(range(len(dataset)), desc="rank role neurons", unit="video"):
         item = dataset[index]
         hidden = item["hidden"].to(device, non_blocking=True)
@@ -94,20 +72,10 @@ def fit_role_disentangled_reference(
         class_count[label] += 1
         host_score = item["host_score"].to(device, non_blocking=True).double()
         host_bag = torch.topk(host_score, tail_count).values.mean().clamp(0.0, 1.0)
-        role_summaries.append(summary)
-        role_labels.append(label)
-        host_bag_scores.append(host_bag)
-
-    role_label = torch.tensor(role_labels, dtype=torch.long, device=device)
-    rank_responsibility = pairwise_rank_error_responsibility(
-        torch.stack(host_bag_scores), role_label
-    ).double()
-    for summary, label, responsibility in zip(
-        role_summaries, role_labels, rank_responsibility
-    ):
-        residual_sum[label] += responsibility * summary
-        residual_square[label] += responsibility * summary.square()
-        residual_count[label] += responsibility
+        residual = (host_bag - float(label)).abs()
+        residual_sum[label] += residual * summary
+        residual_square[label] += residual * summary.square()
+        residual_count[label] += residual
 
     def class_effect(
         total: torch.Tensor,

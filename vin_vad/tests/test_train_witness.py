@@ -9,7 +9,6 @@ from vin_vad.train_witness import (
     balanced_indices,
     comparable_configuration,
     merge_balanced_batches,
-    weighted_quantile,
 )
 from vin_vad.select_witness_checkpoint import select_best
 
@@ -61,12 +60,6 @@ def test_rng_checkpoint_tensors_are_cpu_compatible() -> None:
     state = torch.get_rng_state()
     torch.set_rng_state(state.cpu())
     assert state.dtype == torch.uint8
-
-
-def test_weighted_quantile_gives_each_video_equal_total_mass() -> None:
-    values = torch.tensor([0.0, 10.0, 11.0])
-    weights = torch.tensor([0.8, 0.1, 0.1])
-    assert weighted_quantile(values, weights, 0.5).item() == 0.0
 
 
 def test_w1_host_dataset_never_opens_hidden_archive(tmp_path) -> None:

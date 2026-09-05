@@ -33,6 +33,30 @@ def masked_temporal_mean(
     )
 
 
+def masked_gaussian_blur(
+    values: torch.Tensor, validity: torch.Tensor, sigma: float
+) -> torch.Tensor:
+    """Apply a fixed Gaussian scale without allowing padding to create evidence."""
+    if values.ndim != 3 or validity.shape != values.shape[:2] or sigma <= 0.0:
+        raise ValueError("values must be [B,T,C], validity [B,T], and sigma positive")
+    radius = math.ceil(3.0 * sigma)
+    positions = torch.arange(
+        -radius, radius + 1, dtype=values.dtype, device=values.device
+    )
+    base = torch.exp(-0.5 * (positions / sigma).square())
+    base = base / base.sum()
+    channels = values.shape[-1]
+    kernel = base.view(1, 1, -1).expand(channels, 1, -1)
+    mask = validity[:, None].to(values.dtype)
+    numerator = F.conv1d(
+        values.transpose(1, 2) * mask, kernel, padding=radius, groups=channels
+    )
+    denominator = F.conv1d(mask, base.view(1, 1, -1), padding=radius).clamp_min(1e-6)
+    return (numerator / denominator).transpose(1, 2).masked_fill(
+        ~validity.unsqueeze(-1), 0.0
+    )
+
+
 class WitnessExpert(nn.Module):
     """Neuron-only path: its API intentionally has no host-score argument."""
 
@@ -40,7 +64,9 @@ class WitnessExpert(nn.Module):
         super().__init__()
         self.neurons = SignedTopKWitnessNeurons(active=active)
         self.temporal = WitnessTemporalReadout(width=temporal_width)
-        self.context_temporal = WitnessTemporalReadout(input_channels=24, width=temporal_width)
+        self.context_temporal = WitnessTemporalReadout(
+            input_channels=3 * 12 * active, width=temporal_width
+        )
 
     def forward(
         self,
@@ -56,10 +82,12 @@ class WitnessExpert(nn.Module):
             normality_raw - self.neurons.normal_score_threshold
         ) / self.neurons.normal_score_std
         normality_logits = normality_logits.masked_fill(~validity, 0.0)
+        context_coordinates = neuron["context_coordinates"]
         context_input = torch.cat(
             [
-                masked_temporal_mean(normality_layers, validity, width=9),
-                masked_temporal_mean(normality_layers, validity, width=25),
+                context_coordinates,
+                masked_gaussian_blur(context_coordinates, validity, sigma=1.5),
+                masked_gaussian_blur(context_coordinates, validity, sigma=4.0),
             ],
             dim=-1,
         )

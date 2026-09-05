@@ -135,7 +135,19 @@ class WitnessRouter(nn.Module):
             if eta_anomaly_override is None
             else host_score.new_tensor(eta_anomaly_override)
         )
-        delta_normal_video = eta_normal * torch.minimum(video_logit, torch.zeros_like(video_logit))
+        router_normal_shift = torch.minimum(video_logit, torch.zeros_like(video_logit))
+        # A positive weak label authorizes a sparse event, not every snippet in
+        # the video.  When the frozen host still sees a low average event rate,
+        # retain that independent background prior while local witnesses lift
+        # their protected event positions.  Normal-routed videos keep the
+        # original learned shift, so the two priors are never stacked there.
+        host_video_mean = masked_mean(host_score, validity).clamp(1e-6, 1.0 - 1e-6)
+        sparse_positive_background_shift = hard_authorization * torch.minimum(
+            torch.logit(host_video_mean), torch.zeros_like(host_video_mean)
+        )
+        delta_normal_video = eta_normal * (
+            router_normal_shift + sparse_positive_background_shift
+        )
         # A video-level normal decision is weak supervision, so it cannot safely
         # erase a location where every independent witness role agrees on an
         # anomaly.  Positive consensus only protects the frozen host here; it
@@ -231,6 +243,8 @@ class WitnessRouter(nn.Module):
             "anomaly_authorized": anomaly_authorized,
             "normal_authorized": normal_authorized,
             "anomaly_confidence_gain": anomaly_confidence_gain,
+            "host_video_mean": host_video_mean,
+            "sparse_positive_background_shift": sparse_positive_background_shift,
             "eta_normal": eta_normal,
             "eta_anomaly": eta_anomaly,
             "delta_normal": delta_normal,

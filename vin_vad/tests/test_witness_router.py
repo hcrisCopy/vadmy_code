@@ -155,6 +155,24 @@ def test_positive_consensus_only_protects_normal_route_from_suppression() -> Non
     )
 
 
+def test_sparse_positive_video_keeps_frozen_host_background_prior() -> None:
+    router = WitnessRouter()
+    with torch.no_grad():
+        router.video_head.weight.zero_()
+        router.video_head.bias.fill_(2.0)
+    host = torch.tensor([[0.10, 0.20, 0.90]])
+    evidence = torch.tensor([[0.20, 0.30, 0.80]])
+    validity = torch.ones_like(host, dtype=torch.bool)
+    consensus = torch.tensor([[0.00, 0.00, 1.00]])
+
+    result = router(host, evidence, validity, positive_consensus=consensus)
+
+    assert result["host_video_mean"].item() < 0.5
+    assert result["sparse_positive_background_shift"].item() < 0.0
+    assert torch.all(result["delta_normal"][0, :2] < 0.0)
+    assert result["delta_normal"][0, 2].item() == 0.0
+
+
 def test_event_anchor_uses_standard_weak_mil_topk() -> None:
     score = torch.tensor([[0.1, 0.9, 0.7, 0.2, 99.0]])
     validity = torch.tensor([[True, True, True, True, False]])

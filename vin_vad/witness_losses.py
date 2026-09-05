@@ -39,20 +39,6 @@ def temporal_smoothness(score: torch.Tensor, validity: torch.Tensor) -> torch.Te
     return difference[pair_mask].mean()
 
 
-def normal_intervention_regret(
-    corrected: torch.Tensor,
-    host_score: torch.Tensor,
-    validity: torch.Tensor,
-    labels: torch.Tensor,
-) -> torch.Tensor:
-    """Penalize only correction-induced score increases in known-normal bags."""
-    normal_mask = labels <= 0.5
-    if not normal_mask.any():
-        return corrected.sum() * 0.0
-    positive_gain = torch.relu(corrected - host_score)
-    return masked_mean(positive_gain, validity)[normal_mask].mean()
-
-
 def witness_objective(
     result: dict[str, torch.Tensor],
     host_score: torch.Tensor,
@@ -93,11 +79,11 @@ def witness_objective(
                 for curve in role_curves
             ]
         ).mean(dim=0)
+        normal_corrected = -torch.log1p(-corrected.clamp(max=1.0 - 1e-6))
         dense_normal = (
             masked_mean(normal_evidence, validity)[normal_mask]
-        ).mean() + normal_intervention_regret(
-            corrected, host_score, validity, labels
-        )
+            + masked_mean(normal_corrected, validity)[normal_mask]
+        ).mean()
     else:
         dense_normal = evidence.sum() * 0.0
     abnormal_mask = labels > 0.5
@@ -168,9 +154,8 @@ def variant_objective(
     final_loss = per_video_mil(corrected, validity, labels).mean()
     normal_mask = labels <= 0.5
     if normal_mask.any():
-        dense_corrected = normal_intervention_regret(
-            corrected, host_score, validity, labels
-        )
+        corrected_normal = -torch.log1p(-corrected.clamp(max=1.0 - 1e-6))
+        dense_corrected = masked_mean(corrected_normal, validity)[normal_mask].mean()
     else:
         dense_corrected = zero
 

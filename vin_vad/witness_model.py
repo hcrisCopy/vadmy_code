@@ -33,6 +33,26 @@ def masked_temporal_mean(
     )
 
 
+def gaussian_temporal_filter(values: torch.Tensor, validity: torch.Tensor, sigma: float) -> torch.Tensor:
+    """Match scipy's nearest-boundary Gaussian filter along the snippet axis."""
+    radius = int(4.0 * sigma + 0.5)
+    offsets = torch.arange(-radius, radius + 1, device=values.device, dtype=values.dtype)
+    kernel = torch.exp(-0.5 * (offsets / sigma).square())
+    kernel = (kernel / kernel.sum()).view(1, 1, -1)
+    channels = values.shape[-1]
+    rows = []
+    for row, mask in zip(values, validity):
+        length = int(mask.sum())
+        valid = row[:length].transpose(0, 1).unsqueeze(0)
+        filtered = F.conv1d(
+            F.pad(valid, (radius, radius), mode="replicate"),
+            kernel.expand(channels, 1, -1),
+            groups=channels,
+        ).squeeze(0).transpose(0, 1)
+        rows.append(F.pad(filtered, (0, 0, 0, values.shape[1] - length)))
+    return torch.stack(rows).masked_fill(~validity.unsqueeze(-1), 0.0)
+
+
 class WitnessExpert(nn.Module):
     """Neuron-only path: its API intentionally has no host-score argument."""
 
@@ -41,6 +61,68 @@ class WitnessExpert(nn.Module):
         self.neurons = SignedTopKWitnessNeurons(active=active)
         self.temporal = WitnessTemporalReadout(width=temporal_width)
         self.context_temporal = WitnessTemporalReadout(input_channels=24, width=temporal_width)
+        # The context verifier is learned independently from training bags, then
+        # frozen. This prevents one noisy MIL objective collapsing all roles.
+        context_coordinates = 32
+        context_features = 3 * 12 * context_coordinates
+        self.register_buffer("context_normal_mean", torch.zeros(12, 768))
+        self.register_buffer("context_normal_scale", torch.ones(12, 768))
+        self.register_buffer("context_indices", torch.zeros(12, context_coordinates, dtype=torch.long))
+        self.register_buffer("context_directions", torch.zeros(12, context_coordinates, dtype=torch.long))
+        self.register_buffer("context_feature_mean", torch.zeros(context_features))
+        self.register_buffer("context_feature_scale", torch.ones(context_features))
+        self.register_buffer("context_coefficient", torch.zeros(context_features))
+        self.register_buffer("context_intercept", torch.tensor(0.0))
+        self.register_buffer("pretrained_context_ready", torch.tensor(False))
+
+    @torch.no_grad()
+    def set_pretrained_context(
+        self,
+        normal_mean: torch.Tensor,
+        normal_scale: torch.Tensor,
+        indices: torch.Tensor,
+        directions: torch.Tensor,
+        feature_mean: torch.Tensor,
+        feature_scale: torch.Tensor,
+        coefficient: torch.Tensor,
+        intercept: torch.Tensor,
+    ) -> None:
+        values = (
+            (self.context_normal_mean, normal_mean),
+            (self.context_normal_scale, normal_scale),
+            (self.context_indices, indices),
+            (self.context_directions, directions),
+            (self.context_feature_mean, feature_mean),
+            (self.context_feature_scale, feature_scale),
+            (self.context_coefficient, coefficient.reshape(-1)),
+        )
+        for destination, source in values:
+            if destination.shape != source.shape:
+                raise ValueError(f"pretrained context shape {source.shape} != {destination.shape}")
+            destination.copy_(source.to(destination))
+        self.context_intercept.copy_(intercept.reshape(-1)[0].to(self.context_intercept))
+        self.pretrained_context_ready.fill_(True)
+
+    def pretrained_context_logits(
+        self, hidden: torch.Tensor, validity: torch.Tensor
+    ) -> torch.Tensor:
+        normalized = F.layer_norm(hidden, (hidden.shape[-1],))
+        deviation = (normalized - self.context_normal_mean) / self.context_normal_scale.clamp_min(1e-6)
+        indices = self.context_indices.view(1, 1, 12, -1).expand(hidden.shape[0], hidden.shape[1], -1, -1)
+        selected = deviation.gather(-1, indices)
+        selected = torch.where(self.context_directions.view(1, 1, 12, -1) == 0, selected, -selected)
+        current = selected.flatten(2)
+        features = torch.cat(
+            [
+                current,
+                gaussian_temporal_filter(current, validity, 1.5),
+                gaussian_temporal_filter(current, validity, 4.0),
+            ],
+            dim=-1,
+        )
+        standardized = (features - self.context_feature_mean) / self.context_feature_scale.clamp_min(1e-6)
+        logits = standardized @ self.context_coefficient + self.context_intercept
+        return logits.masked_fill(~validity, 0.0)
 
     def forward(
         self,
@@ -63,7 +145,11 @@ class WitnessExpert(nn.Module):
             ],
             dim=-1,
         )
-        context_logits = self.context_temporal(context_input, validity)
+        context_logits = (
+            self.pretrained_context_logits(hidden, validity)
+            if bool(self.pretrained_context_ready)
+            else self.context_temporal(context_input, validity)
+        )
         primary_role = masked_standardize(primary_logits, validity).clamp(-3.0, 3.0)
         normality_role = normality_logits.clamp(-3.0, 3.0)
         context_role = masked_standardize(context_logits, validity).clamp(-3.0, 3.0)

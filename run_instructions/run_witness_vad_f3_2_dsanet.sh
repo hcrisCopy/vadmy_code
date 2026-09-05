@@ -68,6 +68,8 @@ for dataset in $DATASETS; do
     --device cuda
 
   for variant in w6; do
+    context_normality="../vadmy_data/universal_neuron_adapter/normality_expert_cache/$dataset/top32_signed_v1/normality_expert.npz"
+    context_student="../vadmy_data/universal_neuron_adapter/context_student_cache/$dataset/top32_multiscale_seed234/context_student.npz"
     python -m vin_vad.train_witness \
       --dataset "$dataset" \
       --variant "$variant" \
@@ -95,6 +97,8 @@ for dataset in $DATASETS; do
       --weight-decay 0.0001 \
       --seed 42 \
       --device cuda \
+      --context-normality-model "$context_normality" \
+      --context-student-model "$context_student" \
       --retain-epoch-checkpoints \
       "${RESUME_ARGS[@]}"
 

@@ -124,7 +124,14 @@ class WitnessRouter(nn.Module):
         # The hard state decides whether correction is allowed.  Its bounded
         # positive confidence only controls the strength of already-localized
         # anomaly correction, so it cannot create a whole-video score offset.
-        anomaly_confidence_gain = 1.0 + torch.tanh(torch.relu(video_logit))
+        # Witness evidence always keeps its base correction authority.  Only
+        # the extra video-confidence amplification asks the frozen host for
+        # corroboration, preventing an erroneous positive route from nearly
+        # doubling correction while preserving repair of genuine host misses.
+        host_video_confidence = masked_mean(host_score, validity).clamp(0.0, 1.0)
+        anomaly_confidence_gain = 1.0 + (
+            torch.tanh(torch.relu(video_logit)) * host_video_confidence
+        )
         eta_normal = (
             torch.nn.functional.softplus(self.raw_eta_normal)
             if eta_normal_override is None
@@ -230,6 +237,7 @@ class WitnessRouter(nn.Module):
             "video_probability": video_probability,
             "anomaly_authorized": anomaly_authorized,
             "normal_authorized": normal_authorized,
+            "host_video_confidence": host_video_confidence,
             "anomaly_confidence_gain": anomaly_confidence_gain,
             "eta_normal": eta_normal,
             "eta_anomaly": eta_anomaly,

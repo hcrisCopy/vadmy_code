@@ -120,10 +120,13 @@ def test_positive_video_confidence_boundedly_scales_only_local_correction() -> N
         router.video_head.weight.zero_()
         router.video_head.bias.fill_(2.0)
     positive = router(host, evidence, validity)
-    expected_gain = 1.0 + torch.tanh(torch.tensor(2.0))
+    expected_gain = 1.0 + torch.tanh(torch.tensor(2.0)) * masked_mean(host, validity)
     torch.testing.assert_close(
         positive["anomaly_confidence_gain"],
-        torch.full((2,), expected_gain),
+        expected_gain,
+    )
+    torch.testing.assert_close(
+        positive["host_video_confidence"], masked_mean(host, validity)
     )
     assert torch.all(positive["anomaly_confidence_gain"] < 2.0)
     with torch.no_grad():

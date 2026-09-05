@@ -6,6 +6,26 @@ from torch.nn import functional as F
 from vin_vad.witness_router import masked_mean
 
 
+def class_balanced_hard_bce(
+    probability: torch.Tensor, labels: torch.Tensor
+) -> torch.Tensor:
+    """Keep calibrated BCE while focusing each class on its hard-routed half."""
+    target = labels.to(probability.dtype)
+    losses = F.binary_cross_entropy(
+        probability.clamp(1e-6, 1.0 - 1e-6), target, reduction="none"
+    )
+    selected = []
+    for positive in (False, True):
+        class_loss = losses[(target > 0.5) == positive]
+        if class_loss.numel() == 0:
+            continue
+        count = max(1, (class_loss.numel() + 1) // 2)
+        selected.append(torch.topk(class_loss, count).values.mean())
+    if not selected:
+        raise ValueError("authorization BCE needs at least one video")
+    return torch.stack(selected).mean()
+
+
 def topk_bag_probability(score: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
     outputs = []
     for row, mask in zip(score, validity):
@@ -55,7 +75,7 @@ def witness_objective(
 ) -> dict[str, torch.Tensor]:
     evidence = result["evidence"]
     corrected = result["corrected_score"]
-    video_loss = F.binary_cross_entropy(result["video_probability"], labels.to(evidence.dtype))
+    video_loss = class_balanced_hard_bce(result["video_probability"], labels)
     residual = (labels - topk_bag_probability(host_score, validity)).abs().detach()
     role_curves = [evidence, result["primary_evidence"], result["context_evidence"]]
     role_losses = []

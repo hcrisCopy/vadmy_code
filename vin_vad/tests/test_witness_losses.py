@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import torch
 
-from vin_vad.witness_losses import temporal_smoothness, topk_bag_probability, witness_objective
+from vin_vad.witness_losses import (
+    class_balanced_hard_bce,
+    temporal_smoothness,
+    topk_bag_probability,
+    witness_objective,
+)
 from vin_vad.witness_model import WitnessVAD
 
 
@@ -16,6 +21,13 @@ def sample() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     validity = torch.tensor([[True] * 6 + [False] * 2, [True] * 8])
     labels = torch.tensor([0.0, 1.0])
     return hidden, host, validity, labels
+
+
+def test_hard_bce_selects_each_class_instead_of_only_the_global_hardest() -> None:
+    probability = torch.tensor([0.1, 0.4, 0.9, 0.6])
+    labels = torch.tensor([0.0, 0.0, 1.0, 1.0])
+    expected = -0.5 * (torch.log(torch.tensor(0.6)) + torch.log(torch.tensor(0.6)))
+    torch.testing.assert_close(class_balanced_hard_bce(probability, labels), expected)
 
 
 def test_padding_does_not_enter_topk_or_smoothness() -> None:

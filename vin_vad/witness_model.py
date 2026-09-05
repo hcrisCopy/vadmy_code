@@ -33,36 +33,6 @@ def masked_temporal_mean(
     )
 
 
-def consensus_role_weights(
-    roles: torch.Tensor, validity: torch.Tensor
-) -> torch.Tensor:
-    """Estimate per-video role reliability from positive temporal agreement.
-
-    The weights are detached deliberately: agreement measures whether a role is
-    trustworthy for this video, but must not become a shortcut that the role
-    predictors can optimize directly.
-    """
-    if roles.ndim != 3 or roles.shape[:2] != validity.shape:
-        raise ValueError("roles must be [B,T,R] and validity must be [B,T]")
-    mask = validity.unsqueeze(-1).to(roles.dtype)
-    count = mask.sum(dim=1, keepdim=True).clamp_min(1.0)
-    mean = (roles * mask).sum(dim=1, keepdim=True) / count
-    centered = (roles - mean) * mask
-    norm = torch.sqrt(centered.square().sum(dim=1).clamp_min(1e-6))
-    correlation = torch.einsum("btr,bts->brs", centered, centered) / (
-        norm.unsqueeze(2) * norm.unsqueeze(1)
-    )
-    positive = correlation.clamp_min(0.0)
-    identity = torch.eye(
-        roles.shape[-1], dtype=roles.dtype, device=roles.device
-    ).unsqueeze(0)
-    centrality = 1.0 + (positive * (1.0 - identity)).sum(dim=-1)
-    weights = centrality * roles.shape[-1] / centrality.sum(
-        dim=-1, keepdim=True
-    ).clamp_min(1e-6)
-    return weights.detach()
-
-
 class WitnessExpert(nn.Module):
     """Neuron-only path: its API intentionally has no host-score argument."""
 
@@ -98,12 +68,9 @@ class WitnessExpert(nn.Module):
         normality_role = normality_logits.clamp(-3.0, 3.0)
         context_role = masked_standardize(context_logits, validity).clamp(-3.0, 3.0)
         roles = torch.stack([primary_role, normality_role, context_role], dim=-1)
-        role_weights = consensus_role_weights(roles, validity)
         positive_agreement = torch.relu(roles).amin(dim=-1)
         negative_agreement = torch.relu(-roles).amin(dim=-1)
-        logits = (
-            roles * role_weights.unsqueeze(1)
-        ).mean(dim=-1) + positive_agreement - negative_agreement
+        logits = roles.mean(dim=-1) + positive_agreement - negative_agreement
         evidence = torch.sigmoid(logits).masked_fill(~validity, 0.0)
         return {
             **neuron,
@@ -112,7 +79,6 @@ class WitnessExpert(nn.Module):
             "context_evidence": torch.sigmoid(context_logits).masked_fill(~validity, 0.0),
             "positive_agreement": positive_agreement.masked_fill(~validity, 0.0),
             "negative_agreement": negative_agreement.masked_fill(~validity, 0.0),
-            "role_weights": role_weights,
             "evidence_logits": logits.masked_fill(~validity, 0.0),
             "evidence": evidence,
         }

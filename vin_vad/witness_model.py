@@ -56,11 +56,15 @@ class WitnessExpert(nn.Module):
             normality_raw - self.neurons.normal_score_threshold
         ) / self.neurons.normal_score_std
         normality_logits = normality_logits.masked_fill(~validity, 0.0)
+        short_context = masked_temporal_mean(
+            normality_layers, validity, width=9
+        )
+        long_context = masked_temporal_mean(
+            normality_layers, validity, width=25
+        )
+        transient_context = short_context - long_context
         context_input = torch.cat(
-            [
-                masked_temporal_mean(normality_layers, validity, width=9),
-                masked_temporal_mean(normality_layers, validity, width=25),
-            ],
+            [short_context, transient_context],
             dim=-1,
         )
         context_logits = self.context_temporal(context_input, validity)
@@ -77,6 +81,8 @@ class WitnessExpert(nn.Module):
             "primary_evidence": torch.sigmoid(primary_logits).masked_fill(~validity, 0.0),
             "normality_evidence": torch.sigmoid(normality_role).masked_fill(~validity, 0.0),
             "context_evidence": torch.sigmoid(context_logits).masked_fill(~validity, 0.0),
+            "context_short": short_context,
+            "context_transient": transient_context,
             "positive_agreement": positive_agreement.masked_fill(~validity, 0.0),
             "negative_agreement": negative_agreement.masked_fill(~validity, 0.0),
             "evidence_logits": logits.masked_fill(~validity, 0.0),

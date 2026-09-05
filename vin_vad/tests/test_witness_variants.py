@@ -3,7 +3,11 @@ from __future__ import annotations
 import torch
 
 from vin_vad.witness_losses import variant_objective
-from vin_vad.witness_model import HostVideoOnlyVAD, NeuronOnlyWitnessVAD
+from vin_vad.witness_model import (
+    HostVideoOnlyVAD,
+    NeuronOnlyWitnessVAD,
+    masked_temporal_mean,
+)
 from vin_vad.witness_router import masked_mean
 
 
@@ -39,6 +43,16 @@ def test_w2_neuron_evidence_is_host_independent_and_correction_is_local() -> Non
     torch.testing.assert_close(first["evidence"], second["evidence"])
     assert torch.any(masked_mean(first["delta_anomaly"], validity).abs() > 1e-5)
     assert torch.count_nonzero(first["delta_normal"]) == 0
+
+
+def test_context_role_exposes_short_term_departure_from_long_term_background() -> None:
+    hidden, host, validity, _ = inputs()
+    result = NeuronOnlyWitnessVAD()(hidden, host, validity)
+    normality = result["normality_layer_evidence"]
+    expected = masked_temporal_mean(
+        normality, validity, width=9
+    ) - masked_temporal_mean(normality, validity, width=25)
+    torch.testing.assert_close(result["context_transient"], expected)
 
 
 def test_variant_losses_update_only_present_paths() -> None:

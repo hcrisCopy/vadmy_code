@@ -40,10 +40,7 @@ class WitnessExpert(nn.Module):
         super().__init__()
         self.neurons = SignedTopKWitnessNeurons(active=active)
         self.temporal = WitnessTemporalReadout(width=temporal_width)
-        context_channels = 12 * min(active, 768)
-        self.context_temporal = WitnessTemporalReadout(
-            input_channels=3 * context_channels, width=temporal_width
-        )
+        self.context_temporal = WitnessTemporalReadout(input_channels=24, width=temporal_width)
 
     def forward(
         self,
@@ -59,12 +56,10 @@ class WitnessExpert(nn.Module):
             normality_raw - self.neurons.normal_score_threshold
         ) / self.neurons.normal_score_std
         normality_logits = normality_logits.masked_fill(~validity, 0.0)
-        context_coordinates = neuron["normality_coordinate_evidence"]
         context_input = torch.cat(
             [
-                context_coordinates,
-                masked_temporal_mean(context_coordinates, validity, width=5),
-                masked_temporal_mean(context_coordinates, validity, width=13),
+                masked_temporal_mean(normality_layers, validity, width=9),
+                masked_temporal_mean(normality_layers, validity, width=25),
             ],
             dim=-1,
         )

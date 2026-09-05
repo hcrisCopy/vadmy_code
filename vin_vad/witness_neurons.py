@@ -126,27 +126,6 @@ class SignedTopKWitnessNeurons(nn.Module):
         layer_evidence = layer_evidence.masked_fill(~validity.unsqueeze(-1), 0.0)
         if bool(self.normal_role_ready):
             assert deviation is not None
-            # Preserve which normal-role neurons co-activate.  A layer average is
-            # sufficient for marginal normality, but destroys the coordinate
-            # pattern needed to recognize a temporally coherent context event.
-            normal_indices = torch.topk(
-                self.normal_role_mask * self.normal_role_weight,
-                k=min(self.active, self.dimensions),
-                dim=-1,
-            ).indices
-            directional_signed = deviation * self.normal_role_direction.view(
-                1, 1, self.layers, self.dimensions
-            )
-            normality_coordinate_evidence = torch.gather(
-                directional_signed,
-                dim=-1,
-                index=normal_indices.view(1, 1, self.layers, -1).expand(
-                    hidden.shape[0], hidden.shape[1], -1, -1
-                ),
-            ).flatten(start_dim=2)
-            normality_coordinate_evidence = normality_coordinate_evidence.masked_fill(
-                ~validity.unsqueeze(-1), 0.0
-            )
             directional_deviation = torch.relu(
                 deviation * self.normal_role_direction.view(1, 1, self.layers, self.dimensions)
             )
@@ -159,19 +138,11 @@ class SignedTopKWitnessNeurons(nn.Module):
             )
         else:
             normality_layer_evidence = torch.zeros_like(layer_evidence)
-            normality_coordinate_evidence = torch.zeros(
-                hidden.shape[0],
-                hidden.shape[1],
-                self.layers * min(self.active, self.dimensions),
-                dtype=hidden.dtype,
-                device=hidden.device,
-            )
         layer_probability = torch.softmax(self.layer_logits, dim=0)
         temporal_input = layer_evidence * (self.layers * layer_probability.view(1, 1, -1))
         return {
             "layer_evidence": layer_evidence,
             "normality_layer_evidence": normality_layer_evidence,
-            "normality_coordinate_evidence": normality_coordinate_evidence,
             "temporal_input": temporal_input,
             "gates": gate,
             "coordinate_weights": coordinate_weights,

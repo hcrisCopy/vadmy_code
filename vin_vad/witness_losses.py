@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import math
-
 import torch
 from torch.nn import functional as F
 
-from vin_vad.witness_router import masked_mean, masked_standardize
+from vin_vad.witness_router import masked_mean
 
 
 def topk_bag_probability(score: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
@@ -41,29 +39,6 @@ def temporal_smoothness(score: torch.Tensor, validity: torch.Tensor) -> torch.Te
     return difference[pair_mask].mean()
 
 
-def context_verification_loss(
-    result: dict[str, torch.Tensor], validity: torch.Tensor, labels: torch.Tensor
-) -> torch.Tensor:
-    primary = torch.logit(result["primary_evidence"].clamp(1e-6, 1.0 - 1e-6))
-    normality = torch.logit(result["normality_evidence"].clamp(1e-6, 1.0 - 1e-6))
-    teacher = (masked_standardize(primary, validity) + 3.0 * masked_standardize(normality, validity)).detach()
-    context = result["context_evidence"].clamp(1e-6, 1.0 - 1e-6)
-    class_losses = []
-    normal = labels <= 0.5
-    if normal.any():
-        class_losses.append(masked_mean(-torch.log1p(-context), validity)[normal].mean())
-    abnormal_losses = []
-    for curve, score, mask, label in zip(context, teacher, validity, labels):
-        if label <= 0.5:
-            continue
-        valid_score, valid_curve = score[mask], curve[mask]
-        count = max(1, math.ceil(0.05 * valid_score.numel()))
-        abnormal_losses.append(-torch.log(valid_curve[torch.topk(valid_score, count).indices]).mean())
-    if abnormal_losses:
-        class_losses.append(torch.stack(abnormal_losses).mean())
-    return torch.stack(class_losses).mean() if class_losses else context.sum() * 0.0
-
-
 def witness_objective(
     result: dict[str, torch.Tensor],
     host_score: torch.Tensor,
@@ -82,7 +57,7 @@ def witness_objective(
     corrected = result["corrected_score"]
     video_loss = F.binary_cross_entropy(result["video_probability"], labels.to(evidence.dtype))
     residual = (labels - topk_bag_probability(host_score, validity)).abs().detach()
-    role_curves = [evidence, result["primary_evidence"]]
+    role_curves = [evidence, result["primary_evidence"], result["context_evidence"]]
     role_losses = []
     for role_evidence in role_curves:
         role_per_video = per_video_mil(role_evidence, validity, labels)
@@ -94,7 +69,6 @@ def witness_objective(
             role_evidence, validity
         )
         role_losses.append(role_loss)
-    role_losses.append(context_verification_loss(result, validity, labels) + smooth_weight * temporal_smoothness(result["context_evidence"], validity))
     neuron_loss = torch.stack(role_losses).mean()
     final_loss = per_video_mil(corrected, validity, labels).mean()
     normal_mask = labels <= 0.5

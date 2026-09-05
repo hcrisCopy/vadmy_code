@@ -93,7 +93,9 @@ class WitnessRouter(nn.Module):
 
     def __init__(self, eta_normal: float = 1.0, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
         super().__init__()
-        self.video_head = nn.Linear(10, 1)
+        # The authorization decision must see whether the independent roles
+        # agree, not only their already-fused evidence where conflict is lost.
+        self.video_head = nn.Linear(18, 1)
         self.raw_eta_normal = nn.Parameter(torch.tensor(inverse_softplus(eta_normal)))
         self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
 
@@ -111,7 +113,20 @@ class WitnessRouter(nn.Module):
             raise ValueError("positive_consensus must share the [B,T] host-score shape")
         if negative_consensus is not None and negative_consensus.shape != host_score.shape:
             raise ValueError("negative_consensus must share the [B,T] host-score shape")
-        summary = video_summary(host_score, evidence, validity)
+        fused_summary = video_summary(host_score, evidence, validity)
+        if positive_consensus is None or negative_consensus is None:
+            consensus_summary = torch.zeros(
+                host_score.shape[0], 8, dtype=host_score.dtype, device=host_score.device
+            )
+        else:
+            consensus_summary = torch.cat(
+                [
+                    masked_summary(positive_consensus, validity),
+                    masked_summary(negative_consensus, validity),
+                ],
+                dim=1,
+            )
+        summary = torch.cat([fused_summary, consensus_summary], dim=1)
         video_logit = self.video_head(summary).squeeze(1)
         video_probability = torch.sigmoid(video_logit)
         hard_authorization = (video_probability >= 0.5).to(video_probability.dtype)

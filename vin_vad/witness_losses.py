@@ -59,7 +59,18 @@ def witness_objective(
     residual = (labels - topk_bag_probability(host_score, validity)).abs().detach()
     role_curves = [evidence, result["primary_evidence"], result["context_evidence"]]
     role_losses = []
-    for role_evidence in role_curves:
+    for role_index, role_evidence in enumerate(role_curves):
+        if role_index == 2 and "context_positive_mask" in result:
+            probability = role_evidence.clamp(1e-6, 1.0 - 1e-6)
+            normal_mask = (labels <= 0.5).unsqueeze(1) & validity
+            positive_mask = result["context_positive_mask"] & validity
+            normal_term = -torch.log1p(-probability[normal_mask]).mean()
+            positive_term = -torch.log(probability[positive_mask]).mean()
+            role_losses.append(
+                0.5 * (normal_term + positive_term)
+                + smooth_weight * temporal_smoothness(role_evidence, validity)
+            )
+            continue
         role_per_video = per_video_mil(role_evidence, validity, labels)
         role_loss = (residual * role_per_video).sum() / residual.sum().clamp_min(1e-6)
         role_loss = role_loss + rank_weight * ranking_loss(

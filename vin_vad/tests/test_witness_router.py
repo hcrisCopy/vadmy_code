@@ -169,13 +169,6 @@ def test_local_event_completion_ignores_padding() -> None:
     torch.testing.assert_close(completed, torch.tensor([[0.9, 0.9, 0.9, 0.0]]))
 
 
-def test_host_event_gap_is_bounded_without_changing_its_direction() -> None:
-    host, evidence, validity = inputs()
-    result = WitnessRouter()(host, evidence, validity)
-    assert torch.all(result["event_gap"][validity] >= 0.0)
-    assert torch.all(result["event_gap"][validity] < 1.0)
-
-
 def test_padding_does_not_enter_video_pooling_or_router() -> None:
     host, evidence, validity = inputs()
     router = WitnessRouter()

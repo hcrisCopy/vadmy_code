@@ -19,22 +19,6 @@ def masked_standardize(values: torch.Tensor, validity: torch.Tensor) -> torch.Te
     return (centered / torch.sqrt(variance + 1e-6)).masked_fill(~validity, 0.0)
 
 
-def masked_robust_standardize(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
-    """Estimate video background without letting sparse events dominate it."""
-    if values.shape != validity.shape:
-        raise ValueError("values and validity must share the [B,T] shape")
-    outputs = []
-    for row, mask in zip(values, validity):
-        valid = row[mask]
-        if valid.numel() == 0:
-            raise ValueError("every video needs at least one valid snippet")
-        center = valid.median()
-        # A linear-deviation scale is less sensitive to event peaks than variance.
-        scale = (valid - center).abs().mean().clamp_min(1e-3)
-        outputs.append(((row - center) / scale).masked_fill(~mask, 0.0))
-    return torch.stack(outputs)
-
-
 def masked_summary(values: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
     rows = []
     for value, mask in zip(values, validity):

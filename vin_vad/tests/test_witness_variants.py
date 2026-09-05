@@ -4,7 +4,7 @@ import torch
 
 from vin_vad.witness_losses import variant_objective
 from vin_vad.witness_model import HostVideoOnlyVAD, NeuronOnlyWitnessVAD
-from vin_vad.witness_router import masked_mean, masked_robust_standardize
+from vin_vad.witness_router import masked_mean
 
 
 def inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -16,15 +16,6 @@ def inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     validity = torch.tensor([[True] * 4 + [False] * 2, [True] * 6])
     labels = torch.tensor([0.0, 1.0])
     return hidden, host, validity, labels
-
-
-def test_robust_role_standardization_resists_one_sparse_outlier() -> None:
-    values = torch.tensor([[0.0, 0.0, 1.0, 100.0, 999.0]])
-    validity = torch.tensor([[True, True, True, True, False]])
-    standardized = masked_robust_standardize(values, validity)
-    assert standardized[0, 0].item() == 0.0
-    assert standardized[0, 3].item() > 3.0
-    assert standardized[0, 4].item() == 0.0
 
 
 def test_w1_has_no_neuron_expert_and_only_nonpositive_uniform_shift() -> None:

@@ -9,7 +9,6 @@ from vin_vad.witness_router import (
     WitnessRouter,
     inverse_softplus,
     masked_mean,
-    masked_robust_standardize,
     masked_standardize,
     masked_summary,
     masked_topk_anchor,
@@ -65,9 +64,9 @@ class WitnessExpert(nn.Module):
             dim=-1,
         )
         context_logits = self.context_temporal(context_input, validity)
-        primary_role = masked_robust_standardize(primary_logits, validity).clamp(-3.0, 3.0)
+        primary_role = masked_standardize(primary_logits, validity).clamp(-3.0, 3.0)
         normality_role = normality_logits.clamp(-3.0, 3.0)
-        context_role = masked_robust_standardize(context_logits, validity).clamp(-3.0, 3.0)
+        context_role = masked_standardize(context_logits, validity).clamp(-3.0, 3.0)
         roles = torch.stack([primary_role, normality_role, context_role], dim=-1)
         positive_agreement = torch.relu(roles).amin(dim=-1)
         negative_agreement = torch.relu(-roles).amin(dim=-1)

@@ -2,12 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from vin_vad.witness_losses import (
-    normal_temporal_smoothness,
-    temporal_smoothness,
-    topk_bag_probability,
-    witness_objective,
-)
+from vin_vad.witness_losses import temporal_smoothness, topk_bag_probability, witness_objective
 from vin_vad.witness_model import WitnessVAD
 
 
@@ -31,15 +26,6 @@ def test_padding_does_not_enter_topk_or_smoothness() -> None:
     changed[~validity] = 1e6
     torch.testing.assert_close(first_topk, topk_bag_probability(changed, validity))
     torch.testing.assert_close(first_smooth, temporal_smoothness(changed, validity))
-
-
-def test_normal_smoothness_does_not_blur_abnormal_event_boundaries() -> None:
-    score = torch.tensor([[0.1, 0.2, 0.1], [0.0, 1.0, 0.0]])
-    validity = torch.ones_like(score, dtype=torch.bool)
-    labels = torch.tensor([0.0, 1.0])
-
-    normal_only = normal_temporal_smoothness(score, validity, labels)
-    torch.testing.assert_close(normal_only, temporal_smoothness(score[:1], validity[:1]))
 
 
 def test_every_objective_component_reaches_witness_parameters() -> None:

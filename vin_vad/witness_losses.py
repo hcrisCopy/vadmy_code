@@ -39,18 +39,6 @@ def temporal_smoothness(score: torch.Tensor, validity: torch.Tensor) -> torch.Te
     return difference[pair_mask].mean()
 
 
-def normal_temporal_smoothness(
-    score: torch.Tensor,
-    validity: torch.Tensor,
-    labels: torch.Tensor,
-) -> torch.Tensor:
-    """Regularize stable normal background without blurring anomaly boundaries."""
-    normal = labels <= 0.5
-    if not normal.any():
-        return score.sum() * 0.0
-    return temporal_smoothness(score[normal], validity[normal])
-
-
 def witness_objective(
     result: dict[str, torch.Tensor],
     host_score: torch.Tensor,
@@ -77,8 +65,8 @@ def witness_objective(
         role_loss = role_loss + rank_weight * ranking_loss(
             role_evidence, validity, labels, rank_margin
         )
-        role_loss = role_loss + smooth_weight * normal_temporal_smoothness(
-            role_evidence, validity, labels
+        role_loss = role_loss + smooth_weight * temporal_smoothness(
+            role_evidence, validity
         )
         role_losses.append(role_loss)
     neuron_loss = torch.stack(role_losses).mean()

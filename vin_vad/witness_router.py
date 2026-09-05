@@ -79,7 +79,13 @@ def video_summary(host_score: torch.Tensor, evidence: torch.Tensor, validity: to
     neuron = masked_summary(evidence, validity)
     correlation = masked_correlation(host_score, evidence, validity).unsqueeze(1)
     disagreement = masked_mean((host_score - evidence).abs(), validity).unsqueeze(1)
-    return torch.cat([host, neuron, correlation, disagreement], dim=1)
+    # Authorization needs interpretable cross-source evidence, not redundant
+    # distribution fingerprints.  Keep global host risk, the two weak-MIL event
+    # anchors, temporal agreement, and disagreement magnitude.
+    return torch.cat(
+        [host[:, 0:1], host[:, 2:3], neuron[:, 2:3], correlation, disagreement],
+        dim=1,
+    )
 
 
 def inverse_softplus(value: float) -> float:
@@ -93,7 +99,7 @@ class WitnessRouter(nn.Module):
 
     def __init__(self, eta_normal: float = 1.0, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
         super().__init__()
-        self.video_head = nn.Linear(10, 1)
+        self.video_head = nn.Linear(5, 1)
         self.raw_eta_normal = nn.Parameter(torch.tensor(inverse_softplus(eta_normal)))
         self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
 

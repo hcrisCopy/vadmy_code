@@ -173,6 +173,7 @@ def test_padding_does_not_enter_video_pooling_or_router() -> None:
     host, evidence, validity = inputs()
     router = WitnessRouter()
     first_summary = video_summary(host, evidence, validity)
+    assert first_summary.shape == (host.shape[0], 5)
     first = router(host, evidence, validity)
     changed_host = host.clone()
     changed_evidence = evidence.clone()

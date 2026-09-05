@@ -191,11 +191,22 @@ class WitnessRouter(nn.Module):
             )
             - normal_authorized.unsqueeze(1) * veto_support
         ).masked_fill(~validity, 0.0)
+        positive_consensus_gain = (
+            torch.ones_like(local_shape)
+            if positive_consensus is None
+            else 1.0 + torch.tanh(positive_consensus.clamp_min(0.0))
+        ).masked_fill(~validity, 1.0)
+        consensus_authorized_shape = (
+            torch.relu(local_shape) * positive_consensus_gain
+            - torch.relu(-local_shape)
+        )
         # q decides the correction direction; neuron evidence decides its support.
         # A non-zero mean is required to repair cross-video ranking, which dominates
         # frame AUC/AP, while the support remains temporally localized.
         delta_anomaly = (
-            eta_anomaly * anomaly_confidence_gain.unsqueeze(1) * local_shape
+            eta_anomaly
+            * anomaly_confidence_gain.unsqueeze(1)
+            * consensus_authorized_shape
         )
         delta_anomaly = delta_anomaly.masked_fill(~validity, 0.0)
         delta_normal = delta_normal.masked_fill(~validity, 0.0)
@@ -237,6 +248,8 @@ class WitnessRouter(nn.Module):
             "delta_anomaly": delta_anomaly,
             "positive_normal_protection": positive_normal_protection,
             "local_shape": local_shape,
+            "positive_consensus_gain": positive_consensus_gain,
+            "consensus_authorized_shape": consensus_authorized_shape,
             "witness_support": witness_support,
             "host_miss_support": host_miss_support,
             "complementary_support": complementary_support,

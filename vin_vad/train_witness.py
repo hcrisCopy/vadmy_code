@@ -24,6 +24,24 @@ from vin_vad.witness_losses import variant_objective
 from vin_vad.witness_model import build_witness_variant
 
 
+def weighted_quantile(
+    values: torch.Tensor, weights: torch.Tensor, quantile: float
+) -> torch.Tensor:
+    """Return a deterministic weighted empirical quantile."""
+    if values.ndim != 1 or weights.shape != values.shape:
+        raise ValueError("values and weights must be one-dimensional with equal shape")
+    if values.numel() == 0 or not 0.0 <= quantile <= 1.0:
+        raise ValueError("values must be non-empty and quantile must be in [0, 1]")
+    if torch.any(weights < 0) or weights.sum() <= 0:
+        raise ValueError("weights must be non-negative with positive total mass")
+    order = torch.argsort(values)
+    sorted_values = values[order]
+    cumulative = torch.cumsum(weights[order], dim=0)
+    cutoff = cumulative[-1] * quantile
+    index = torch.searchsorted(cumulative, cutoff).clamp_max(values.numel() - 1)
+    return sorted_values[index]
+
+
 @torch.no_grad()
 def fit_role_disentangled_reference(
     model: torch.nn.Module,
@@ -39,11 +57,14 @@ def fit_role_disentangled_reference(
     for index in tqdm(normal_indices, desc="fit normal neuron moments", unit="video"):
         hidden = dataset[index]["hidden"].to(device, non_blocking=True)
         normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
-        total += normalized.sum(dim=0)
-        square += normalized.square().sum(dim=0)
+        # A normal bag is one complete dense-negative observation. Equal-video
+        # moments prevent a few very long recordings from defining normality.
+        total += normalized.mean(dim=0)
+        square += normalized.square().mean(dim=0)
         snippet_count += len(normalized)
-    mean = total / max(snippet_count, 1)
-    variance = (square / max(snippet_count, 1) - mean.square()).clamp_min(1e-4)
+    normal_video_count = max(len(normal_indices), 1)
+    mean = total / normal_video_count
+    variance = (square / normal_video_count - mean.square()).clamp_min(1e-4)
     standard_deviation = variance.sqrt()
 
     class_sum = torch.zeros(
@@ -113,6 +134,7 @@ def fit_role_disentangled_reference(
 
     role_weight = normal_mask * normal_weight
     normal_scores = []
+    normal_score_weights = []
     for index in tqdm(normal_indices, desc="calibrate normality score", unit="video"):
         hidden = dataset[index]["hidden"].to(device, non_blocking=True)
         normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
@@ -123,9 +145,15 @@ def fit_role_disentangled_reference(
         ).clamp_min(1e-6)
         score = layer_score.mean(dim=-1)
         normal_scores.append(score)
+        normal_score_weights.append(torch.full_like(score, 1.0 / len(score)))
     normal_score = torch.cat(normal_scores)
-    score_threshold = torch.quantile(normal_score, 0.95)
-    score_std = normal_score.std(unbiased=False).clamp_min(1e-2)
+    normal_weight = torch.cat(normal_score_weights)
+    score_threshold = weighted_quantile(normal_score, normal_weight, 0.95)
+    normalized_weight = normal_weight / normal_weight.sum()
+    score_mean = (normal_score * normalized_weight).sum()
+    score_std = torch.sqrt(
+        ((normal_score - score_mean).square() * normalized_weight).sum()
+    ).clamp_min(1e-2)
     neurons.set_normal_role(
         mean.float(),
         standard_deviation.float(),

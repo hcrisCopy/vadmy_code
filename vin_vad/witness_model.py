@@ -74,9 +74,9 @@ class WitnessExpert(nn.Module):
         evidence = torch.sigmoid(logits).masked_fill(~validity, 0.0)
         return {
             **neuron,
-            "primary_evidence": torch.sigmoid(primary_logits).masked_fill(~validity, 0.0),
+            "primary_evidence": torch.sigmoid(primary_role).masked_fill(~validity, 0.0),
             "normality_evidence": torch.sigmoid(normality_role).masked_fill(~validity, 0.0),
-            "context_evidence": torch.sigmoid(context_logits).masked_fill(~validity, 0.0),
+            "context_evidence": torch.sigmoid(context_role).masked_fill(~validity, 0.0),
             "positive_agreement": positive_agreement.masked_fill(~validity, 0.0),
             "negative_agreement": negative_agreement.masked_fill(~validity, 0.0),
             "evidence_logits": logits.masked_fill(~validity, 0.0),

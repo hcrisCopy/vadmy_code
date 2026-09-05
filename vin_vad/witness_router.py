@@ -177,9 +177,11 @@ class WitnessRouter(nn.Module):
         )
         witness_event_support = masked_local_max(witness_support, validity)
         event_anchor = masked_local_max(host_clipped, validity)
-        event_gap = torch.relu(
-            torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6))
-            - torch.logit(host_clipped)
+        event_gap = torch.tanh(
+            torch.relu(
+                torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6))
+                - torch.logit(host_clipped)
+            )
         ).masked_fill(~validity, 0.0)
         local_shape = (
             anomaly_authorized.unsqueeze(1)

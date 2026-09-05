@@ -2,12 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from vin_vad.witness_losses import (
-    abnormal_event_background_ranking,
-    temporal_smoothness,
-    topk_bag_probability,
-    witness_objective,
-)
+from vin_vad.witness_losses import temporal_smoothness, topk_bag_probability, witness_objective
 from vin_vad.witness_model import WitnessVAD
 
 
@@ -31,19 +26,6 @@ def test_padding_does_not_enter_topk_or_smoothness() -> None:
     changed[~validity] = 1e6
     torch.testing.assert_close(first_topk, topk_bag_probability(changed, validity))
     torch.testing.assert_close(first_smooth, temporal_smoothness(changed, validity))
-
-
-def test_abnormal_event_background_ranking_rewards_separation() -> None:
-    validity = torch.ones(2, 16, dtype=torch.bool)
-    labels = torch.tensor([1.0, 0.0])
-    separated = torch.zeros(2, 16)
-    separated[0, 0] = 1.0
-    flat = separated.clone()
-    flat[0] = 0.5
-
-    assert abnormal_event_background_ranking(separated, validity, labels, 0.5) < (
-        abnormal_event_background_ranking(flat, validity, labels, 0.5)
-    )
 
 
 def test_every_objective_component_reaches_witness_parameters() -> None:

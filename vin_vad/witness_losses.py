@@ -31,30 +31,6 @@ def ranking_loss(score: torch.Tensor, validity: torch.Tensor, labels: torch.Tens
     return F.softplus(margin - abnormal[:, None] + normal[None, :]).mean()
 
 
-def abnormal_event_background_ranking(
-    score: torch.Tensor,
-    validity: torch.Tensor,
-    labels: torch.Tensor,
-    margin: float,
-) -> torch.Tensor:
-    """Separate latent top-k events from background inside positive bags."""
-    losses = []
-    for row, mask, label in zip(score, validity, labels):
-        if label <= 0.5:
-            continue
-        valid = row[mask]
-        count = min(valid.numel(), int(valid.numel() / 16 + 1))
-        if count >= valid.numel():
-            continue
-        ordered = torch.sort(valid, descending=True).values
-        event = ordered[:count].mean()
-        background = ordered[count:].mean()
-        losses.append(F.softplus(margin - event + background))
-    if not losses:
-        return score.sum() * 0.0
-    return torch.stack(losses).mean()
-
-
 def temporal_smoothness(score: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
     pair_mask = validity[:, 1:] & validity[:, :-1]
     difference = (score[:, 1:] - score[:, :-1]).square()
@@ -87,9 +63,6 @@ def witness_objective(
         role_per_video = per_video_mil(role_evidence, validity, labels)
         role_loss = (residual * role_per_video).sum() / residual.sum().clamp_min(1e-6)
         role_loss = role_loss + rank_weight * ranking_loss(
-            role_evidence, validity, labels, rank_margin
-        )
-        role_loss = role_loss + rank_weight * abnormal_event_background_ranking(
             role_evidence, validity, labels, rank_margin
         )
         role_loss = role_loss + smooth_weight * temporal_smoothness(

@@ -68,9 +68,22 @@ class WitnessExpert(nn.Module):
         normality_role = normality_logits.clamp(-3.0, 3.0)
         context_role = masked_standardize(context_logits, validity).clamp(-3.0, 3.0)
         roles = torch.stack([primary_role, normality_role, context_role], dim=-1)
+        # Keep absolute normality for pointwise functional decisions, but use
+        # within-video deviations to locate the temporal extent of an event.
+        local_normality_role = masked_standardize(normality_logits, validity).clamp(
+            -3.0, 3.0
+        )
+        local_roles = torch.stack(
+            [primary_role, local_normality_role, context_role], dim=-1
+        )
         positive_agreement = torch.relu(roles).amin(dim=-1)
         negative_agreement = torch.relu(-roles).amin(dim=-1)
         logits = roles.mean(dim=-1) + positive_agreement - negative_agreement
+        local_logits = (
+            local_roles.mean(dim=-1)
+            + torch.relu(local_roles).amin(dim=-1)
+            - torch.relu(-local_roles).amin(dim=-1)
+        )
         evidence = torch.sigmoid(logits).masked_fill(~validity, 0.0)
         return {
             **neuron,
@@ -81,6 +94,9 @@ class WitnessExpert(nn.Module):
             "negative_agreement": negative_agreement.masked_fill(~validity, 0.0),
             "evidence_logits": logits.masked_fill(~validity, 0.0),
             "evidence": evidence,
+            "local_evidence": torch.sigmoid(local_logits).masked_fill(
+                ~validity, 0.0
+            ),
         }
 
 
@@ -110,6 +126,7 @@ class WitnessVAD(nn.Module):
             host_score,
             expert["evidence"],
             validity,
+            event_evidence=expert["local_evidence"],
             eta_normal_override=eta_normal_override,
             eta_anomaly_override=eta_anomaly_override,
             positive_consensus=expert["positive_agreement"],

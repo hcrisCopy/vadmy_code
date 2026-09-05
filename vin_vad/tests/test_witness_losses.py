@@ -73,4 +73,4 @@ def test_witness_mil_orients_primary_and_context_roles() -> None:
     )
     losses["witness_mil"].backward()
     assert float(model.expert.temporal.output.weight.grad.abs().sum()) > 0.0
-    assert float(model.expert.context_temporal.output.weight.grad.abs().sum()) > 0.0
+    assert float(model.expert.context_temporal.weight.grad.abs().sum()) > 0.0

@@ -72,28 +72,14 @@ def masked_correlation(first: torch.Tensor, second: torch.Tensor, validity: torc
     return torch.stack(outputs)
 
 
-def video_summary(
-    host_score: torch.Tensor,
-    evidence: torch.Tensor,
-    validity: torch.Tensor,
-    positive_consensus: torch.Tensor | None = None,
-) -> torch.Tensor:
+def video_summary(host_score: torch.Tensor, evidence: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
     if host_score.shape != evidence.shape or validity.shape != host_score.shape:
         raise ValueError("host_score, evidence and validity must share [B,T]")
-    if positive_consensus is not None and positive_consensus.shape != host_score.shape:
-        raise ValueError("positive_consensus must share the [B,T] host-score shape")
     host = masked_summary(host_score, validity)
     neuron = masked_summary(evidence, validity)
     correlation = masked_correlation(host_score, evidence, validity).unsqueeze(1)
     disagreement = masked_mean((host_score - evidence).abs(), validity).unsqueeze(1)
-    # Fused evidence can be large when only one role fires. Authorization needs
-    # an explicit measure of how much of the video all independent roles support.
-    consensus_mass = (
-        torch.zeros_like(correlation)
-        if positive_consensus is None
-        else masked_mean(positive_consensus.clamp_min(0.0), validity).unsqueeze(1)
-    )
-    return torch.cat([host, neuron, correlation, disagreement, consensus_mass], dim=1)
+    return torch.cat([host, neuron, correlation, disagreement], dim=1)
 
 
 def inverse_softplus(value: float) -> float:
@@ -107,7 +93,7 @@ class WitnessRouter(nn.Module):
 
     def __init__(self, eta_normal: float = 1.0, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
         super().__init__()
-        self.video_head = nn.Linear(11, 1)
+        self.video_head = nn.Linear(10, 1)
         self.raw_eta_normal = nn.Parameter(torch.tensor(inverse_softplus(eta_normal)))
         self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
 
@@ -125,12 +111,7 @@ class WitnessRouter(nn.Module):
             raise ValueError("positive_consensus must share the [B,T] host-score shape")
         if negative_consensus is not None and negative_consensus.shape != host_score.shape:
             raise ValueError("negative_consensus must share the [B,T] host-score shape")
-        summary = video_summary(
-            host_score,
-            evidence,
-            validity,
-            positive_consensus=positive_consensus,
-        )
+        summary = video_summary(host_score, evidence, validity)
         video_logit = self.video_head(summary).squeeze(1)
         video_probability = torch.sigmoid(video_logit)
         hard_authorization = (video_probability >= 0.5).to(video_probability.dtype)

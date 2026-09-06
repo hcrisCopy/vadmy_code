@@ -8,6 +8,7 @@ from vin_vad.data import HostScoreTrainingDataset
 from vin_vad.train_witness import (
     balanced_indices,
     comparable_configuration,
+    greedy_credible_witness_cover,
     merge_balanced_batches,
 )
 from vin_vad.select_witness_checkpoint import select_best
@@ -60,6 +61,27 @@ def test_rng_checkpoint_tensors_are_cpu_compatible() -> None:
     state = torch.get_rng_state()
     torch.set_rng_state(state.cpu())
     assert state.dtype == torch.uint8
+
+
+def test_credible_cover_requires_effect_and_complementarity() -> None:
+    abnormal = torch.tensor(
+        [
+            [3.0, 2.9, 0.0, 0.0],
+            [3.0, 2.9, 0.0, 0.0],
+            [0.0, 0.0, 5.0, 1.0],
+            [0.0, 0.0, 5.0, 1.0],
+        ]
+    )
+    selected, marginal = greedy_credible_witness_cover(
+        abnormal,
+        torch.zeros(2, 4),
+        torch.ones(4),
+        torch.arange(4),
+        torch.tensor([1.0, 0.1, 0.01, 1.0]),
+        active=2,
+    )
+    assert selected.tolist() == [0, 3]
+    assert torch.all(marginal > 0)
 
 
 def test_w1_host_dataset_never_opens_hidden_archive(tmp_path) -> None:

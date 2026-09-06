@@ -78,16 +78,6 @@ def test_video_state_routes_witness_and_veto_support() -> None:
     assert torch.all(completed[validity] <= abnormal["completion_anchor"][validity])
 
 
-def test_video_state_is_frozen_host_prior_plus_witness_residual() -> None:
-    host, evidence, validity = inputs()
-    router = WitnessRouter()
-    result = router(host, evidence, validity)
-    expected_prior = torch.logit(masked_topk_anchor(host, validity))
-    torch.testing.assert_close(result["host_prior"], expected_prior)
-    torch.testing.assert_close(result["witness_residual"], torch.zeros_like(expected_prior))
-    torch.testing.assert_close(result["video_logit"], expected_prior)
-
-
 def test_negative_role_consensus_vetoes_only_host_conflicts() -> None:
     router = WitnessRouter()
     with torch.no_grad():

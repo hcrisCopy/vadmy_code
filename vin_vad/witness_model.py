@@ -64,13 +64,7 @@ class WitnessExpert(nn.Module):
             dim=-1,
         )
         context_logits = self.context_temporal(context_input, validity)
-        primary_relative_role = masked_standardize(primary_logits, validity).clamp(-3.0, 3.0)
-        primary_absolute_role = neuron["primary_absolute_logit"].clamp(-3.0, 3.0)
-        # Relative evidence says where the latent event is; its training-normal
-        # calibration says whether that response is exceptional across videos.
-        # They are two measurements of the same weak-label-defined role, not two
-        # detector branches, so the original three-role jury and router stay intact.
-        primary_role = primary_relative_role + primary_absolute_role
+        primary_role = masked_standardize(primary_logits, validity).clamp(-3.0, 3.0)
         normality_role = normality_logits.clamp(-3.0, 3.0)
         context_role = masked_standardize(context_logits, validity).clamp(-3.0, 3.0)
         roles = torch.stack([primary_role, normality_role, context_role], dim=-1)
@@ -81,8 +75,6 @@ class WitnessExpert(nn.Module):
         return {
             **neuron,
             "primary_evidence": torch.sigmoid(primary_logits).masked_fill(~validity, 0.0),
-            "primary_relative_role": primary_relative_role,
-            "primary_absolute_role": primary_absolute_role,
             "normality_evidence": torch.sigmoid(normality_role).masked_fill(~validity, 0.0),
             "context_evidence": torch.sigmoid(context_logits).masked_fill(~validity, 0.0),
             "positive_agreement": positive_agreement.masked_fill(~validity, 0.0),

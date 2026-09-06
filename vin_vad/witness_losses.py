@@ -39,29 +39,6 @@ def temporal_smoothness(score: torch.Tensor, validity: torch.Tensor) -> torch.Te
     return difference[pair_mask].mean()
 
 
-def latent_snippet_ranking_loss(
-    score: torch.Tensor,
-    validity: torch.Tensor,
-    labels: torch.Tensor,
-    margin: float,
-) -> torch.Tensor:
-    """Rank latent positive snippets above every reliable normal-bag snippet."""
-    latent_positive = []
-    reliable_negative = []
-    for curve, mask, label in zip(score, validity, labels):
-        valid = curve[mask]
-        if label > 0.5:
-            count = min(valid.numel(), int(valid.numel() / 16 + 1))
-            latent_positive.append(torch.topk(valid, count).values)
-        else:
-            reliable_negative.append(valid)
-    if not latent_positive or not reliable_negative:
-        return score.sum() * 0.0
-    positive = torch.cat(latent_positive)
-    negative = torch.cat(reliable_negative)
-    return F.softplus(margin - positive[:, None] + negative[None, :]).mean()
-
-
 def witness_objective(
     result: dict[str, torch.Tensor],
     host_score: torch.Tensor,
@@ -94,9 +71,6 @@ def witness_objective(
         role_losses.append(role_loss)
     neuron_loss = torch.stack(role_losses).mean()
     final_loss = per_video_mil(corrected, validity, labels).mean()
-    final_loss = final_loss + rank_weight * latent_snippet_ranking_loss(
-        corrected, validity, labels, rank_margin
-    )
     normal_mask = labels <= 0.5
     if normal_mask.any():
         normal_evidence = torch.stack(

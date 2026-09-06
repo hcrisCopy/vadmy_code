@@ -36,9 +36,13 @@ def masked_temporal_mean(
 class WitnessExpert(nn.Module):
     """Neuron-only path: its API intentionally has no host-score argument."""
 
-    def __init__(self, active: int = 32, temporal_width: int = 64) -> None:
+    def __init__(
+        self, active: int = 32, temporal_width: int = 64, normal_contexts: int = 4
+    ) -> None:
         super().__init__()
-        self.neurons = SignedTopKWitnessNeurons(active=active)
+        self.neurons = SignedTopKWitnessNeurons(
+            active=active, contexts=normal_contexts
+        )
         self.temporal = WitnessTemporalReadout(width=temporal_width)
         self.context_temporal = WitnessTemporalReadout(input_channels=24, width=temporal_width)
 
@@ -91,9 +95,14 @@ class WitnessVAD(nn.Module):
         temporal_width: int = 64,
         eta_normal: float = 1.0,
         eta_anomaly: float = 0.25,
+        normal_contexts: int = 4,
     ) -> None:
         super().__init__()
-        self.expert = WitnessExpert(active=active, temporal_width=temporal_width)
+        self.expert = WitnessExpert(
+            active=active,
+            temporal_width=temporal_width,
+            normal_contexts=normal_contexts,
+        )
         self.router = WitnessRouter(eta_normal=eta_normal, eta_anomaly=eta_anomaly)
 
     def forward(
@@ -205,9 +214,19 @@ class NeuronOnlyRouter(nn.Module):
 
 
 class NeuronOnlyWitnessVAD(nn.Module):
-    def __init__(self, active: int = 32, temporal_width: int = 64, eta_anomaly: float = 0.25) -> None:
+    def __init__(
+        self,
+        active: int = 32,
+        temporal_width: int = 64,
+        eta_anomaly: float = 0.25,
+        normal_contexts: int = 4,
+    ) -> None:
         super().__init__()
-        self.expert = WitnessExpert(active=active, temporal_width=temporal_width)
+        self.expert = WitnessExpert(
+            active=active,
+            temporal_width=temporal_width,
+            normal_contexts=normal_contexts,
+        )
         self.router = NeuronOnlyRouter(eta_anomaly=eta_anomaly)
 
     def forward(
@@ -235,12 +254,16 @@ def build_witness_variant(
     temporal_width: int = 64,
     eta_normal: float = 1.0,
     eta_anomaly: float = 0.25,
+    normal_contexts: int = 4,
 ) -> nn.Module:
     if variant == "w1":
         return HostVideoOnlyVAD(eta_normal=eta_normal)
     if variant == "w2":
         return NeuronOnlyWitnessVAD(
-            active=active, temporal_width=temporal_width, eta_anomaly=eta_anomaly
+            active=active,
+            temporal_width=temporal_width,
+            eta_anomaly=eta_anomaly,
+            normal_contexts=normal_contexts,
         )
     if variant == "w6":
         return WitnessVAD(
@@ -248,5 +271,6 @@ def build_witness_variant(
             temporal_width=temporal_width,
             eta_normal=eta_normal,
             eta_anomaly=eta_anomaly,
+            normal_contexts=normal_contexts,
         )
     raise ValueError("variant must be w1, w2 or w6")

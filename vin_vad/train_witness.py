@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+from sklearn.cluster import KMeans
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
@@ -30,21 +31,77 @@ def fit_role_disentangled_reference(
     dataset: AuditorTrainingDataset,
     normal_indices: list[int],
     device: torch.device,
-) -> dict[str, int]:
+    seed: int,
+) -> dict[str, object]:
     """Fit role definitions and their absolute normal calibration on training bags."""
     neurons = model.expert.neurons
     total = torch.zeros(neurons.layers, neurons.dimensions, dtype=torch.float64, device=device)
     square = torch.zeros_like(total)
     snippet_count = 0
+    normal_descriptors = []
     for index in tqdm(normal_indices, desc="fit normal neuron moments", unit="video"):
         hidden = dataset[index]["hidden"].to(device, non_blocking=True)
         normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
         total += normalized.sum(dim=0)
         square += normalized.square().sum(dim=0)
         snippet_count += len(normalized)
+        normal_descriptors.append(normalized[:, -1].median(dim=0).values.float().cpu())
     mean = total / max(snippet_count, 1)
     variance = (square / max(snippet_count, 1) - mean.square()).clamp_min(1e-4)
     standard_deviation = variance.sqrt()
+
+    descriptors = torch.stack(normal_descriptors)
+    if neurons.contexts > len(descriptors):
+        raise ValueError("normal contexts cannot exceed normal training videos")
+    clusterer = KMeans(
+        n_clusters=neurons.contexts,
+        random_state=seed,
+        n_init=10,
+    )
+    normal_context_index = torch.from_numpy(
+        clusterer.fit_predict(descriptors.numpy())
+    ).long()
+    context_centers = torch.from_numpy(clusterer.cluster_centers_).to(
+        device=device, dtype=torch.float64
+    )
+    context_total = torch.zeros(
+        neurons.contexts,
+        neurons.layers,
+        neurons.dimensions,
+        dtype=torch.float64,
+        device=device,
+    )
+    context_square = torch.zeros_like(context_total)
+    context_snippets = torch.zeros(
+        neurons.contexts, dtype=torch.float64, device=device
+    )
+    for index, context_index in tqdm(
+        zip(normal_indices, normal_context_index.tolist()),
+        total=len(normal_indices),
+        desc="fit context-matched normal moments",
+        unit="video",
+    ):
+        hidden = dataset[index]["hidden"].to(device, non_blocking=True)
+        normalized = torch.nn.functional.layer_norm(
+            hidden, (neurons.dimensions,)
+        ).double()
+        context_total[context_index] += normalized.sum(dim=0)
+        context_square[context_index] += normalized.square().sum(dim=0)
+        context_snippets[context_index] += len(normalized)
+    context_mean = context_total / context_snippets[:, None, None].clamp_min(1.0)
+    context_variance = (
+        context_square / context_snippets[:, None, None].clamp_min(1.0)
+        - context_mean.square()
+    ).clamp_min(1e-4)
+    context_std = context_variance.sqrt()
+
+    def matched_deviation(normalized: torch.Tensor) -> torch.Tensor:
+        descriptor = normalized[:, -1].median(dim=0).values
+        distance = (descriptor.unsqueeze(0) - context_centers).square().mean(dim=-1)
+        context_index = int(distance.argmin())
+        return (
+            normalized - context_mean[context_index]
+        ) / context_std[context_index]
 
     class_sum = torch.zeros(
         2, 2, neurons.layers, neurons.dimensions, dtype=torch.float64, device=device
@@ -58,7 +115,7 @@ def fit_role_disentangled_reference(
         item = dataset[index]
         hidden = item["hidden"].to(device, non_blocking=True)
         normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
-        deviation = (normalized - mean) / standard_deviation
+        deviation = matched_deviation(normalized)
         tail_count = min(len(deviation), max(1, len(deviation) // 16 + 1))
         summary = torch.stack(
             [
@@ -116,7 +173,7 @@ def fit_role_disentangled_reference(
     for index in tqdm(normal_indices, desc="calibrate normality score", unit="video"):
         hidden = dataset[index]["hidden"].to(device, non_blocking=True)
         normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
-        deviation = (normalized - mean) / standard_deviation
+        deviation = matched_deviation(normalized)
         directional = torch.relu(deviation * normal_direction)
         layer_score = (directional * role_weight).sum(dim=-1) / role_weight.sum(
             dim=-1
@@ -135,6 +192,11 @@ def fit_role_disentangled_reference(
         score_threshold.float(),
         score_std.float(),
     )
+    neurons.set_normal_context_reference(
+        context_centers.float(),
+        context_mean.float(),
+        context_std.float(),
+    )
     neurons.set_primary_role(
         primary_mask.float(),
         primary_direction.float(),
@@ -144,6 +206,10 @@ def fit_role_disentangled_reference(
         "normal_reference_snippets": snippet_count,
         "normal_role_neurons_per_layer": active_per_layer,
         "primary_role_neurons_per_layer": active_per_layer,
+        "normal_contexts_fit": neurons.contexts,
+        "normal_context_video_counts": torch.bincount(
+            normal_context_index, minlength=neurons.contexts
+        ).tolist(),
     }
 
 
@@ -190,9 +256,12 @@ def comparable_configuration(config: dict[str, object]) -> dict[str, object]:
         "normal_reference_snippets",
         "normal_role_neurons_per_layer",
         "primary_role_neurons_per_layer",
+        "normal_contexts_fit",
+        "normal_context_video_counts",
     }
     comparable = {key: value for key, value in config.items() if key not in derived}
     comparable.setdefault("variant", "w6")
+    comparable.setdefault("normal_contexts", 4)
     comparable.setdefault("num_workers", 0)
     comparable.setdefault("cache_training_data", False)
     comparable.setdefault("retain_epoch_checkpoints", False)
@@ -297,6 +366,7 @@ def main() -> None:
     parser.add_argument("--num-workers", type=int, required=True)
     parser.add_argument("--cache-training-data", action="store_true")
     parser.add_argument("--active-neurons", type=int, required=True)
+    parser.add_argument("--normal-contexts", type=int, default=4)
     parser.add_argument("--temporal-width", type=int, required=True)
     parser.add_argument("--eta-normal", type=float, required=True)
     parser.add_argument("--eta-anomaly", type=float, required=True)
@@ -386,6 +456,7 @@ def main() -> None:
         temporal_width=args.temporal_width,
         eta_normal=args.eta_normal,
         eta_anomaly=args.eta_anomaly,
+        normal_contexts=args.normal_contexts,
     ).to(device)
     if (
         args.variant == "w6"
@@ -393,7 +464,9 @@ def main() -> None:
         and isinstance(dataset, AuditorTrainingDataset)
     ):
         configuration.update(
-            fit_role_disentangled_reference(model, dataset, normal_indices, device)
+            fit_role_disentangled_reference(
+                model, dataset, normal_indices, device, args.seed
+            )
         )
         config_path.write_text(json.dumps(configuration, indent=2), encoding="utf-8")
     optimizer = torch.optim.AdamW(

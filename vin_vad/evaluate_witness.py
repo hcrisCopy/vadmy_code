@@ -39,8 +39,22 @@ def build_from_checkpoint(
         temporal_width=int(config["temporal_width"]),
         eta_normal=float(config["eta_normal"]),
         eta_anomaly=float(config["eta_anomaly"]),
+        normal_contexts=int(config.get("normal_contexts", 4)),
     )
-    model.load_state_dict(checkpoint["model"])
+    incompatible = model.load_state_dict(checkpoint["model"], strict=False)
+    allowed_context_buffers = {
+        "expert.neurons.normal_context_centers",
+        "expert.neurons.normal_context_mean",
+        "expert.neurons.normal_context_std",
+        "expert.neurons.normal_context_ready",
+    }
+    unexpected_missing = set(incompatible.missing_keys) - allowed_context_buffers
+    if unexpected_missing or incompatible.unexpected_keys:
+        raise RuntimeError(
+            "checkpoint architecture mismatch: "
+            f"missing={sorted(unexpected_missing)}, "
+            f"unexpected={sorted(incompatible.unexpected_keys)}"
+        )
     return model.to(device).eval(), config
 
 

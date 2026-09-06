@@ -81,6 +81,7 @@ for dataset in $DATASETS; do
       --num-workers 4 \
       --cache-training-data \
       --active-neurons 32 \
+      --normal-contexts 4 \
       --temporal-width 64 \
       --eta-normal 1.0 \
       --eta-anomaly 0.25 \

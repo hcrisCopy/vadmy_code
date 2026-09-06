@@ -13,13 +13,22 @@ class SignedTopKWitnessNeurons(nn.Module):
     its soft surrogate carries gradients to the gate logits.
     """
 
-    def __init__(self, layers: int = 12, dimensions: int = 768, active: int = 32) -> None:
+    def __init__(
+        self,
+        layers: int = 12,
+        dimensions: int = 768,
+        active: int = 32,
+        contexts: int = 4,
+    ) -> None:
         super().__init__()
         if not 0 < active <= layers * dimensions:
             raise ValueError("active must be in [1, layers * dimensions]")
         self.layers = int(layers)
         self.dimensions = int(dimensions)
         self.active = int(active)
+        if contexts < 1:
+            raise ValueError("contexts must be positive")
+        self.contexts = int(contexts)
         self.normalization = nn.LayerNorm(dimensions, elementwise_affine=False)
         self.register_buffer("normal_mean", torch.zeros(layers, dimensions))
         self.register_buffer("normal_std", torch.ones(layers, dimensions))
@@ -29,11 +38,64 @@ class SignedTopKWitnessNeurons(nn.Module):
         self.register_buffer("normal_score_threshold", torch.tensor(0.0))
         self.register_buffer("normal_score_std", torch.tensor(1.0))
         self.register_buffer("normal_role_ready", torch.tensor(False))
+        self.register_buffer(
+            "normal_context_centers", torch.zeros(contexts, dimensions)
+        )
+        self.register_buffer(
+            "normal_context_mean", torch.zeros(contexts, layers, dimensions)
+        )
+        self.register_buffer(
+            "normal_context_std", torch.ones(contexts, layers, dimensions)
+        )
+        self.register_buffer("normal_context_ready", torch.tensor(False))
         self.gate_logits = nn.Parameter(torch.empty(layers, dimensions))
         self.signed_weights = nn.Parameter(torch.empty(layers, dimensions))
         self.layer_logits = nn.Parameter(torch.zeros(layers))
         nn.init.normal_(self.gate_logits, mean=0.0, std=1e-3)
         nn.init.normal_(self.signed_weights, mean=0.0, std=0.02)
+
+    @torch.no_grad()
+    def set_normal_context_reference(
+        self,
+        centers: torch.Tensor,
+        mean: torch.Tensor,
+        standard_deviation: torch.Tensor,
+    ) -> None:
+        if centers.shape != self.normal_context_centers.shape:
+            raise ValueError("centers must have shape [contexts, dimensions]")
+        if mean.shape != self.normal_context_mean.shape:
+            raise ValueError("mean must have shape [contexts, layers, dimensions]")
+        if standard_deviation.shape != self.normal_context_std.shape:
+            raise ValueError(
+                "standard_deviation must have shape [contexts, layers, dimensions]"
+            )
+        self.normal_context_centers.copy_(centers.to(self.normal_context_centers))
+        self.normal_context_mean.copy_(mean.to(self.normal_context_mean))
+        self.normal_context_std.copy_(
+            standard_deviation.to(self.normal_context_std).clamp_min(1e-4)
+        )
+        self.normal_context_ready.fill_(True)
+
+    def contextual_deviation(
+        self, normalized: torch.Tensor, validity: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compare each video with its nearest training-normal context."""
+        descriptors = torch.stack(
+            [
+                row[mask, -1].median(dim=0).values
+                for row, mask in zip(normalized, validity)
+            ]
+        )
+        distance = (
+            descriptors.unsqueeze(1) - self.normal_context_centers.unsqueeze(0)
+        ).square().mean(dim=-1)
+        context_index = distance.argmin(dim=1)
+        mean = self.normal_context_mean[context_index]
+        standard_deviation = self.normal_context_std[context_index]
+        deviation = (
+            normalized - mean.unsqueeze(1)
+        ) / standard_deviation.unsqueeze(1)
+        return deviation, context_index
 
     @torch.no_grad()
     def set_normal_role(
@@ -111,12 +173,24 @@ class SignedTopKWitnessNeurons(nn.Module):
             raise ValueError("validity must be a boolean [B,T] tensor")
         normalized = self.normalization(hidden)
         if bool(self.normal_role_ready):
-            deviation = (
-                normalized - self.normal_mean.view(1, 1, self.layers, self.dimensions)
-            ) / self.normal_std.view(1, 1, self.layers, self.dimensions)
+            if bool(self.normal_context_ready):
+                deviation, context_index = self.contextual_deviation(
+                    normalized, validity
+                )
+            else:
+                deviation = (
+                    normalized
+                    - self.normal_mean.view(1, 1, self.layers, self.dimensions)
+                ) / self.normal_std.view(1, 1, self.layers, self.dimensions)
+                context_index = torch.full(
+                    (hidden.shape[0],), -1, dtype=torch.long, device=hidden.device
+                )
             primary_input = deviation
         else:
             deviation = None
+            context_index = torch.full(
+                (hidden.shape[0],), -1, dtype=torch.long, device=hidden.device
+            )
             primary_input = normalized
         gate = self.gates(neuron_keep_mask)
         coordinate_weights = gate * self.signed_weights
@@ -147,6 +221,7 @@ class SignedTopKWitnessNeurons(nn.Module):
             "gates": gate,
             "coordinate_weights": coordinate_weights,
             "layer_probability": layer_probability,
+            "normal_context_index": context_index,
         }
 
     def active_counts(self) -> torch.Tensor:

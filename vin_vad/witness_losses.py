@@ -57,7 +57,7 @@ def witness_objective(
     corrected = result["corrected_score"]
     video_loss = F.binary_cross_entropy(result["video_probability"], labels.to(evidence.dtype))
     residual = (labels - topk_bag_probability(host_score, validity)).abs().detach()
-    role_curves = [evidence, result["primary_evidence"], result["context_evidence"]]
+    role_curves = [evidence, result["signed_evidence"], result["context_evidence"]]
     role_losses = []
     for role_evidence in role_curves:
         role_per_video = per_video_mil(role_evidence, validity, labels)

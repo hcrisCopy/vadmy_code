@@ -4,6 +4,7 @@ import torch
 
 from vin_vad.witness_model import WitnessExpert
 from vin_vad.witness_neurons import SignedTopKWitnessNeurons
+from vin_vad.witness_router import masked_standardize
 from vin_vad.witness_temporal import WitnessTemporalReadout
 
 
@@ -68,7 +69,7 @@ def test_temporal_padding_never_changes_valid_output() -> None:
     assert torch.equal(second[~validity], torch.zeros_like(second[~validity]))
 
 
-def test_role_jury_has_distinct_auditable_views() -> None:
+def test_signed_witness_chain_has_local_context_and_absolute_views() -> None:
     hidden, validity = sample_hidden()
     expert = WitnessExpert()
     mask = torch.zeros(12, 768)
@@ -82,30 +83,34 @@ def test_role_jury_has_distinct_auditable_views() -> None:
         torch.tensor(0.4),
         torch.tensor(0.2),
     )
-    primary_mask = torch.zeros(12, 768)
-    primary_mask[:, 32:64] = 1.0
-    expert.neurons.set_primary_role(
-        primary_mask,
-        -torch.ones(12, 768),
-        primary_mask,
+    torch.testing.assert_close(
+        (expert.neurons.gates().detach() > 0.5).to(mask), mask
     )
     torch.testing.assert_close(
-        (expert.neurons.gates().detach() > 0.5).to(primary_mask), primary_mask
-    )
-    torch.testing.assert_close(
-        expert.neurons.signed_weights.detach(), -primary_mask
+        expert.neurons.signed_weights.detach(), mask
     )
     torch.testing.assert_close(expert.neurons.normal_role_mask, mask)
     result = expert(hidden, validity)
     for name in (
-        "primary_evidence",
-        "normality_evidence",
+        "signed_evidence",
         "context_evidence",
-        "positive_agreement",
-        "negative_agreement",
+        "absolute_evidence_logits",
     ):
         assert result[name].shape == validity.shape
         assert torch.equal(result[name][~validity], torch.zeros_like(result[name][~validity]))
+    expected = 0.5 * (
+        torch.logit(result["signed_evidence"].clamp(1e-6, 1.0 - 1e-6))
+        + masked_standardize(
+            torch.logit(result["context_evidence"].clamp(1e-6, 1.0 - 1e-6)),
+            validity,
+        ).clamp(-3.0, 3.0)
+    )
+    torch.testing.assert_close(
+        result["evidence_logits"][validity],
+        expected[validity],
+        atol=3e-5,
+        rtol=1e-4,
+    )
 
 
 def test_each_video_uses_its_nearest_training_normal_context() -> None:

@@ -58,13 +58,6 @@ if [[ -f "$metric" ]] && method_matches "$recorded_commit"; then
   exit 0
 fi
 
-if [[ -n "$config" && -f "$config" ]] && method_matches "$recorded_commit"; then
-  echo "resume matching interrupted formal run from $recorded_commit"
-  export WITNESS_DATASETS="$datasets"
-  bash run_instructions/run_witness_vad_f3_2_dsanet.sh --resume
-  exit 0
-fi
-
 # The archived controller log is the authoritative receipt for the completed
 # a8b43cd XD run.  It prevents a documentation-only commit from retraining the
 # exact same model after the controller record is archived.
@@ -75,6 +68,13 @@ if [[ "$datasets" == "xd" && -f "$receipt" ]]; then
     read_json_key "$receipt" target_margin_pp
     exit 0
   fi
+fi
+
+if [[ -n "$config" && -f "$config" ]] && method_matches "$recorded_commit"; then
+  echo "resume matching interrupted formal run from $recorded_commit"
+  export WITNESS_DATASETS="$datasets"
+  bash run_instructions/run_witness_vad_f3_2_dsanet.sh --resume
+  exit 0
 fi
 
 # Never delete a previous trial.  Move even an interrupted directory into the

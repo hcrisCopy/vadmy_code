@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import math
 import random
 import subprocess
 import time
@@ -168,19 +167,30 @@ def fit_role_disentangled_reference(
     normal_mask, normal_direction, normal_weight = role_definition(
         class_effect(class_sum, class_square, class_count)
     )
-    role_weight = normal_mask * normal_direction * normal_weight
+    # A bag-level host error says which videos are difficult, not which snippets
+    # are anomalous.  Using it to select coordinates leaked that coarse notion of
+    # difficulty into the local witness role.  Both the fixed normality probe and
+    # its trainable temporal readout therefore start from the same auditable
+    # training-only counterfactual neurons; the readout, not the host, learns how
+    # their signed deviations evolve through time.
+    primary_mask = normal_mask.clone()
+    primary_direction = normal_direction.clone()
+    primary_weight = normal_weight.clone()
+
+    role_weight = normal_mask * normal_weight
     normal_scores = []
-    for index in tqdm(normal_indices, desc="calibrate signed witness score", unit="video"):
+    for index in tqdm(normal_indices, desc="calibrate normality score", unit="video"):
         hidden = dataset[index]["hidden"].to(device, non_blocking=True)
         normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
         deviation = matched_deviation(normalized)
-        layer_score = (deviation * role_weight).sum(dim=-1) / math.sqrt(
-            active_per_layer
-        )
+        directional = torch.relu(deviation * normal_direction)
+        layer_score = (directional * role_weight).sum(dim=-1) / role_weight.sum(
+            dim=-1
+        ).clamp_min(1e-6)
         score = layer_score.mean(dim=-1)
         normal_scores.append(score)
     normal_score = torch.cat(normal_scores)
-    score_mean = normal_score.mean()
+    score_threshold = torch.quantile(normal_score, 0.95)
     score_std = normal_score.std(unbiased=False).clamp_min(1e-2)
     neurons.set_normal_role(
         mean.float(),
@@ -188,7 +198,7 @@ def fit_role_disentangled_reference(
         normal_mask.float(),
         normal_direction.float(),
         normal_weight.float(),
-        score_mean.float(),
+        score_threshold.float(),
         score_std.float(),
     )
     neurons.set_normal_context_reference(
@@ -196,11 +206,15 @@ def fit_role_disentangled_reference(
         context_mean.float(),
         context_std.float(),
     )
+    neurons.set_primary_role(
+        primary_mask.float(),
+        primary_direction.float(),
+        primary_weight.float(),
+    )
     return {
         "normal_reference_snippets": snippet_count,
         "normal_role_neurons_per_layer": active_per_layer,
-        "signed_score_mean": float(score_mean),
-        "signed_score_std": float(score_std),
+        "primary_role_neurons_per_layer": active_per_layer,
         "normal_contexts_fit": neurons.contexts,
         "normal_context_video_counts": torch.bincount(
             normal_context_index, minlength=neurons.contexts
@@ -251,8 +265,6 @@ def comparable_configuration(config: dict[str, object]) -> dict[str, object]:
         "normal_reference_snippets",
         "normal_role_neurons_per_layer",
         "primary_role_neurons_per_layer",
-        "signed_score_mean",
-        "signed_score_std",
         "normal_contexts_fit",
         "normal_context_video_counts",
     }

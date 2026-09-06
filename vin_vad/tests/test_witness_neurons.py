@@ -4,7 +4,6 @@ import torch
 
 from vin_vad.witness_model import WitnessExpert
 from vin_vad.witness_neurons import SignedTopKWitnessNeurons
-from vin_vad.witness_router import masked_standardize
 from vin_vad.witness_temporal import WitnessTemporalReadout
 
 
@@ -17,33 +16,16 @@ def sample_hidden() -> tuple[torch.Tensor, torch.Tensor]:
     return hidden, validity
 
 
-def set_simple_role(module: SignedTopKWitnessNeurons) -> torch.Tensor:
-    mask = torch.zeros(module.layers, module.dimensions)
-    mask[:, : module.active] = 1.0
-    direction = torch.ones_like(mask)
-    direction[:, 1 : module.active : 2] = -1.0
-    module.set_normal_role(
-        torch.zeros_like(mask),
-        torch.ones_like(mask),
-        mask,
-        direction,
-        mask,
-        torch.tensor(0.0),
-        torch.tensor(1.0),
-    )
-    return mask
-
-
-def test_training_defined_signed_neurons_are_fixed_per_layer() -> None:
+def test_exactly_32_signed_neurons_per_layer_and_gradients() -> None:
     hidden, validity = sample_hidden()
     module = SignedTopKWitnessNeurons(active=32)
-    set_simple_role(module)
     result = module(hidden, validity)
     assert torch.equal(module.active_counts(), torch.full((12,), 32))
     assert torch.any(result["coordinate_weights"] < 0)
     assert torch.any(result["coordinate_weights"] > 0)
-    assert not module.gate_logits.requires_grad
-    assert not module.signed_weights.requires_grad
+    result["layer_evidence"].square().mean().backward()
+    assert float(module.gate_logits.grad.abs().sum()) > 0.0
+    assert float(module.signed_weights.grad.abs().sum()) > 0.0
 
 
 def test_neuron_only_api_and_output_do_not_depend_on_host() -> None:
@@ -58,7 +40,6 @@ def test_neuron_only_api_and_output_do_not_depend_on_host() -> None:
 def test_tag_deletion_changes_only_requested_coordinate_support() -> None:
     hidden, validity = sample_hidden()
     module = SignedTopKWitnessNeurons(active=32)
-    set_simple_role(module)
     original = module(hidden, validity)
     selected = torch.nonzero(original["gates"].detach() > 0.5, as_tuple=False)
     layer, dimension = (int(value) for value in selected[0])
@@ -87,7 +68,7 @@ def test_temporal_padding_never_changes_valid_output() -> None:
     assert torch.equal(second[~validity], torch.zeros_like(second[~validity]))
 
 
-def test_signed_witness_chain_has_local_context_and_absolute_views() -> None:
+def test_role_jury_has_distinct_auditable_views() -> None:
     hidden, validity = sample_hidden()
     expert = WitnessExpert()
     mask = torch.zeros(12, 768)
@@ -101,34 +82,30 @@ def test_signed_witness_chain_has_local_context_and_absolute_views() -> None:
         torch.tensor(0.4),
         torch.tensor(0.2),
     )
-    torch.testing.assert_close(
-        (expert.neurons.gates().detach() > 0.5).to(mask), mask
+    primary_mask = torch.zeros(12, 768)
+    primary_mask[:, 32:64] = 1.0
+    expert.neurons.set_primary_role(
+        primary_mask,
+        -torch.ones(12, 768),
+        primary_mask,
     )
-    result = expert(hidden, validity)
     torch.testing.assert_close(
-        result["coordinate_weights"], mask
+        (expert.neurons.gates().detach() > 0.5).to(primary_mask), primary_mask
+    )
+    torch.testing.assert_close(
+        expert.neurons.signed_weights.detach(), -primary_mask
     )
     torch.testing.assert_close(expert.neurons.normal_role_mask, mask)
+    result = expert(hidden, validity)
     for name in (
-        "signed_evidence",
+        "primary_evidence",
+        "normality_evidence",
         "context_evidence",
-        "absolute_evidence_logits",
+        "positive_agreement",
+        "negative_agreement",
     ):
         assert result[name].shape == validity.shape
         assert torch.equal(result[name][~validity], torch.zeros_like(result[name][~validity]))
-    expected = 0.5 * (
-        torch.logit(result["signed_evidence"].clamp(1e-6, 1.0 - 1e-6))
-        + masked_standardize(
-            torch.logit(result["context_evidence"].clamp(1e-6, 1.0 - 1e-6)),
-            validity,
-        ).clamp(-3.0, 3.0)
-    )
-    torch.testing.assert_close(
-        result["evidence_logits"][validity],
-        expected[validity],
-        atol=3e-5,
-        rtol=1e-4,
-    )
 
 
 def test_each_video_uses_its_nearest_training_normal_context() -> None:

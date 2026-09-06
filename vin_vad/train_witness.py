@@ -95,16 +95,13 @@ def fit_role_disentangled_reference(
     ).clamp_min(1e-4)
     context_std = context_variance.sqrt()
 
-    def matched_deviation(
-        normalized: torch.Tensor,
-    ) -> tuple[torch.Tensor, int]:
+    def matched_deviation(normalized: torch.Tensor) -> torch.Tensor:
         descriptor = normalized[:, -1].median(dim=0).values
         distance = (descriptor.unsqueeze(0) - context_centers).square().mean(dim=-1)
         context_index = int(distance.argmin())
         return (
-            (normalized - context_mean[context_index]) / context_std[context_index],
-            context_index,
-        )
+            normalized - context_mean[context_index]
+        ) / context_std[context_index]
 
     class_sum = torch.zeros(
         2, 2, neurons.layers, neurons.dimensions, dtype=torch.float64, device=device
@@ -118,7 +115,7 @@ def fit_role_disentangled_reference(
         item = dataset[index]
         hidden = item["hidden"].to(device, non_blocking=True)
         normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
-        deviation, _ = matched_deviation(normalized)
+        deviation = matched_deviation(normalized)
         tail_count = min(len(deviation), max(1, len(deviation) // 16 + 1))
         summary = torch.stack(
             [
@@ -173,32 +170,19 @@ def fit_role_disentangled_reference(
 
     role_weight = normal_mask * normal_weight
     normal_scores = []
-    normal_context_scores: list[list[torch.Tensor]] = [
-        [] for _ in range(neurons.contexts)
-    ]
     for index in tqdm(normal_indices, desc="calibrate normality score", unit="video"):
         hidden = dataset[index]["hidden"].to(device, non_blocking=True)
         normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
-        deviation, context_index = matched_deviation(normalized)
+        deviation = matched_deviation(normalized)
         directional = torch.relu(deviation * normal_direction)
         layer_score = (directional * role_weight).sum(dim=-1) / role_weight.sum(
             dim=-1
         ).clamp_min(1e-6)
         score = layer_score.mean(dim=-1)
         normal_scores.append(score)
-        normal_context_scores[context_index].append(score)
     normal_score = torch.cat(normal_scores)
     score_threshold = torch.quantile(normal_score, 0.95)
     score_std = normal_score.std(unbiased=False).clamp_min(1e-2)
-    context_score_threshold = torch.stack(
-        [torch.quantile(torch.cat(scores), 0.95) for scores in normal_context_scores]
-    )
-    context_score_std = torch.stack(
-        [
-            torch.cat(scores).std(unbiased=False).clamp_min(1e-2)
-            for scores in normal_context_scores
-        ]
-    )
     neurons.set_normal_role(
         mean.float(),
         standard_deviation.float(),
@@ -212,9 +196,6 @@ def fit_role_disentangled_reference(
         context_centers.float(),
         context_mean.float(),
         context_std.float(),
-    )
-    neurons.set_normal_context_calibration(
-        context_score_threshold.float(), context_score_std.float()
     )
     neurons.set_primary_role(
         primary_mask.float(),

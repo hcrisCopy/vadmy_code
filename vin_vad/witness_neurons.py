@@ -37,6 +37,13 @@ class SignedTopKWitnessNeurons(nn.Module):
         self.register_buffer("normal_role_weight", torch.zeros(layers, dimensions))
         self.register_buffer("normal_score_threshold", torch.tensor(0.0))
         self.register_buffer("normal_score_std", torch.tensor(1.0))
+        self.register_buffer(
+            "normal_context_score_threshold", torch.zeros(contexts)
+        )
+        self.register_buffer("normal_context_score_std", torch.ones(contexts))
+        self.register_buffer(
+            "normal_context_calibration_ready", torch.tensor(False)
+        )
         self.register_buffer("normal_role_ready", torch.tensor(False))
         self.register_buffer(
             "normal_context_centers", torch.zeros(contexts, dimensions)
@@ -75,6 +82,22 @@ class SignedTopKWitnessNeurons(nn.Module):
             standard_deviation.to(self.normal_context_std).clamp_min(1e-4)
         )
         self.normal_context_ready.fill_(True)
+
+    @torch.no_grad()
+    def set_normal_context_calibration(
+        self, score_threshold: torch.Tensor, score_std: torch.Tensor
+    ) -> None:
+        """Calibrate normality inside each matched normal regime."""
+        expected = (self.contexts,)
+        if score_threshold.shape != expected or score_std.shape != expected:
+            raise ValueError("context calibration must have shape [contexts]")
+        self.normal_context_score_threshold.copy_(
+            score_threshold.to(self.normal_context_score_threshold)
+        )
+        self.normal_context_score_std.copy_(
+            score_std.to(self.normal_context_score_std).clamp_min(1e-4)
+        )
+        self.normal_context_calibration_ready.fill_(True)
 
     def contextual_deviation(
         self, normalized: torch.Tensor, validity: torch.Tensor

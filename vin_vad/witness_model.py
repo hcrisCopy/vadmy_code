@@ -56,9 +56,18 @@ class WitnessExpert(nn.Module):
         primary_logits = self.temporal(neuron["temporal_input"], validity)
         normality_layers = neuron["normality_layer_evidence"]
         normality_raw = normality_layers.mean(dim=-1)
-        normality_logits = (
-            normality_raw - self.neurons.normal_score_threshold
-        ) / self.neurons.normal_score_std
+        if bool(self.neurons.normal_context_calibration_ready):
+            context_index = neuron["normal_context_index"]
+            normality_threshold = self.neurons.normal_context_score_threshold[
+                context_index
+            ].unsqueeze(1)
+            normality_std = self.neurons.normal_context_score_std[
+                context_index
+            ].unsqueeze(1)
+        else:
+            normality_threshold = self.neurons.normal_score_threshold
+            normality_std = self.neurons.normal_score_std
+        normality_logits = (normality_raw - normality_threshold) / normality_std
         normality_logits = normality_logits.masked_fill(~validity, 0.0)
         context_input = torch.cat(
             [

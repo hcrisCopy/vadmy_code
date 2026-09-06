@@ -96,7 +96,6 @@ class WitnessRouter(nn.Module):
         self.video_head = nn.Linear(10, 1)
         self.raw_eta_normal = nn.Parameter(torch.tensor(inverse_softplus(eta_normal)))
         self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
-        self.raw_absolute_mix = nn.Parameter(torch.tensor(inverse_softplus(0.1)))
 
     def forward(
         self,
@@ -105,15 +104,13 @@ class WitnessRouter(nn.Module):
         validity: torch.Tensor,
         eta_normal_override: float | None = None,
         eta_anomaly_override: float | None = None,
-        absolute_evidence_logits: torch.Tensor | None = None,
+        positive_consensus: torch.Tensor | None = None,
+        negative_consensus: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
-        if (
-            absolute_evidence_logits is not None
-            and absolute_evidence_logits.shape != host_score.shape
-        ):
-            raise ValueError(
-                "absolute_evidence_logits must share the [B,T] host-score shape"
-            )
+        if positive_consensus is not None and positive_consensus.shape != host_score.shape:
+            raise ValueError("positive_consensus must share the [B,T] host-score shape")
+        if negative_consensus is not None and negative_consensus.shape != host_score.shape:
+            raise ValueError("negative_consensus must share the [B,T] host-score shape")
         summary = video_summary(host_score, evidence, validity)
         video_logit = self.video_head(summary).squeeze(1)
         video_probability = torch.sigmoid(video_logit)
@@ -135,26 +132,37 @@ class WitnessRouter(nn.Module):
             else host_score.new_tensor(eta_anomaly_override)
         )
         delta_normal_video = eta_normal * torch.minimum(video_logit, torch.zeros_like(video_logit))
-        delta_normal = delta_normal_video.unsqueeze(1).expand_as(host_score)
+        # A video-level normal decision is weak supervision, so it cannot safely
+        # erase a location where every independent witness role agrees on an
+        # anomaly.  Positive consensus only protects the frozen host here; it
+        # does not create anomaly score by itself.
+        if positive_consensus is None:
+            positive_normal_protection = torch.zeros_like(host_score)
+        else:
+            bounded_positive = positive_consensus.clamp(0.0, 1.0)
+            hard_positive = (bounded_positive > 0.0).to(bounded_positive.dtype)
+            positive_normal_protection = (
+                hard_positive + bounded_positive - bounded_positive.detach()
+            )
+        positive_normal_protection = positive_normal_protection.masked_fill(
+            ~validity, 0.0
+        )
+        delta_normal = (
+            delta_normal_video.unsqueeze(1).expand_as(host_score)
+            * (1.0 - positive_normal_protection)
+        )
 
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
         direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
-        absolute_mix = F.softplus(self.raw_absolute_mix)
-        absolute_witness = (
-            torch.zeros_like(direct_witness)
-            if absolute_evidence_logits is None
-            else absolute_evidence_logits.clamp(-3.0, 3.0).masked_fill(
-                ~validity, 0.0
-            )
-        )
-        # Relative evidence assigns temporal responsibility within a video;
-        # the small learned absolute term preserves whether the matched-normal
-        # departure is unusual across videos. Both are measurements of the
-        # same selected witnesses, hence one correction equation.
-        local_shape = direct_witness + absolute_mix * absolute_witness
-        witness_support = torch.relu(local_shape)
-        veto_support = torch.relu(-local_shape)
+        witness_support = torch.relu(direct_witness)
+        veto_support = torch.relu(-direct_witness)
+        # Video-standardization turns the neuron jury into a signed local
+        # residual: evidence above the video's own reference raises a snippet,
+        # while evidence below it lowers one by the same learned scale.  This
+        # preserves the frozen host's video calibration and prevents weak bag
+        # labels from authorizing a positive shift over most of an abnormal bag.
+        local_shape = direct_witness
         delta_anomaly = eta_anomaly * local_shape
         delta_anomaly = delta_anomaly.masked_fill(~validity, 0.0)
         delta_normal = delta_normal.masked_fill(~validity, 0.0)
@@ -178,8 +186,7 @@ class WitnessRouter(nn.Module):
             "eta_anomaly": eta_anomaly,
             "delta_normal": delta_normal,
             "delta_anomaly": delta_anomaly,
-            "absolute_mix": absolute_mix,
-            "absolute_witness": absolute_witness,
+            "positive_normal_protection": positive_normal_protection,
             "local_shape": local_shape,
             "witness_support": witness_support,
             "veto_support": veto_support,

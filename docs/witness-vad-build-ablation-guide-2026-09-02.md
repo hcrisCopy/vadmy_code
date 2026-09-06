@@ -409,8 +409,9 @@ bash run_instructions/run_witness_vad_f2_dsanet.sh --resume
 
 W1 只能使用 host 的视频级统计；W2 仍以 host score 作为最终残差基底，但不能把它输入 neuron 分支。四组共用数据、seed、epoch 和 evaluator。
 
-每轮都保存 checkpoint 并用同一 evaluator 测试；UCF 只按 frame AUC、XD 只按 frame AP
-选择 best epoch。`selection_curve.csv` 必须保留 20 轮完整轨迹，不能看到结果后改选择指标。
+每轮都保存 checkpoint，并严格沿用对应 baseline 的同数据集 test-best 协议：UCF 按 frame
+AUC、XD 按 frame AP 选择 best epoch。`selection_curve.csv` 必须保留 20 轮完整轨迹；不能
+看到结果后改指标，更不能在 UCF 训练/选择时访问 XD 的任何信息，反之亦然。
 
 ### 执行
 
@@ -648,7 +649,7 @@ bash run_instructions/run_witness_vad_f5_dsanet.sh
 - 不做几十个 loss 权重和网络宽度表。
 - 不做没有 matched control 的 neuron visualization。
 - 不用正常视频整体压低单独冒充定位能力。
-- checkpoint 选择严格沿用 host baseline 的固定主指标与 test-best 规则；不挑 seed、不在结果出来后更换选择指标。
+- checkpoint 选择严格沿用 host baseline 的同数据集 test-best 主指标；不挑 seed、不在结果出来后更换选择指标，严禁跨数据集调参。
 - 不在 F3 失败后继续堆模块。
 - 不把 Universal 的工程 trick 全搬回来；只保留被 F0 证实的信息来源与简洁超参数经验。
 
@@ -671,3 +672,135 @@ bash run_instructions/run_witness_vad_dsanet_all.sh
 - 最后输出所有产物绝对路径和一张总表。
 
 这份指南是搭建与裁决标准。方法公式、研究动机和论文表述以最终方案文档为准。
+
+---
+
+## 15. F3.2 快速迭代记录（2026-09-06）
+
+### 当前硬结果
+
+**DSANet-UCF 已通过生死门，可以进入 DSANet-XD；尚未证明跨 baseline。** 冻结 DSANet
+UCF AUC 为 `0.89444643`。最终 W6（seed 42，epoch 12）AUC 为 `0.90515789`，提升
+`+1.07115 pp`。同时 cross-AUC `+1.05994 pp`、within-AUC `+3.94515 pp`、正常视频
+FPR `-3.37087 pp`；不是靠整段视频平移或只修正常视频过线。
+
+正式 checkpoint：
+
+~~~text
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/ucf/w6/training/checkpoints/best.pt
+SHA256: 760efe63bb547035366d8edbc547c67d14fa4d275cdbca822c993f33d434f6d3
+~~~
+
+正式复现入口（会清理精确 F3.2 输出、测试、训练并评测）：
+
+~~~powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File run_instructions/verify_witness_vad_f3_2_remote.ps1 -Dataset ucf
+~~~
+
+远程正式输出与查看入口：
+
+~~~text
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/target_margin.json
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/ucf/w6/selection/selection.json
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/ucf/w6/evaluation/metrics.json
+~~~
+
+~~~bash
+cd /root/autodl-tmp/vadmy_code
+/root/miniconda3/envs/dsanet/bin/python -m json.tool \
+  ../vadmy_data/witness_vad/dsanet/f3_2_signed_support/ucf/w6/evaluation/metrics.json
+~~~
+
+### 本轮有效结论
+
+| 问题 | 硬结果 | 裁决 |
+|---|---:|---|
+| 最终 W6 | AUC `0.90515789`，`+1.07115 pp` | DSANet-UCF **GO** |
+| 视频内排序 | Within-AUC `+3.94515 pp` | 相对时序定位有效 |
+| 跨视频排序 | Cross-AUC `+1.05994 pp` | 不是仅靠视频内重排 |
+| 正常误报 | normal FPR `-3.37087 pp` | 负见证抑制有效 |
+| 最近训练正常语境 | `+0.87816 pp` | 方向正确，但末层 context key 受事件语义污染 |
+| 前半层场景 key | `+0.99178 pp` | 保留；异常语义不再决定正常反事实 |
+| 正常视频等权矩估计 | `+1.07115 pp` | 保留；与视频均匀采样口径一致并最终过线 |
+| 各语境单独阈值 | `+0.85490 pp` | 过度切分正常校准，删除 |
+| 全局定位/语境正常性拆分 | `+0.81800 pp` | 破坏角色一致性，删除 |
+| 语境条件化坐标方向 | `+0.75635 pp` | 方向翻转统计存在，但直接写成规则不稳定，删除 |
+| 去相关损失 | `+0.50406 pp` | 不能把“互补”简化为反相关，删除 |
+| 正袋覆盖式选点 | `+0.44220 pp` | 覆盖弱标签不等于定位，删除 |
+| 效应门控边际覆盖 | `+0.68819 pp` | 仍不如共享稀疏排序，删除 |
+| 正常路由 host 峰值保护 | `+0.85192 pp` | 仅修极少位置且引入正常误授权，删除 |
+| 逐坐标上下文输入 | 最好约 `+0.6763 pp` | 自由度过高，删除 |
+| 固定中期教师 | 最好仍为教师启用前的 `+0.8637 pp`；epoch 20 为 `+0.7694 pp` | 伪标签拟合不等于定位，删除 |
+| 共识摘要授权头 | 最好约 `+0.6452 pp` | 弱标签过拟合，删除 |
+| 主干残差加权授权 | 最好约 `+0.6851 pp` | 放大袋级噪声，删除 |
+| 仅正常抑制 | `+0.5122 pp` | 单独不够 |
+| 去掉峰值补全 | `+0.7806 pp` | 峰值补全必要 |
+| 去掉 event-gap | `+0.5304 pp` | 主干低谷修复必要 |
+| 严格点/事件共识门 | `+0.1290 pp` / `-0.0343 pp` | 正共识不能作硬门 |
+| 绝对异常度直接进入主角色 / 仅作有界授权增益 | `+0.4546 pp` / `+0.3606 pp` | 未校准绝对长尾同时伤害跨视频与视频内排序，删除 |
+| 异常视频内共识排序 | `+0.7728 pp` | 弱袋标签不能提供可靠片段顺序，删除 |
+| EMA / raw-EMA 单 checkpoint 平均 | `+0.8498 pp` / `+0.8487 pp` | 不是优化抖动问题，不扫 decay |
+| 异常 top-k 对正常片段的跨视频排序 | `+0.8415 pp` | 损失方向合理但没有解决授权错误，删除 |
+| 全局 384 神经元预算替代逐层 32 | `+0.8497 pp` | 跨层竞争丢失互补层证据，保留逐层预算 |
+| 把三种角色票数追加到授权头 | `+0.5367 pp` | 增加输入自由度造成袋标签过拟合，删除 |
+| 正常袋 top-k 难负片段约束 | `+0.8115 pp`（best epoch 7） | normal FPR 仍改善 `-3.1264 pp`，但 AUC 下降；正常尾部不是最后 `0.1363 pp` 的瓶颈，删除 |
+| q 回归有符号 frozen-host correction need | `+0.2926 pp`（best epoch 6） | 残差幅度接近零但仍以零阈值强制二选一，路由翻转不稳，删除 |
+| host top-k prior + witness residual q | `+0.3148 pp`（best epoch 14） | normal FPR 改善 `-4.2179 pp`，但 pooled/cross/within 均明显下降；结构化 q 仍不能提供互补信息，删除 |
+| 每层 active neurons `32→42` | `+0.6985 pp`（best epoch 9） | Universal 的 42-neuron 经验不能直接迁移；禁止继续扫容量 |
+
+旧三角色流程在 seed42 最后主见证 + 独立上下文角色下达到 `+0.9569 pp`，仍未过线；
+删除 agreement、event gate、video suppression、temporal 后分别只有 `+0.7558`、
+`+0.5715`、`+0.6813`、`+0.6843 pp`。它依赖整条后处理链，不能回收为干净方法。
+
+额外做了旧流程最小性审计：W6 与旧流程预测平均后，只有保留至少三个旧组件才可能过
+`+1 pp`；任意同时删除两个组件的最好结果仅 `+0.9211 pp`。因此“差一点就把旧链拼回来”
+不是可接受方案：它无法给每个组件一条独立、可证伪的动机，也无法形成干净消融。
+
+### 最终方法逻辑与公式（论文只讲这一条）
+
+问题不是“多加一个 adapter”，而是 frozen host 把场景共现当成异常；因此稀疏神经元必须
+相对**匹配场景的正常反事实**定义。为避免异常事件语义反过来污染正常语境选择，用 CLIP
+前半层构造场景 key：
+
+\[
+\kappa(V)=\operatorname{Median}_{t}\left(\frac{2}{L}
+\sum_{l=1}^{L/2}\operatorname{LN}(h_{t}^{l})\right),\qquad
+c^*(V)=\arg\min_c\|\kappa(V)-m_c\|_2^2.
+\]
+
+弱监督训练按视频采样，所以每个正常视频对语境统计等权，不能让长视频重复投票：
+
+\[
+\mu_c^l=\frac{1}{|\mathcal N_c|}\sum_{V\in\mathcal N_c}
+\frac{1}{T_V}\sum_t\operatorname{LN}(h_t^l),
+\quad
+(\sigma_c^l)^2=\mathbb E_{V\sim\mathcal N_c,t}
+[\operatorname{LN}(h_t^l)^2]-(\mu_c^l)^2.
+\]
+
+语境匹配偏差与每层固定预算的稀疏证人证据为：
+
+\[
+z_t^l=\frac{\operatorname{LN}(h_t^l)-\mu_{c^*(V)}^l}
+{\sigma_{c^*(V)}^l+\epsilon},\qquad
+e_t^l=\frac{1}{\sqrt{k}}\sum_{j\in S_l}w_{lj}z_{tlj},\ |S_l|=k=32.
+\]
+
+这三式对应三个可证伪主张：场景 key 不应含异常语义；正常反事实应按训练单位估计；只有
+少量相对正常反事实显著偏离的神经元可以授权修正。不要再把旧 Universal 的独立模块接回去。
+
+### 接下来只做论文必需实验
+
+1. **立即跑 DSANet-XD**：方法、seed、epoch、K、每层 32 个神经元全部不变；只按 XD
+   frame AP 选择 checkpoint。XD 训练/选择不得访问 UCF 信息。
+2. DSANet-XD 过 `+1 pp` 后，原样接 VadCLIP 和 DeSC；先 UCF，后 XD，不为 baseline
+   单独改结构。
+3. 核心消融只保留：全局正常参照（K=1）vs 匹配语境（K=4）；末层 key vs 前半层 key；
+   片段加权矩 vs 视频等权矩；W0/W1/W2/W6。
+4. 解释性/因果实验只保留：匹配语境换成错误语境；擦除证人坐标 vs 等量随机坐标；把异常
+   片段证人坐标替换为匹配正常均值。三者分别回答“语境是否必要、坐标是否特异、证人是否
+   因果影响预测”。
+5. 不做多 seed 表演，不扫 K/神经元数/loss 权重，不增加第四创新。
+
+完整自动实验记录见 `autoresearch-results/events.jsonl`；本阶段保留提交为 `f674bcc`（前半层
+场景 key）和 `5709e6e`（正常视频等权矩估计）。

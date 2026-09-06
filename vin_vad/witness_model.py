@@ -8,7 +8,6 @@ from vin_vad.witness_neurons import SignedTopKWitnessNeurons
 from vin_vad.witness_router import (
     WitnessRouter,
     inverse_softplus,
-    masked_mean,
     masked_standardize,
     masked_summary,
     masked_topk_anchor,
@@ -43,7 +42,6 @@ class WitnessExpert(nn.Module):
         self.neurons = SignedTopKWitnessNeurons(
             active=active, contexts=normal_contexts
         )
-        self.temporal = WitnessTemporalReadout(width=temporal_width)
         self.context_temporal = WitnessTemporalReadout(input_channels=24, width=temporal_width)
 
     def forward(
@@ -53,36 +51,34 @@ class WitnessExpert(nn.Module):
         neuron_keep_mask: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         neuron = self.neurons(hidden, validity, neuron_keep_mask)
-        primary_logits = self.temporal(neuron["temporal_input"], validity)
-        normality_layers = neuron["normality_layer_evidence"]
-        normality_raw = normality_layers.mean(dim=-1)
-        normality_logits = (
-            normality_raw - self.neurons.normal_score_threshold
-        ) / self.neurons.normal_score_std
-        normality_logits = normality_logits.masked_fill(~validity, 0.0)
+        signed_layers = neuron["layer_evidence"]
+        signed_raw = signed_layers.mean(dim=-1)
+        signed_absolute = (
+            signed_raw - self.neurons.signed_score_mean
+        ) / self.neurons.signed_score_std
+        signed_absolute = signed_absolute.clamp(-3.0, 3.0).masked_fill(~validity, 0.0)
         context_input = torch.cat(
             [
-                masked_temporal_mean(normality_layers, validity, width=9),
-                masked_temporal_mean(normality_layers, validity, width=25),
+                masked_temporal_mean(signed_layers, validity, width=9),
+                masked_temporal_mean(signed_layers, validity, width=25),
             ],
             dim=-1,
         )
         context_logits = self.context_temporal(context_input, validity)
-        primary_role = masked_standardize(primary_logits, validity).clamp(-3.0, 3.0)
-        normality_role = normality_logits.clamp(-3.0, 3.0)
+        signed_role = masked_standardize(signed_raw, validity).clamp(-3.0, 3.0)
         context_role = masked_standardize(context_logits, validity).clamp(-3.0, 3.0)
-        roles = torch.stack([primary_role, normality_role, context_role], dim=-1)
-        positive_agreement = torch.relu(roles).amin(dim=-1)
-        negative_agreement = torch.relu(-roles).amin(dim=-1)
-        logits = roles.mean(dim=-1) + positive_agreement - negative_agreement
+        # One witness chain, not a jury of loosely motivated roles: the same
+        # signed counterfactual departure is read at the current snippet and
+        # through its learned temporal context. Their symmetric mean is the
+        # relative localization evidence; the normal-calibrated absolute score
+        # is passed separately to preserve cross-video ordering.
+        logits = 0.5 * (signed_role + context_role)
         evidence = torch.sigmoid(logits).masked_fill(~validity, 0.0)
         return {
             **neuron,
-            "primary_evidence": torch.sigmoid(primary_logits).masked_fill(~validity, 0.0),
-            "normality_evidence": torch.sigmoid(normality_role).masked_fill(~validity, 0.0),
+            "signed_evidence": torch.sigmoid(signed_role).masked_fill(~validity, 0.0),
             "context_evidence": torch.sigmoid(context_logits).masked_fill(~validity, 0.0),
-            "positive_agreement": positive_agreement.masked_fill(~validity, 0.0),
-            "negative_agreement": negative_agreement.masked_fill(~validity, 0.0),
+            "absolute_evidence_logits": signed_absolute,
             "evidence_logits": logits.masked_fill(~validity, 0.0),
             "evidence": evidence,
         }
@@ -121,8 +117,7 @@ class WitnessVAD(nn.Module):
             validity,
             eta_normal_override=eta_normal_override,
             eta_anomaly_override=eta_anomaly_override,
-            positive_consensus=expert["positive_agreement"],
-            negative_consensus=expert["negative_agreement"],
+            absolute_evidence_logits=expert["absolute_evidence_logits"],
         )
         return {**expert, **routed}
 

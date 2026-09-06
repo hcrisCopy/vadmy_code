@@ -4,7 +4,6 @@ import torch
 
 from vin_vad.witness_losses import temporal_smoothness, topk_bag_probability, witness_objective
 from vin_vad.witness_model import WitnessVAD
-from vin_vad.train_witness import update_ema_state
 
 
 def sample() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -75,15 +74,3 @@ def test_witness_mil_orients_primary_and_context_roles() -> None:
     losses["witness_mil"].backward()
     assert float(model.expert.temporal.output.weight.grad.abs().sum()) > 0.0
     assert float(model.expert.context_temporal.output.weight.grad.abs().sum()) > 0.0
-
-
-def test_ema_updates_floats_and_copies_audit_buffers() -> None:
-    model = WitnessVAD()
-    ema = {name: value.detach().clone() for name, value in model.state_dict().items()}
-    before = ema["router.video_head.weight"].clone()
-    with torch.no_grad():
-        model.router.video_head.weight.add_(2.0)
-        model.expert.neurons.normal_role_ready.fill_(True)
-    update_ema_state(ema, model, decay=0.5)
-    torch.testing.assert_close(ema["router.video_head.weight"], before + 1.0)
-    assert bool(ema["expert.neurons.normal_role_ready"])

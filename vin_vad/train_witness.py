@@ -449,7 +449,6 @@ def main() -> None:
             "witness_mil": 0.0,
             "final_mil": 0.0,
             "dense_normal": 0.0,
-            "normal_host_copy": 0.0,
             "sparse": 0.0,
         }
         lr_start = float(optimizer.param_groups[0]["lr"])
@@ -505,7 +504,6 @@ def main() -> None:
                 video=f"{totals['video'] / step:.3f}",
                 witness=f"{totals['witness_mil'] / step:.3f}",
                 final=f"{totals['final_mil'] / step:.3f}",
-                copy=f"{totals['normal_host_copy'] / step:.3f}",
                 normal=f"{totals['dense_normal'] / step:.3f}",
                 sparse=f"{totals['sparse'] / step:.3f}",
             )

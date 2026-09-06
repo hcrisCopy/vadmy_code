@@ -39,49 +39,6 @@ def temporal_smoothness(score: torch.Tensor, validity: torch.Tensor) -> torch.Te
     return difference[pair_mask].mean()
 
 
-def normal_host_copy_loss(
-    evidence: torch.Tensor,
-    host_score: torch.Tensor,
-    validity: torch.Tensor,
-    labels: torch.Tensor,
-) -> torch.Tensor:
-    """Remove host-copying evidence only where snippet labels are trustworthy.
-
-    Every snippet in a normal bag is a reliable negative.  Positive temporal
-    correlation between the frozen host and the witness on such a bag is
-    therefore shared false-alarm evidence, not complementary testimony.  We
-    weight the one-sided correlation penalty by the host bag risk so that flat,
-    already-correct normal videos do not dominate.  Negative correlation is
-    preserved because it is the desired veto role.
-    """
-    if evidence.shape != host_score.shape or validity.shape != evidence.shape:
-        raise ValueError("evidence, host_score and validity must share [B,T]")
-    if labels.shape != evidence.shape[:1]:
-        raise ValueError("labels must have shape [B]")
-    normal_mask = labels <= 0.5
-    if not normal_mask.any():
-        return evidence.sum() * 0.0
-
-    host_mean = masked_mean(host_score, validity).unsqueeze(1)
-    evidence_mean = masked_mean(evidence, validity).unsqueeze(1)
-    host_centered = (host_score - host_mean).masked_fill(~validity, 0.0)
-    evidence_centered = (evidence - evidence_mean).masked_fill(~validity, 0.0)
-    host_scale = torch.sqrt(
-        masked_mean(host_centered.square(), validity) + 1e-6
-    ).unsqueeze(1)
-    evidence_scale = torch.sqrt(
-        masked_mean(evidence_centered.square(), validity) + 1e-6
-    ).unsqueeze(1)
-    correlation = masked_mean(
-        (host_centered / host_scale) * (evidence_centered / evidence_scale),
-        validity,
-    )
-    host_risk = topk_bag_probability(host_score, validity).detach()
-    normal_risk = host_risk[normal_mask]
-    copied_evidence = torch.relu(correlation[normal_mask]).square()
-    return (normal_risk * copied_evidence).sum() / normal_risk.sum().clamp_min(1e-6)
-
-
 def witness_objective(
     result: dict[str, torch.Tensor],
     host_score: torch.Tensor,
@@ -113,12 +70,6 @@ def witness_objective(
         )
         role_losses.append(role_loss)
     neuron_loss = torch.stack(role_losses).mean()
-    normal_host_copy = normal_host_copy_loss(
-        evidence, host_score, validity, labels
-    )
-    # This is part of the witness definition, not a second correction module:
-    # selected evidence must add information beyond frozen-host false alarms.
-    neuron_loss = neuron_loss + normal_host_copy
     final_loss = per_video_mil(corrected, validity, labels).mean()
     normal_mask = labels <= 0.5
     if normal_mask.any():
@@ -159,7 +110,6 @@ def witness_objective(
         "witness_mil": neuron_loss,
         "final_mil": final_loss,
         "dense_normal": dense_normal,
-        "normal_host_copy": normal_host_copy,
         "sparse": sparse_loss,
         "host_residual": residual.mean(),
     }
@@ -220,7 +170,6 @@ def variant_objective(
             "witness_mil": zero,
             "final_mil": final_loss,
             "dense_normal": dense_corrected,
-            "normal_host_copy": zero,
             "sparse": zero,
             "host_residual": zero,
         }
@@ -264,7 +213,6 @@ def variant_objective(
             "witness_mil": neuron_loss,
             "final_mil": final_loss,
             "dense_normal": dense_normal,
-            "normal_host_copy": zero,
             "sparse": sparse_loss,
             "host_residual": residual.mean(),
         }

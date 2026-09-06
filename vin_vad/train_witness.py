@@ -79,7 +79,7 @@ def fit_role_disentangled_reference(
         device=device,
     )
     context_square = torch.zeros_like(context_total)
-    context_snippets = torch.zeros(
+    context_videos = torch.zeros(
         neurons.contexts, dtype=torch.float64, device=device
     )
     for index, context_index in tqdm(
@@ -92,12 +92,14 @@ def fit_role_disentangled_reference(
         normalized = torch.nn.functional.layer_norm(
             hidden, (neurons.dimensions,)
         ).double()
-        context_total[context_index] += normalized.sum(dim=0)
-        context_square[context_index] += normalized.square().sum(dim=0)
-        context_snippets[context_index] += len(normalized)
-    context_mean = context_total / context_snippets[:, None, None].clamp_min(1.0)
+        # Training samples bags uniformly, so the normal counterfactual must not
+        # let a long video count as many independent normal regimes.
+        context_total[context_index] += normalized.mean(dim=0)
+        context_square[context_index] += normalized.square().mean(dim=0)
+        context_videos[context_index] += 1
+    context_mean = context_total / context_videos[:, None, None].clamp_min(1.0)
     context_variance = (
-        context_square / context_snippets[:, None, None].clamp_min(1.0)
+        context_square / context_videos[:, None, None].clamp_min(1.0)
         - context_mean.square()
     ).clamp_min(1e-4)
     context_std = context_variance.sqrt()

@@ -35,6 +35,10 @@ import json
 import sys
 print(json.load(open(sys.argv[1]))["target_margin_pp"])
 PY
+elif [[ -n "`$recorded_commit" ]] && \
+     git diff --quiet "`$recorded_commit"..HEAD -- vin_vad run_instructions/run_witness_vad_f3_2_dsanet.sh; then
+  echo "resume matching interrupted formal run from `$recorded_commit"
+  bash run_instructions/run_witness_vad_f3_2_dsanet.sh --resume
 else
   bash run_instructions/run_witness_vad_f3_2_dsanet.sh --clean
 fi

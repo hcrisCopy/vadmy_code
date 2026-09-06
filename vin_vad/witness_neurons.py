@@ -48,6 +48,13 @@ class SignedTopKWitnessNeurons(nn.Module):
             "normal_context_std", torch.ones(contexts, layers, dimensions)
         )
         self.register_buffer("normal_context_ready", torch.tensor(False))
+        self.register_buffer(
+            "primary_context_direction", torch.ones(contexts, layers, dimensions)
+        )
+        self.register_buffer(
+            "primary_context_weight", torch.ones(contexts, layers, dimensions)
+        )
+        self.register_buffer("primary_context_ready", torch.tensor(False))
         self.gate_logits = nn.Parameter(torch.empty(layers, dimensions))
         self.signed_weights = nn.Parameter(torch.empty(layers, dimensions))
         self.layer_logits = nn.Parameter(torch.zeros(layers))
@@ -75,6 +82,23 @@ class SignedTopKWitnessNeurons(nn.Module):
             standard_deviation.to(self.normal_context_std).clamp_min(1e-4)
         )
         self.normal_context_ready.fill_(True)
+
+    @torch.no_grad()
+    def set_primary_context_role(
+        self, direction: torch.Tensor, weight: torch.Tensor
+    ) -> None:
+        expected = self.primary_context_direction.shape
+        if direction.shape != expected or weight.shape != expected:
+            raise ValueError(
+                "primary context tensors must have shape [contexts, layers, dimensions]"
+            )
+        self.primary_context_direction.copy_(
+            direction.to(self.primary_context_direction)
+        )
+        self.primary_context_weight.copy_(
+            weight.to(self.primary_context_weight)
+        )
+        self.primary_context_ready.fill_(True)
 
     def contextual_deviation(
         self, normalized: torch.Tensor, validity: torch.Tensor
@@ -185,7 +209,14 @@ class SignedTopKWitnessNeurons(nn.Module):
                 context_index = torch.full(
                     (hidden.shape[0],), -1, dtype=torch.long, device=hidden.device
                 )
-            primary_input = deviation
+            if bool(self.primary_context_ready):
+                primary_input = (
+                    deviation
+                    * self.primary_context_direction[context_index].unsqueeze(1)
+                    * self.primary_context_weight[context_index].unsqueeze(1)
+                )
+            else:
+                primary_input = deviation
         else:
             deviation = None
             context_index = torch.full(

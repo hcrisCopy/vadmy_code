@@ -47,6 +47,9 @@ def build_from_checkpoint(
         "expert.neurons.normal_context_mean",
         "expert.neurons.normal_context_std",
         "expert.neurons.normal_context_ready",
+        "expert.neurons.primary_context_direction",
+        "expert.neurons.primary_context_weight",
+        "expert.neurons.primary_context_ready",
     }
     unexpected_missing = set(incompatible.missing_keys) - allowed_context_buffers
     if unexpected_missing or incompatible.unexpected_keys:

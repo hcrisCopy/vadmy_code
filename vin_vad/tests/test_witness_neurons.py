@@ -143,3 +143,47 @@ def test_each_video_uses_its_nearest_training_normal_context() -> None:
     result = module(hidden, validity)
 
     assert result["normal_context_index"].tolist() == [0, 1]
+
+
+def test_shared_sparse_coordinates_can_reverse_direction_by_context() -> None:
+    module = SignedTopKWitnessNeurons(
+        layers=2, dimensions=4, active=1, contexts=2
+    )
+    hidden = torch.tensor(
+        [
+            [[[3.0, 0.0, 0.0, 0.0], [3.0, 0.0, 0.0, 0.0]]] * 3,
+            [[[0.0, 3.0, 0.0, 0.0], [0.0, 3.0, 0.0, 0.0]]] * 3,
+        ]
+    )
+    validity = torch.ones(2, 3, dtype=torch.bool)
+    normalized = module.normalization(hidden)
+    centers = torch.stack(
+        [normalized[index, :, -1].median(dim=0).values for index in range(2)]
+    )
+    role_mask = torch.zeros(2, 4)
+    role_mask[:, 0] = 1.0
+    module.set_normal_role(
+        torch.zeros(2, 4),
+        torch.ones(2, 4),
+        role_mask,
+        torch.ones(2, 4),
+        role_mask,
+        torch.tensor(0.0),
+        torch.tensor(1.0),
+    )
+    module.set_normal_context_reference(
+        centers,
+        torch.zeros(2, 2, 4),
+        torch.ones(2, 2, 4),
+    )
+    module.set_primary_role(role_mask, torch.ones(2, 4), role_mask)
+    context_direction = torch.ones(2, 2, 4)
+    context_direction[1] = -1.0
+    module.set_primary_context_role(context_direction, torch.ones(2, 2, 4))
+
+    result = module(hidden, validity)
+
+    assert result["normal_context_index"].tolist() == [0, 1]
+    assert torch.all(result["layer_evidence"][0] > 0)
+    assert torch.all(result["layer_evidence"][1] > 0)
+    assert module.active_counts().tolist() == [1, 1]

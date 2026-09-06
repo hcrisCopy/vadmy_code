@@ -24,58 +24,6 @@ from vin_vad.witness_losses import variant_objective
 from vin_vad.witness_model import build_witness_variant
 
 
-def greedy_witness_cover(
-    abnormal_response: torch.Tensor,
-    normal_response: torch.Tensor,
-    abnormal_weight: torch.Tensor,
-    candidate_dimension: torch.Tensor,
-    active: int,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Select a sparse jury that covers complementary positive bags.
-
-    A positive WSVAD bag only promises that some anomaly is present.  Ranking
-    coordinates independently therefore wastes the sparse budget on redundant
-    witnesses for the same easy bags.  This coverage objective gives a candidate
-    credit only for response beyond what the already-selected jury explains;
-    normal-bag response remains a multiplicative false-witness cost.
-    """
-    if abnormal_response.ndim != 2 or normal_response.ndim != 2:
-        raise ValueError("response tensors must have shape [bags, candidates]")
-    if abnormal_response.shape[1] != normal_response.shape[1]:
-        raise ValueError("normal and abnormal responses need the same candidates")
-    if abnormal_weight.shape != abnormal_response.shape[:1]:
-        raise ValueError("abnormal_weight must have shape [abnormal bags]")
-    if candidate_dimension.shape != abnormal_response.shape[1:]:
-        raise ValueError("candidate_dimension must have shape [candidates]")
-    unique_dimensions = torch.unique(candidate_dimension)
-    if not 0 < active <= unique_dimensions.numel():
-        raise ValueError("active must fit the available coordinate dimensions")
-
-    weights = abnormal_weight.clamp_min(0.0)
-    weight_sum = weights.sum().clamp_min(1e-6)
-    normal_cost = normal_response.mean(dim=0).clamp_min(0.0)
-    covered = torch.zeros_like(abnormal_response[:, 0])
-    available = torch.ones(
-        abnormal_response.shape[1], dtype=torch.bool, device=abnormal_response.device
-    )
-    selected = []
-    marginal_values = []
-    for _ in range(active):
-        marginal = torch.relu(abnormal_response - covered.unsqueeze(1))
-        utility = (weights.unsqueeze(1) * marginal).sum(dim=0) / weight_sum
-        utility = utility / (1.0 + normal_cost)
-        utility = utility.masked_fill(~available, -torch.inf)
-        index = int(torch.argmax(utility))
-        selected.append(index)
-        marginal_values.append(utility[index].clamp_min(1e-6))
-        covered = torch.maximum(covered, abnormal_response[:, index])
-        available[candidate_dimension == candidate_dimension[index]] = False
-    return (
-        torch.tensor(selected, dtype=torch.long, device=abnormal_response.device),
-        torch.stack(marginal_values),
-    )
-
-
 @torch.no_grad()
 def fit_role_disentangled_reference(
     model: torch.nn.Module,
@@ -103,9 +51,9 @@ def fit_role_disentangled_reference(
     )
     class_square = torch.zeros_like(class_sum)
     class_count = torch.zeros(2, dtype=torch.float64, device=device)
-    bag_summaries = []
-    bag_labels = []
-    bag_host_residuals = []
+    residual_sum = torch.zeros_like(class_sum)
+    residual_square = torch.zeros_like(class_sum)
+    residual_count = torch.zeros(2, dtype=torch.float64, device=device)
     for index in tqdm(range(len(dataset)), desc="rank role neurons", unit="video"):
         item = dataset[index]
         hidden = item["hidden"].to(device, non_blocking=True)
@@ -125,9 +73,9 @@ def fit_role_disentangled_reference(
         host_score = item["host_score"].to(device, non_blocking=True).double()
         host_bag = torch.topk(host_score, tail_count).values.mean().clamp(0.0, 1.0)
         residual = (host_bag - float(label)).abs()
-        bag_summaries.append(summary.float().cpu())
-        bag_labels.append(label)
-        bag_host_residuals.append(float(residual))
+        residual_sum[label] += residual * summary
+        residual_square[label] += residual * summary.square()
+        residual_count[label] += residual
 
     def class_effect(
         total: torch.Tensor,
@@ -159,48 +107,9 @@ def fit_role_disentangled_reference(
     normal_mask, normal_direction, normal_weight = role_definition(
         class_effect(class_sum, class_square, class_count)
     )
-    summaries = torch.stack(bag_summaries)
-    labels = torch.tensor(bag_labels, dtype=torch.long)
-    host_residuals = torch.tensor(bag_host_residuals, dtype=torch.float32)
-    primary_mask = torch.zeros(
-        neurons.layers, neurons.dimensions, dtype=torch.float32, device=device
+    primary_mask, primary_direction, primary_weight = role_definition(
+        class_effect(residual_sum, residual_square, residual_count)
     )
-    primary_direction = torch.ones_like(primary_mask)
-    primary_weight = torch.zeros_like(primary_mask)
-    candidate_dimension = torch.arange(
-        neurons.dimensions, dtype=torch.long, device=device
-    ).repeat(2)
-    for layer in range(neurons.layers):
-        normal_summary = summaries[labels == 0, :, layer, :].to(device)
-        abnormal_summary = summaries[labels == 1, :, layer, :].to(device)
-        threshold = torch.quantile(normal_summary, 0.95, dim=0)
-        scale = normal_summary.std(dim=0, unbiased=False).clamp_min(1e-3)
-        normal_response = torch.relu((normal_summary - threshold) / scale).reshape(
-            len(normal_summary), -1
-        )
-        abnormal_response = torch.relu(
-            (abnormal_summary - threshold) / scale
-        ).reshape(len(abnormal_summary), -1)
-        selected, marginal = greedy_witness_cover(
-            abnormal_response,
-            normal_response,
-            host_residuals[labels == 1].to(device),
-            candidate_dimension,
-            active_per_layer,
-        )
-        direction_index = torch.div(
-            selected, neurons.dimensions, rounding_mode="floor"
-        )
-        dimension_index = selected.remainder(neurons.dimensions)
-        primary_mask[layer, dimension_index] = 1.0
-        primary_direction[layer, dimension_index] = torch.where(
-            direction_index == 0,
-            torch.ones_like(direction_index, dtype=torch.float32),
-            -torch.ones_like(direction_index, dtype=torch.float32),
-        )
-        primary_weight[layer, dimension_index] = marginal / marginal.mean().clamp_min(
-            1e-6
-        )
 
     role_weight = normal_mask * normal_weight
     normal_scores = []

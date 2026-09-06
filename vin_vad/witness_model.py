@@ -69,6 +69,7 @@ class WitnessExpert(nn.Module):
         context_role = masked_standardize(context_logits, validity).clamp(-3.0, 3.0)
         roles = torch.stack([primary_role, normality_role, context_role], dim=-1)
         positive_agreement = torch.relu(roles).amin(dim=-1)
+        positive_quorum = torch.relu(roles).median(dim=-1).values
         negative_agreement = torch.relu(-roles).amin(dim=-1)
         logits = roles.mean(dim=-1) + positive_agreement - negative_agreement
         evidence = torch.sigmoid(logits).masked_fill(~validity, 0.0)
@@ -78,6 +79,7 @@ class WitnessExpert(nn.Module):
             "normality_evidence": torch.sigmoid(normality_role).masked_fill(~validity, 0.0),
             "context_evidence": torch.sigmoid(context_logits).masked_fill(~validity, 0.0),
             "positive_agreement": positive_agreement.masked_fill(~validity, 0.0),
+            "positive_quorum": positive_quorum.masked_fill(~validity, 0.0),
             "negative_agreement": negative_agreement.masked_fill(~validity, 0.0),
             "evidence_logits": logits.masked_fill(~validity, 0.0),
             "evidence": evidence,
@@ -113,6 +115,7 @@ class WitnessVAD(nn.Module):
             eta_normal_override=eta_normal_override,
             eta_anomaly_override=eta_anomaly_override,
             positive_consensus=expert["positive_agreement"],
+            positive_quorum=expert["positive_quorum"],
             negative_consensus=expert["negative_agreement"],
         )
         return {**expert, **routed}

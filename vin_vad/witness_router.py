@@ -105,10 +105,13 @@ class WitnessRouter(nn.Module):
         eta_normal_override: float | None = None,
         eta_anomaly_override: float | None = None,
         positive_consensus: torch.Tensor | None = None,
+        positive_quorum: torch.Tensor | None = None,
         negative_consensus: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         if positive_consensus is not None and positive_consensus.shape != host_score.shape:
             raise ValueError("positive_consensus must share the [B,T] host-score shape")
+        if positive_quorum is not None and positive_quorum.shape != host_score.shape:
+            raise ValueError("positive_quorum must share the [B,T] host-score shape")
         if negative_consensus is not None and negative_consensus.shape != host_score.shape:
             raise ValueError("negative_consensus must share the [B,T] host-score shape")
         summary = video_summary(host_score, evidence, validity)
@@ -136,6 +139,8 @@ class WitnessRouter(nn.Module):
             else host_score.new_tensor(eta_anomaly_override)
         )
         delta_normal_video = eta_normal * torch.minimum(video_logit, torch.zeros_like(video_logit))
+        host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
+        direct_host = masked_standardize(host_clipped, validity).clamp(-3.0, 3.0)
         # A video-level normal decision is weak supervision, so it cannot safely
         # erase a location where every independent witness role agrees on an
         # anomaly.  Positive consensus only protects the frozen host here; it
@@ -148,18 +153,29 @@ class WitnessRouter(nn.Module):
             positive_normal_protection = (
                 hard_positive + bounded_positive - bounded_positive.detach()
             )
-        positive_normal_protection = positive_normal_protection.masked_fill(
-            ~validity, 0.0
-        )
+        # A mistaken video-level normal decision must also yield to a local
+        # host peak corroborated by at least two independent witness roles.
+        # This is a soft protection, so quorum alone cannot flip or amplify a
+        # score and the existing unanimous protection remains unchanged.
+        if positive_quorum is not None:
+            host_quorum_protection = torch.minimum(
+                torch.relu(direct_host).clamp(max=1.0),
+                positive_quorum.clamp(0.0, 1.0),
+            )
+            positive_normal_protection = torch.maximum(
+                positive_normal_protection, host_quorum_protection
+            )
+        else:
+            host_quorum_protection = torch.zeros_like(host_score)
+        positive_normal_protection = positive_normal_protection.masked_fill(~validity, 0.0)
+        host_quorum_protection = host_quorum_protection.masked_fill(~validity, 0.0)
         delta_normal = (
             delta_normal_video.unsqueeze(1).expand_as(host_score)
             * (1.0 - positive_normal_protection)
         )
 
-        host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
         direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
-        direct_host = masked_standardize(host_clipped, validity).clamp(-3.0, 3.0)
         witness_support = torch.relu(direct_witness)
         veto_support = torch.relu(-direct_witness)
         host_support = torch.relu(direct_host)
@@ -236,6 +252,7 @@ class WitnessRouter(nn.Module):
             "delta_normal": delta_normal,
             "delta_anomaly": delta_anomaly,
             "positive_normal_protection": positive_normal_protection,
+            "host_quorum_protection": host_quorum_protection,
             "local_shape": local_shape,
             "witness_support": witness_support,
             "host_miss_support": host_miss_support,

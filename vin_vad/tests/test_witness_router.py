@@ -155,6 +155,28 @@ def test_positive_consensus_only_protects_normal_route_from_suppression() -> Non
     )
 
 
+def test_host_peak_and_role_quorum_softly_protect_a_missed_anomaly() -> None:
+    router = WitnessRouter()
+    with torch.no_grad():
+        router.video_head.weight.zero_()
+        router.video_head.bias.fill_(-2.0)
+    host = torch.tensor([[0.10, 0.90, 0.20]])
+    evidence = torch.tensor([[0.20, 0.80, 0.30]])
+    validity = torch.ones_like(host, dtype=torch.bool)
+    quorum = torch.ones_like(host)
+
+    protected = router(host, evidence, validity, positive_quorum=quorum)
+    unprotected = router(host, evidence, validity)
+
+    assert protected["host_quorum_protection"][0, 1].item() > 0.0
+    assert protected["host_quorum_protection"][0, 0].item() == 0.0
+    assert protected["host_quorum_protection"][0, 2].item() == 0.0
+    assert abs(protected["delta_normal"][0, 1]) < abs(unprotected["delta_normal"][0, 1])
+    torch.testing.assert_close(
+        protected["delta_normal"][0, 0], unprotected["delta_normal"][0, 0]
+    )
+
+
 def test_event_anchor_uses_standard_weak_mil_topk() -> None:
     score = torch.tensor([[0.1, 0.9, 0.7, 0.2, 99.0]])
     validity = torch.tensor([[True, True, True, True, False]])

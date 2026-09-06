@@ -120,10 +120,10 @@ def test_positive_video_confidence_boundedly_scales_only_local_correction() -> N
         router.video_head.weight.zero_()
         router.video_head.bias.fill_(2.0)
     positive = router(host, evidence, validity)
-    expected_gain = 1.0 + torch.tanh(torch.tensor(2.0))
+    expected_gain = 1.0 + torch.tanh(torch.relu(positive["video_logit"]))
     torch.testing.assert_close(
         positive["anomaly_confidence_gain"],
-        torch.full((2,), expected_gain),
+        expected_gain,
     )
     assert torch.all(positive["anomaly_confidence_gain"] < 2.0)
     with torch.no_grad():
@@ -131,6 +131,17 @@ def test_positive_video_confidence_boundedly_scales_only_local_correction() -> N
     negative = router(host, evidence, validity)
     torch.testing.assert_close(
         negative["anomaly_confidence_gain"], torch.ones(2)
+    )
+
+
+def test_video_state_is_frozen_host_prior_plus_witness_residual() -> None:
+    host, evidence, validity = inputs()
+    router = WitnessRouter()
+    result = router(host, evidence, validity)
+    expected_prior = torch.logit(masked_topk_anchor(host, validity))
+    torch.testing.assert_close(result["host_prior"], expected_prior)
+    torch.testing.assert_close(
+        result["video_logit"], expected_prior + result["witness_residual"]
     )
 
 

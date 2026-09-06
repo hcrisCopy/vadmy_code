@@ -64,13 +64,24 @@ def test_one_forward_backward_and_one_optimizer_step() -> None:
     assert torch.isfinite(losses["total"])
 
 
-def test_witness_mil_orients_primary_and_context_roles() -> None:
+def test_witness_mil_orients_signed_coordinates_and_context_readout() -> None:
     hidden, host, validity, labels = sample()
     model = WitnessVAD()
+    mask = torch.zeros(12, 768)
+    mask[:, :32] = 1.0
+    model.expert.neurons.set_normal_role(
+        torch.zeros_like(mask),
+        torch.ones_like(mask),
+        mask,
+        torch.ones_like(mask),
+        mask,
+        torch.tensor(0.0),
+        torch.tensor(1.0),
+    )
     result = model(hidden, host, validity)
     losses = witness_objective(
         result, host, validity, labels, model.expert.neurons.sparsity_surrogate()
     )
     losses["witness_mil"].backward()
-    assert float(model.expert.temporal.output.weight.grad.abs().sum()) > 0.0
+    assert model.expert.neurons.signed_weights.grad is None
     assert float(model.expert.context_temporal.output.weight.grad.abs().sum()) > 0.0

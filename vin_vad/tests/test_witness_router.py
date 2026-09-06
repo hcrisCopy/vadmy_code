@@ -58,7 +58,7 @@ def test_signed_witness_residual_has_zero_video_mean() -> None:
     assert torch.all(abnormal["delta_anomaly"][abnormal["veto_support"] > 0] < 0.0)
 
 
-def test_negative_role_consensus_does_not_override_signed_evidence() -> None:
+def test_absolute_witness_preserves_cross_video_calibration() -> None:
     router = WitnessRouter()
     with torch.no_grad():
         router.video_head.weight.zero_()
@@ -66,12 +66,15 @@ def test_negative_role_consensus_does_not_override_signed_evidence() -> None:
     host = torch.tensor([[0.10, 0.90, 0.20]])
     evidence = torch.tensor([[0.90, 0.10, 0.80]])
     validity = torch.ones_like(host, dtype=torch.bool)
-    consensus = torch.tensor([[1.00, 0.25, 0.00]])
+    absolute = torch.tensor([[1.00, 1.00, 1.00]])
 
-    result = router(host, evidence, validity, negative_consensus=consensus)
+    result = router(
+        host, evidence, validity, absolute_evidence_logits=absolute
+    )
 
     without_consensus = router(host, evidence, validity)
-    torch.testing.assert_close(result["delta_anomaly"], without_consensus["delta_anomaly"])
+    assert torch.all(result["local_shape"] > without_consensus["local_shape"])
+    assert float(result["absolute_mix"]) > 0.0
 
 
 def test_signed_residual_does_not_propagate_to_neighbors() -> None:
@@ -82,9 +85,7 @@ def test_signed_residual_does_not_propagate_to_neighbors() -> None:
     host = torch.tensor([[0.10, 0.40, 0.20]])
     evidence = torch.tensor([[0.90, 0.50, 0.20]])
     validity = torch.ones_like(host, dtype=torch.bool)
-    consensus = torch.tensor([[1.00, 0.25, 0.00]])
-
-    result = router(host, evidence, validity, negative_consensus=consensus)
+    result = router(host, evidence, validity)
 
     expected = masked_standardize(evidence, validity).clamp(-3.0, 3.0)
     torch.testing.assert_close(result["local_shape"], expected)
@@ -101,27 +102,6 @@ def test_video_confidence_does_not_scale_signed_local_correction() -> None:
         router.video_head.bias.fill_(-2.0)
     negative = router(host, evidence, validity)
     torch.testing.assert_close(positive["delta_anomaly"], negative["delta_anomaly"])
-
-
-def test_positive_consensus_only_protects_normal_route_from_suppression() -> None:
-    router = WitnessRouter()
-    with torch.no_grad():
-        router.video_head.weight.zero_()
-        router.video_head.bias.fill_(-2.0)
-    host = torch.tensor([[0.10, 0.90, 0.20]])
-    evidence = torch.tensor([[0.20, 0.80, 0.30]])
-    validity = torch.ones_like(host, dtype=torch.bool)
-    consensus = torch.tensor([[0.00, 1.00, 0.25]])
-
-    protected = router(host, evidence, validity, positive_consensus=consensus)
-    unprotected = router(host, evidence, validity)
-
-    assert protected["delta_normal"][0, 1].item() == 0.0
-    assert protected["delta_normal"][0, 2].item() == 0.0
-    torch.testing.assert_close(protected["delta_normal"][0, 0], unprotected["delta_normal"][0, 0])
-    torch.testing.assert_close(
-        protected["delta_anomaly"], unprotected["delta_anomaly"]
-    )
 
 
 def test_event_anchor_uses_standard_weak_mil_topk() -> None:

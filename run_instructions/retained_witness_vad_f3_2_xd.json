@@ -1,0 +1,12 @@
+{
+  "source": "autoresearch-results/archive/20260906-191324/logs/0002-verify.json",
+  "git_commit": "a8b43cdde37fd212e6967a57aeaf3a59a08c26ac",
+  "dataset": "xd",
+  "variant": "w6",
+  "seed": 42,
+  "checkpoint_epoch": 1,
+  "host_pooled_ap": 0.8695089607090747,
+  "w6_pooled_ap": 0.87299345703486,
+  "gain_pp": 0.3484496325785291,
+  "target_margin_pp": -0.6515503674214709
+}

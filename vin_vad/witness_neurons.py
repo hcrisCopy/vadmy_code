@@ -80,13 +80,9 @@ class SignedTopKWitnessNeurons(nn.Module):
         self, normalized: torch.Tensor, validity: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compare each video with its nearest training-normal context."""
-        context_layers = max(1, self.layers // 2)
         descriptors = torch.stack(
             [
-                row[mask, :context_layers]
-                .mean(dim=1)
-                .median(dim=0)
-                .values
+                row[mask, -1].median(dim=0).values
                 for row, mask in zip(normalized, validity)
             ]
         )

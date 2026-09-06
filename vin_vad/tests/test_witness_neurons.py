@@ -143,25 +143,3 @@ def test_each_video_uses_its_nearest_training_normal_context() -> None:
     result = module(hidden, validity)
 
     assert result["normal_context_index"].tolist() == [0, 1]
-
-
-def test_context_key_uses_early_layers_not_anomaly_semantic_last_layer() -> None:
-    module = SignedTopKWitnessNeurons(
-        layers=4, dimensions=4, active=1, contexts=2
-    )
-    hidden = torch.zeros(1, 3, 4, 4)
-    hidden[:, :, :2, 0] = 3.0
-    hidden[:, :, -1, 1] = 20.0
-    validity = torch.ones(1, 3, dtype=torch.bool)
-    normalized = module.normalization(hidden)
-    early_key = normalized[0, :, :2].mean(dim=1).median(dim=0).values
-    late_key = normalized[0, :, -1].median(dim=0).values
-    module.set_normal_context_reference(
-        torch.stack([early_key, late_key]),
-        torch.zeros(2, 4, 4),
-        torch.ones(2, 4, 4),
-    )
-
-    result = module(hidden, validity)
-
-    assert result["normal_context_index"].item() == 0

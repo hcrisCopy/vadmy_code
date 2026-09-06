@@ -45,14 +45,7 @@ def fit_role_disentangled_reference(
         total += normalized.sum(dim=0)
         square += normalized.square().sum(dim=0)
         snippet_count += len(normalized)
-        context_layers = max(1, neurons.layers // 2)
-        normal_descriptors.append(
-            normalized[:, :context_layers]
-            .mean(dim=1)
-            .median(dim=0)
-            .values.float()
-            .cpu()
-        )
+        normal_descriptors.append(normalized[:, -1].median(dim=0).values.float().cpu())
     mean = total / max(snippet_count, 1)
     variance = (square / max(snippet_count, 1) - mean.square()).clamp_min(1e-4)
     standard_deviation = variance.sqrt()
@@ -103,10 +96,7 @@ def fit_role_disentangled_reference(
     context_std = context_variance.sqrt()
 
     def matched_deviation(normalized: torch.Tensor) -> torch.Tensor:
-        context_layers = max(1, neurons.layers // 2)
-        descriptor = (
-            normalized[:, :context_layers].mean(dim=1).median(dim=0).values
-        )
+        descriptor = normalized[:, -1].median(dim=0).values
         distance = (descriptor.unsqueeze(0) - context_centers).square().mean(dim=-1)
         context_index = int(distance.argmin())
         return (

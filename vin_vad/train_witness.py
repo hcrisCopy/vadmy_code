@@ -120,9 +120,6 @@ def fit_role_disentangled_reference(
     )
     class_square = torch.zeros_like(class_sum)
     class_count = torch.zeros(2, dtype=torch.float64, device=device)
-    residual_sum = torch.zeros_like(class_sum)
-    residual_square = torch.zeros_like(class_sum)
-    residual_count = torch.zeros(2, dtype=torch.float64, device=device)
     for index in tqdm(range(len(dataset)), desc="rank role neurons", unit="video"):
         item = dataset[index]
         hidden = item["hidden"].to(device, non_blocking=True)
@@ -139,12 +136,6 @@ def fit_role_disentangled_reference(
         class_sum[label] += summary
         class_square[label] += summary.square()
         class_count[label] += 1
-        host_score = item["host_score"].to(device, non_blocking=True).double()
-        host_bag = torch.topk(host_score, tail_count).values.mean().clamp(0.0, 1.0)
-        residual = (host_bag - float(label)).abs()
-        residual_sum[label] += residual * summary
-        residual_square[label] += residual * summary.square()
-        residual_count[label] += residual
 
     def class_effect(
         total: torch.Tensor,
@@ -176,9 +167,15 @@ def fit_role_disentangled_reference(
     normal_mask, normal_direction, normal_weight = role_definition(
         class_effect(class_sum, class_square, class_count)
     )
-    primary_mask, primary_direction, primary_weight = role_definition(
-        class_effect(residual_sum, residual_square, residual_count)
-    )
+    # A bag-level host error says which videos are difficult, not which snippets
+    # are anomalous.  Using it to select coordinates leaked that coarse notion of
+    # difficulty into the local witness role.  Both the fixed normality probe and
+    # its trainable temporal readout therefore start from the same auditable
+    # training-only counterfactual neurons; the readout, not the host, learns how
+    # their signed deviations evolve through time.
+    primary_mask = normal_mask.clone()
+    primary_direction = normal_direction.clone()
+    primary_weight = normal_weight.clone()
 
     role_weight = normal_mask * normal_weight
     normal_scores = []

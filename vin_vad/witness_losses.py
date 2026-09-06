@@ -80,10 +80,17 @@ def witness_objective(
             ]
         ).mean(dim=0)
         normal_corrected = -torch.log1p(-corrected.clamp(max=1.0 - 1e-6))
+        normal_penalty = normal_evidence + normal_corrected
         dense_normal = (
             masked_mean(normal_evidence, validity)[normal_mask]
             + masked_mean(normal_corrected, validity)[normal_mask]
         ).mean()
+        # Every snippet in a normal bag is a reliable negative.  Its sparse
+        # high-score tail must not be diluted by the many easy snippets in a
+        # long video, so optimize the same top-k tail used by the host MIL rule.
+        dense_normal = dense_normal + topk_bag_probability(
+            normal_penalty, validity
+        )[normal_mask].mean()
     else:
         dense_normal = evidence.sum() * 0.0
     abnormal_mask = labels > 0.5

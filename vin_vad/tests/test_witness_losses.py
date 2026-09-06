@@ -74,3 +74,19 @@ def test_witness_mil_orients_primary_and_context_roles() -> None:
     losses["witness_mil"].backward()
     assert float(model.expert.temporal.output.weight.grad.abs().sum()) > 0.0
     assert float(model.expert.context_temporal.output.weight.grad.abs().sum()) > 0.0
+
+
+def test_dense_normal_loss_penalizes_a_sparse_normal_false_alarm() -> None:
+    hidden, host, validity, labels = sample()
+    model = WitnessVAD()
+    clean = model(hidden, host, validity)
+    clean_loss = witness_objective(
+        clean, host, validity, labels, model.expert.neurons.sparsity_surrogate()
+    )["dense_normal"]
+    false_alarm = {name: value for name, value in clean.items()}
+    false_alarm["corrected_score"] = clean["corrected_score"].clone()
+    false_alarm["corrected_score"][0, 0] = 1.0 - 1e-6
+    alarm_loss = witness_objective(
+        false_alarm, host, validity, labels, model.expert.neurons.sparsity_surrogate()
+    )["dense_normal"]
+    assert alarm_loss > clean_loss

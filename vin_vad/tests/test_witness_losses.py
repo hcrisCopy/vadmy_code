@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import torch
 
-from vin_vad.witness_losses import temporal_smoothness, topk_bag_probability, witness_objective
+from vin_vad.witness_losses import (
+    latent_snippet_ranking_loss,
+    temporal_smoothness,
+    topk_bag_probability,
+    witness_objective,
+)
 from vin_vad.witness_model import WitnessVAD
 
 
@@ -26,6 +31,24 @@ def test_padding_does_not_enter_topk_or_smoothness() -> None:
     changed[~validity] = 1e6
     torch.testing.assert_close(first_topk, topk_bag_probability(changed, validity))
     torch.testing.assert_close(first_smooth, temporal_smoothness(changed, validity))
+
+
+def test_latent_snippet_ranking_matches_weak_label_semantics() -> None:
+    validity = torch.ones(2, 3, dtype=torch.bool)
+    labels = torch.tensor([0.0, 1.0])
+    ordered = latent_snippet_ranking_loss(
+        torch.tensor([[0.1, 0.2, 0.3], [0.9, 0.8, 0.7]]),
+        validity,
+        labels,
+        margin=0.5,
+    )
+    reversed_order = latent_snippet_ranking_loss(
+        torch.tensor([[0.7, 0.8, 0.9], [0.3, 0.2, 0.1]]),
+        validity,
+        labels,
+        margin=0.5,
+    )
+    assert ordered < reversed_order
 
 
 def test_every_objective_component_reaches_witness_parameters() -> None:

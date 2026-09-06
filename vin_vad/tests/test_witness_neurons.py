@@ -99,6 +99,8 @@ def test_role_jury_has_distinct_auditable_views() -> None:
     result = expert(hidden, validity)
     for name in (
         "primary_evidence",
+        "primary_relative_role",
+        "primary_absolute_role",
         "normality_evidence",
         "context_evidence",
         "positive_agreement",

@@ -93,12 +93,7 @@ class WitnessRouter(nn.Module):
 
     def __init__(self, eta_normal: float = 1.0, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
         super().__init__()
-        # The frozen host is the default video decision.  The witness branch is
-        # only allowed to learn a near-zero residual from its own summary and
-        # explicit host-witness relations, which makes an override auditable.
-        self.video_head = nn.Linear(6, 1)
-        nn.init.constant_(self.video_head.weight, 1e-3)
-        nn.init.zeros_(self.video_head.bias)
+        self.video_head = nn.Linear(10, 1)
         self.raw_eta_normal = nn.Parameter(torch.tensor(inverse_softplus(eta_normal)))
         self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
 
@@ -117,11 +112,7 @@ class WitnessRouter(nn.Module):
         if negative_consensus is not None and negative_consensus.shape != host_score.shape:
             raise ValueError("negative_consensus must share the [B,T] host-score shape")
         summary = video_summary(host_score, evidence, validity)
-        host_prior = torch.logit(
-            masked_topk_anchor(host_score.clamp(1e-6, 1.0 - 1e-6), validity)
-        )
-        witness_residual = self.video_head(summary[:, 4:]).squeeze(1)
-        video_logit = host_prior + witness_residual
+        video_logit = self.video_head(summary).squeeze(1)
         video_probability = torch.sigmoid(video_logit)
         hard_authorization = (video_probability >= 0.5).to(video_probability.dtype)
         anomaly_authorized = (
@@ -235,8 +226,6 @@ class WitnessRouter(nn.Module):
             corrected = host_score.masked_fill(~validity, 0.0)
         return {
             "summary": summary,
-            "host_prior": host_prior,
-            "witness_residual": witness_residual,
             "video_logit": video_logit,
             "video_probability": video_probability,
             "anomaly_authorized": anomaly_authorized,

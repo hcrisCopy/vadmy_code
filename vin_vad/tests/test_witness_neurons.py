@@ -143,3 +143,44 @@ def test_each_video_uses_its_nearest_training_normal_context() -> None:
     result = module(hidden, validity)
 
     assert result["normal_context_index"].tolist() == [0, 1]
+
+
+def test_context_matching_changes_normality_but_not_global_localization() -> None:
+    module = SignedTopKWitnessNeurons(
+        layers=2, dimensions=4, active=1, contexts=2
+    )
+    hidden = torch.randn(2, 3, 2, 4)
+    validity = torch.ones(2, 3, dtype=torch.bool)
+    role_mask = torch.zeros(2, 4)
+    role_mask[:, 0] = 1.0
+    module.set_normal_role(
+        torch.zeros(2, 4),
+        torch.ones(2, 4),
+        role_mask,
+        torch.ones(2, 4),
+        role_mask,
+        torch.tensor(0.0),
+        torch.tensor(1.0),
+    )
+    module.set_primary_role(role_mask, torch.ones(2, 4), role_mask)
+    normalized = module.normalization(hidden)
+    centers = torch.stack(
+        [normalized[index, :, -1].median(dim=0).values for index in range(2)]
+    )
+    module.set_normal_context_reference(
+        centers,
+        torch.zeros(2, 2, 4),
+        torch.ones(2, 2, 4),
+    )
+    first = module(hidden, validity)
+    module.set_normal_context_reference(
+        centers,
+        torch.full((2, 2, 4), -10.0),
+        torch.ones(2, 2, 4),
+    )
+    second = module(hidden, validity)
+
+    torch.testing.assert_close(first["layer_evidence"], second["layer_evidence"])
+    assert not torch.allclose(
+        first["normality_layer_evidence"], second["normality_layer_evidence"]
+    )

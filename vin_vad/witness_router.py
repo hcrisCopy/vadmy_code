@@ -114,10 +114,6 @@ class WitnessRouter(nn.Module):
         summary = video_summary(host_score, evidence, validity)
         video_logit = self.video_head(summary).squeeze(1)
         video_probability = torch.sigmoid(video_logit)
-        # The signed, bounded state estimates how much the frozen host still
-        # needs to move toward the weak bag label.  Its sign keeps the existing
-        # two routing actions; its magnitude is an auditable correction need.
-        correction_need = torch.tanh(video_logit)
         hard_authorization = (video_probability >= 0.5).to(video_probability.dtype)
         anomaly_authorized = (
             hard_authorization
@@ -232,7 +228,6 @@ class WitnessRouter(nn.Module):
             "summary": summary,
             "video_logit": video_logit,
             "video_probability": video_probability,
-            "correction_need": correction_need,
             "anomaly_authorized": anomaly_authorized,
             "normal_authorized": normal_authorized,
             "anomaly_confidence_gain": anomaly_confidence_gain,

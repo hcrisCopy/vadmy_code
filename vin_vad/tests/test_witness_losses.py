@@ -2,12 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from vin_vad.witness_losses import (
-    intervention_need_target,
-    temporal_smoothness,
-    topk_bag_probability,
-    witness_objective,
-)
+from vin_vad.witness_losses import temporal_smoothness, topk_bag_probability, witness_objective
 from vin_vad.witness_model import WitnessVAD
 
 
@@ -31,16 +26,6 @@ def test_padding_does_not_enter_topk_or_smoothness() -> None:
     changed[~validity] = 1e6
     torch.testing.assert_close(first_topk, topk_bag_probability(changed, validity))
     torch.testing.assert_close(first_smooth, temporal_smoothness(changed, validity))
-
-
-def test_intervention_target_is_signed_frozen_host_residual() -> None:
-    _, host, validity, labels = sample()
-    target = intervention_need_target(host, validity, labels)
-    expected = labels - topk_bag_probability(host, validity)
-    torch.testing.assert_close(target, expected)
-    assert target[0] < 0.0
-    assert target[1] > 0.0
-    assert not target.requires_grad
 
 
 def test_every_objective_component_reaches_witness_parameters() -> None:

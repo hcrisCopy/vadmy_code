@@ -22,14 +22,6 @@ def per_video_mil(score: torch.Tensor, validity: torch.Tensor, labels: torch.Ten
     return F.binary_cross_entropy(bag, labels.to(score.dtype), reduction="none")
 
 
-def intervention_need_target(
-    host_score: torch.Tensor, validity: torch.Tensor, labels: torch.Tensor
-) -> torch.Tensor:
-    """Signed train-only intervention needed to move the frozen host to its bag label."""
-    host_bag = topk_bag_probability(host_score, validity)
-    return (labels.to(host_bag.dtype) - host_bag).detach()
-
-
 def ranking_loss(score: torch.Tensor, validity: torch.Tensor, labels: torch.Tensor, margin: float) -> torch.Tensor:
     bag = topk_bag_probability(score, validity)
     normal = bag[labels <= 0.5]
@@ -63,8 +55,7 @@ def witness_objective(
 ) -> dict[str, torch.Tensor]:
     evidence = result["evidence"]
     corrected = result["corrected_score"]
-    need_target = intervention_need_target(host_score, validity, labels)
-    video_loss = F.smooth_l1_loss(result["correction_need"], need_target)
+    video_loss = F.binary_cross_entropy(result["video_probability"], labels.to(evidence.dtype))
     residual = (labels - topk_bag_probability(host_score, validity)).abs().detach()
     role_curves = [evidence, result["primary_evidence"], result["context_evidence"]]
     role_losses = []

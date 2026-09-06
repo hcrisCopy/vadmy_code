@@ -106,17 +106,6 @@ class WitnessVAD(nn.Module):
         eta_anomaly_override: float | None = None,
     ) -> dict[str, torch.Tensor]:
         expert = self.expert(hidden, validity, neuron_keep_mask)
-        role_video_votes = torch.stack(
-            [
-                masked_topk_anchor(expert[name], validity)
-                for name in (
-                    "primary_evidence",
-                    "normality_evidence",
-                    "context_evidence",
-                )
-            ],
-            dim=1,
-        )
         routed = self.router(
             host_score,
             expert["evidence"],
@@ -125,9 +114,8 @@ class WitnessVAD(nn.Module):
             eta_anomaly_override=eta_anomaly_override,
             positive_consensus=expert["positive_agreement"],
             negative_consensus=expert["negative_agreement"],
-            role_video_votes=role_video_votes,
         )
-        return {**expert, "role_video_votes": role_video_votes, **routed}
+        return {**expert, **routed}
 
 
 class HostVideoOnlyVAD(nn.Module):

@@ -93,7 +93,7 @@ class WitnessRouter(nn.Module):
 
     def __init__(self, eta_normal: float = 1.0, eta_anomaly: float = 0.25, local_width: int = 16) -> None:
         super().__init__()
-        self.video_head = nn.Linear(13, 1)
+        self.video_head = nn.Linear(10, 1)
         self.raw_eta_normal = nn.Parameter(torch.tensor(inverse_softplus(eta_normal)))
         self.raw_eta_anomaly = nn.Parameter(torch.tensor(inverse_softplus(eta_anomaly)))
 
@@ -106,19 +106,12 @@ class WitnessRouter(nn.Module):
         eta_anomaly_override: float | None = None,
         positive_consensus: torch.Tensor | None = None,
         negative_consensus: torch.Tensor | None = None,
-        role_video_votes: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         if positive_consensus is not None and positive_consensus.shape != host_score.shape:
             raise ValueError("positive_consensus must share the [B,T] host-score shape")
         if negative_consensus is not None and negative_consensus.shape != host_score.shape:
             raise ValueError("negative_consensus must share the [B,T] host-score shape")
-        if role_video_votes is None:
-            role_video_votes = host_score.new_zeros(host_score.shape[0], 3)
-        if role_video_votes.shape != (host_score.shape[0], 3):
-            raise ValueError("role_video_votes must have shape [B,3]")
-        summary = torch.cat(
-            [video_summary(host_score, evidence, validity), role_video_votes], dim=1
-        )
+        summary = video_summary(host_score, evidence, validity)
         video_logit = self.video_head(summary).squeeze(1)
         video_probability = torch.sigmoid(video_logit)
         hard_authorization = (video_probability >= 0.5).to(video_probability.dtype)

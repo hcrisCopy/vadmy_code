@@ -162,23 +162,6 @@ def test_event_anchor_uses_standard_weak_mil_topk() -> None:
     torch.testing.assert_close(anchor, torch.tensor([0.9]))
 
 
-def test_absolute_witness_only_amplifies_positive_local_authorization() -> None:
-    router = WitnessRouter()
-    host = torch.tensor([[0.2, 0.4, 0.8]])
-    evidence = torch.tensor([[0.9, 0.5, 0.1]])
-    validity = torch.ones_like(host, dtype=torch.bool)
-    neutral = router(host, evidence, validity, absolute_witness_logit=torch.zeros_like(host))
-    qualified = router(
-        host,
-        evidence,
-        validity,
-        absolute_witness_logit=torch.tensor([[2.0, -2.0, -2.0]]),
-    )
-    assert qualified["absolute_authorization_gain"][0, 0] > 1.0
-    assert qualified["absolute_authorization_gain"][0, 1] == 1.0
-    assert qualified["delta_anomaly"][0, 0] >= neutral["delta_anomaly"][0, 0]
-
-
 def test_local_event_completion_ignores_padding() -> None:
     score = torch.tensor([[0.1, 0.9, 0.2, 99.0]])
     validity = torch.tensor([[True, True, True, False]])

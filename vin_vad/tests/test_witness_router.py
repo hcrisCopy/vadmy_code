@@ -162,6 +162,13 @@ def test_event_anchor_uses_standard_weak_mil_topk() -> None:
     torch.testing.assert_close(anchor, torch.tensor([0.9]))
 
 
+def test_role_video_votes_enter_only_the_transparent_authorization_summary() -> None:
+    host, evidence, validity = inputs()
+    votes = torch.tensor([[0.8, 0.2, 0.6], [0.1, 0.3, 0.4]])
+    result = WitnessRouter()(host, evidence, validity, role_video_votes=votes)
+    torch.testing.assert_close(result["summary"][:, -3:], votes)
+
+
 def test_local_event_completion_ignores_padding() -> None:
     score = torch.tensor([[0.1, 0.9, 0.2, 99.0]])
     validity = torch.tensor([[True, True, True, False]])

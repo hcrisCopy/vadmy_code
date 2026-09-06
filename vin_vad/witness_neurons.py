@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import nn
 
@@ -13,8 +15,8 @@ class SignedTopKWitnessNeurons(nn.Module):
 
     def __init__(self, layers: int = 12, dimensions: int = 768, active: int = 32) -> None:
         super().__init__()
-        if not 0 < active <= dimensions:
-            raise ValueError("active must be in [1, dimensions]")
+        if not 0 < active <= layers * dimensions:
+            raise ValueError("active must be in [1, layers * dimensions]")
         self.layers = int(layers)
         self.dimensions = int(dimensions)
         self.active = int(active)
@@ -84,9 +86,8 @@ class SignedTopKWitnessNeurons(nn.Module):
 
     def gates(self, neuron_keep_mask: torch.Tensor | None = None) -> torch.Tensor:
         soft = torch.sigmoid(self.gate_logits)
-        total_active = self.layers * self.active
-        indices = torch.topk(self.gate_logits.reshape(-1), k=total_active).indices
-        hard = torch.zeros_like(soft).reshape(-1).scatter_(0, indices, 1.0).view_as(soft)
+        indices = torch.topk(self.gate_logits, k=self.active, dim=-1).indices
+        hard = torch.zeros_like(soft).scatter_(-1, indices, 1.0)
         straight_through = hard + soft - soft.detach()
         if neuron_keep_mask is not None:
             if neuron_keep_mask.shape != straight_through.shape:
@@ -119,10 +120,9 @@ class SignedTopKWitnessNeurons(nn.Module):
             primary_input = normalized
         gate = self.gates(neuron_keep_mask)
         coordinate_weights = gate * self.signed_weights
-        active_per_layer = gate.detach().sum(dim=-1).clamp_min(1.0).sqrt()
         layer_evidence = torch.einsum(
             "btld,ld->btl", primary_input, coordinate_weights
-        ) / active_per_layer.view(1, 1, self.layers)
+        ) / math.sqrt(self.active)
         layer_evidence = layer_evidence.masked_fill(~validity.unsqueeze(-1), 0.0)
         if bool(self.normal_role_ready):
             assert deviation is not None

@@ -16,14 +16,11 @@ def sample_hidden() -> tuple[torch.Tensor, torch.Tensor]:
     return hidden, validity
 
 
-def test_global_budget_selects_exactly_384_signed_neurons_and_gradients() -> None:
+def test_exactly_32_signed_neurons_per_layer_and_gradients() -> None:
     hidden, validity = sample_hidden()
     module = SignedTopKWitnessNeurons(active=32)
-    with torch.no_grad():
-        module.gate_logits[0].add_(10.0)
     result = module(hidden, validity)
-    assert int(module.active_counts().sum()) == 12 * 32
-    assert int(module.active_counts()[0]) > 32
+    assert torch.equal(module.active_counts(), torch.full((12,), 32))
     assert torch.any(result["coordinate_weights"] < 0)
     assert torch.any(result["coordinate_weights"] > 0)
     result["layer_evidence"].square().mean().backward()

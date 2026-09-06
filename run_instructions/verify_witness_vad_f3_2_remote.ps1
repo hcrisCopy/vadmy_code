@@ -26,7 +26,7 @@ conda activate dsanet
 export WITNESS_DATASETS='$datasetList'
 config='../vadmy_data/witness_vad/dsanet/f3_2_signed_support/$Dataset/w6/training/config.json'
 metric='../vadmy_data/witness_vad/dsanet/f3_2_signed_support/target_margin.json'
-recorded_commit=`$(grep -m1 '"git_commit"' "`$config" 2>/dev/null | cut -d'"' -f4 || true)
+recorded_commit=`$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("git_commit", ""))' "`$config" 2>/dev/null || true)
 if [[ -n "`$recorded_commit" ]] && [[ -f "`$metric" ]] && \
    git diff --quiet "`$recorded_commit"..HEAD -- vin_vad run_instructions/run_witness_vad_f3_2_dsanet.sh; then
   echo "reuse matching formal result from `$recorded_commit"

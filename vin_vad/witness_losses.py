@@ -39,6 +39,36 @@ def temporal_smoothness(score: torch.Tensor, validity: torch.Tensor) -> torch.Te
     return difference[pair_mask].mean()
 
 
+def consensus_localization_loss(
+    score: torch.Tensor,
+    positive_consensus: torch.Tensor,
+    negative_consensus: torch.Tensor,
+    validity: torch.Tensor,
+    labels: torch.Tensor,
+    margin: float,
+) -> torch.Tensor:
+    """Rank agreed witness locations above agreed veto locations in abnormal bags."""
+    losses = []
+    for curve, positive, negative, mask, label in zip(
+        score, positive_consensus, negative_consensus, validity, labels
+    ):
+        if label <= 0.5:
+            continue
+        curve = curve[mask]
+        positive = positive[mask].detach().clamp_min(0.0)
+        negative = negative[mask].detach().clamp_min(0.0)
+        pair_weight = positive[:, None] * negative[None, :]
+        weight_sum = pair_weight.sum()
+        if weight_sum > 0:
+            pair_loss = F.softplus(
+                margin - curve[:, None] + curve[None, :]
+            )
+            losses.append((pair_weight * pair_loss).sum() / weight_sum)
+    if not losses:
+        return score.sum() * 0.0
+    return torch.stack(losses).mean()
+
+
 def witness_objective(
     result: dict[str, torch.Tensor],
     host_score: torch.Tensor,
@@ -71,6 +101,17 @@ def witness_objective(
         role_losses.append(role_loss)
     neuron_loss = torch.stack(role_losses).mean()
     final_loss = per_video_mil(corrected, validity, labels).mean()
+    # Bag labels say only that an event exists.  The independent role jury
+    # supplies the missing within-video constraint without creating hard
+    # pseudo labels: only agreed witness-veto pairs carry ranking weight.
+    final_loss = final_loss + rank_weight * consensus_localization_loss(
+        corrected,
+        result["positive_agreement"],
+        result["negative_agreement"],
+        validity,
+        labels,
+        rank_margin,
+    )
     normal_mask = labels <= 0.5
     if normal_mask.any():
         normal_evidence = torch.stack(

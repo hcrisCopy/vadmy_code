@@ -35,8 +35,8 @@ class SignedTopKWitnessNeurons(nn.Module):
         self.register_buffer("normal_role_mask", torch.zeros(layers, dimensions))
         self.register_buffer("normal_role_direction", torch.ones(layers, dimensions))
         self.register_buffer("normal_role_weight", torch.zeros(layers, dimensions))
-        self.register_buffer("signed_score_mean", torch.tensor(0.0))
-        self.register_buffer("signed_score_std", torch.tensor(1.0))
+        self.register_buffer("normal_score_threshold", torch.tensor(0.0))
+        self.register_buffer("normal_score_std", torch.tensor(1.0))
         self.register_buffer("normal_role_ready", torch.tensor(False))
         self.register_buffer(
             "normal_context_centers", torch.zeros(contexts, dimensions)
@@ -109,7 +109,7 @@ class SignedTopKWitnessNeurons(nn.Module):
         mask: torch.Tensor,
         direction: torch.Tensor,
         weight: torch.Tensor,
-        score_mean: torch.Tensor,
+        score_threshold: torch.Tensor,
         score_std: torch.Tensor,
     ) -> None:
         expected = self.normal_mean.shape
@@ -120,10 +120,10 @@ class SignedTopKWitnessNeurons(nn.Module):
         self.normal_role_mask.copy_(mask.to(self.normal_role_mask))
         self.normal_role_direction.copy_(direction.to(self.normal_role_direction))
         self.normal_role_weight.copy_(weight.to(self.normal_role_weight))
-        self.signed_score_mean.copy_(score_mean.to(self.signed_score_mean))
-        self.signed_score_std.copy_(
-            score_std.to(self.signed_score_std).clamp_min(1e-4)
+        self.normal_score_threshold.copy_(
+            score_threshold.to(self.normal_score_threshold)
         )
+        self.normal_score_std.copy_(score_std.to(self.normal_score_std).clamp_min(1e-4))
         # A witness must start from a weak-label-defined functional role instead
         # of asking a random sparse gate to discover both support and direction.
         # The parameters remain trainable in the single joint optimization.
@@ -202,10 +202,25 @@ class SignedTopKWitnessNeurons(nn.Module):
             "btld,ld->btl", primary_input, coordinate_weights
         ) / math.sqrt(self.active)
         layer_evidence = layer_evidence.masked_fill(~validity.unsqueeze(-1), 0.0)
+        if bool(self.normal_role_ready):
+            assert deviation is not None
+            directional_deviation = torch.relu(
+                deviation * self.normal_role_direction.view(1, 1, self.layers, self.dimensions)
+            )
+            role_weight = self.normal_role_mask * self.normal_role_weight
+            normality_layer_evidence = (
+                directional_deviation * role_weight.view(1, 1, self.layers, self.dimensions)
+            ).sum(dim=-1) / role_weight.sum(dim=-1).clamp_min(1e-6).view(1, 1, self.layers)
+            normality_layer_evidence = normality_layer_evidence.masked_fill(
+                ~validity.unsqueeze(-1), 0.0
+            )
+        else:
+            normality_layer_evidence = torch.zeros_like(layer_evidence)
         layer_probability = torch.softmax(self.layer_logits, dim=0)
         temporal_input = layer_evidence * (self.layers * layer_probability.view(1, 1, -1))
         return {
             "layer_evidence": layer_evidence,
+            "normality_layer_evidence": normality_layer_evidence,
             "temporal_input": temporal_input,
             "gates": gate,
             "coordinate_weights": coordinate_weights,

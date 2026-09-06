@@ -29,6 +29,12 @@ class SignedTopKWitnessNeurons(nn.Module):
         self.register_buffer("normal_score_threshold", torch.tensor(0.0))
         self.register_buffer("normal_score_std", torch.tensor(1.0))
         self.register_buffer("normal_role_ready", torch.tensor(False))
+        self.register_buffer("primary_role_mask", torch.zeros(layers, dimensions))
+        self.register_buffer("primary_role_direction", torch.ones(layers, dimensions))
+        self.register_buffer("primary_role_weight", torch.zeros(layers, dimensions))
+        self.register_buffer("primary_score_threshold", torch.tensor(0.0))
+        self.register_buffer("primary_score_std", torch.tensor(1.0))
+        self.register_buffer("primary_role_ready", torch.tensor(False))
         self.gate_logits = nn.Parameter(torch.empty(layers, dimensions))
         self.signed_weights = nn.Parameter(torch.empty(layers, dimensions))
         self.layer_logits = nn.Parameter(torch.zeros(layers))
@@ -74,15 +80,25 @@ class SignedTopKWitnessNeurons(nn.Module):
         mask: torch.Tensor,
         direction: torch.Tensor,
         weight: torch.Tensor,
+        score_threshold: torch.Tensor | None = None,
+        score_std: torch.Tensor | None = None,
     ) -> None:
         expected = self.gate_logits.shape
         if any(value.shape != expected for value in (mask, direction, weight)):
             raise ValueError("primary-role tensors must all have shape [layers, dimensions]")
         selected = mask.to(self.gate_logits) > 0
+        self.primary_role_mask.copy_(mask.to(self.primary_role_mask))
+        self.primary_role_direction.copy_(direction.to(self.primary_role_direction))
+        self.primary_role_weight.copy_(weight.to(self.primary_role_weight))
+        if score_threshold is not None:
+            self.primary_score_threshold.copy_(score_threshold.to(self.primary_score_threshold))
+        if score_std is not None:
+            self.primary_score_std.copy_(score_std.to(self.primary_score_std).clamp_min(1e-4))
         self.gate_logits.copy_(torch.where(selected, 4.0, -4.0))
         self.signed_weights.copy_(
             direction.to(self.signed_weights) * weight.to(self.signed_weights)
         )
+        self.primary_role_ready.fill_(True)
 
     def gates(self, neuron_keep_mask: torch.Tensor | None = None) -> torch.Tensor:
         soft = torch.sigmoid(self.gate_logits)
@@ -124,6 +140,22 @@ class SignedTopKWitnessNeurons(nn.Module):
             "btld,ld->btl", primary_input, coordinate_weights
         ) / math.sqrt(self.active)
         layer_evidence = layer_evidence.masked_fill(~validity.unsqueeze(-1), 0.0)
+        if bool(self.primary_role_ready) and deviation is not None:
+            primary_weight = self.primary_role_mask * self.primary_role_weight
+            primary_absolute_layer = (
+                deviation
+                * self.primary_role_direction.view(1, 1, self.layers, self.dimensions)
+                * primary_weight.view(1, 1, self.layers, self.dimensions)
+            ).sum(dim=-1) / primary_weight.sum(dim=-1).clamp_min(1e-6).view(
+                1, 1, self.layers
+            )
+            primary_absolute_logit = (
+                primary_absolute_layer.mean(dim=-1) - self.primary_score_threshold
+            ) / self.primary_score_std
+            primary_absolute_logit = primary_absolute_logit.masked_fill(~validity, 0.0)
+        else:
+            primary_absolute_layer = torch.zeros_like(layer_evidence)
+            primary_absolute_logit = torch.zeros_like(validity, dtype=hidden.dtype)
         if bool(self.normal_role_ready):
             assert deviation is not None
             directional_deviation = torch.relu(
@@ -142,6 +174,8 @@ class SignedTopKWitnessNeurons(nn.Module):
         temporal_input = layer_evidence * (self.layers * layer_probability.view(1, 1, -1))
         return {
             "layer_evidence": layer_evidence,
+            "primary_absolute_layer_evidence": primary_absolute_layer,
+            "primary_absolute_logit": primary_absolute_logit,
             "normality_layer_evidence": normality_layer_evidence,
             "temporal_input": temporal_input,
             "gates": gate,

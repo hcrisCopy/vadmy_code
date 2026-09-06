@@ -106,11 +106,14 @@ class WitnessRouter(nn.Module):
         eta_anomaly_override: float | None = None,
         positive_consensus: torch.Tensor | None = None,
         negative_consensus: torch.Tensor | None = None,
+        absolute_witness_logit: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         if positive_consensus is not None and positive_consensus.shape != host_score.shape:
             raise ValueError("positive_consensus must share the [B,T] host-score shape")
         if negative_consensus is not None and negative_consensus.shape != host_score.shape:
             raise ValueError("negative_consensus must share the [B,T] host-score shape")
+        if absolute_witness_logit is not None and absolute_witness_logit.shape != host_score.shape:
+            raise ValueError("absolute_witness_logit must share the [B,T] host-score shape")
         summary = video_summary(host_score, evidence, validity)
         video_logit = self.video_head(summary).squeeze(1)
         video_probability = torch.sigmoid(video_logit)
@@ -175,6 +178,11 @@ class WitnessRouter(nn.Module):
         complementary_support = torch.minimum(
             witness_support, host_miss_support
         )
+        absolute_authorization_gain = (
+            torch.ones_like(witness_support)
+            if absolute_witness_logit is None
+            else 1.0 + torch.tanh(torch.relu(absolute_witness_logit))
+        ).masked_fill(~validity, 0.0)
         witness_event_support = masked_local_max(witness_support, validity)
         event_anchor = masked_local_max(host_clipped, validity)
         event_gap = torch.relu(
@@ -184,9 +192,12 @@ class WitnessRouter(nn.Module):
         local_shape = (
             anomaly_authorized.unsqueeze(1)
             * (
-                witness_support
-                + complementary_support
-                + witness_event_support * event_gap
+                absolute_authorization_gain
+                * (
+                    witness_support
+                    + complementary_support
+                    + witness_event_support * event_gap
+                )
                 - consensus_conflict_veto
             )
             - normal_authorized.unsqueeze(1) * veto_support
@@ -240,6 +251,7 @@ class WitnessRouter(nn.Module):
             "witness_support": witness_support,
             "host_miss_support": host_miss_support,
             "complementary_support": complementary_support,
+            "absolute_authorization_gain": absolute_authorization_gain,
             "witness_event_support": witness_event_support,
             "veto_support": veto_support,
             "consensus_conflict_veto": consensus_conflict_veto,

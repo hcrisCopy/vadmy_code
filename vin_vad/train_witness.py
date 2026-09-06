@@ -94,16 +94,17 @@ def fit_role_disentangled_reference(
 
     def role_definition(effect: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         best_effect, best_direction = effect.max(dim=0)
-        selected = torch.topk(best_effect, active_per_layer, dim=-1).indices
-        mask = torch.zeros_like(best_effect).scatter_(-1, selected, 1.0)
+        selected = torch.topk(best_effect.reshape(-1), total_active).indices
+        mask = torch.zeros_like(best_effect).reshape(-1).scatter_(0, selected, 1.0).view_as(
+            best_effect
+        )
         direction = torch.where(best_direction == 0, 1.0, -1.0)
         weight = best_effect * mask
-        weight = weight / (
-            weight.sum(dim=-1, keepdim=True) / active_per_layer
-        ).clamp_min(1e-6)
+        weight = weight / (weight.sum() / total_active).clamp_min(1e-6)
         return mask, direction, weight
 
     active_per_layer = min(neurons.active, neurons.dimensions)
+    total_active = neurons.layers * active_per_layer
     normal_mask, normal_direction, normal_weight = role_definition(
         class_effect(class_sum, class_square, class_count)
     )
@@ -142,8 +143,8 @@ def fit_role_disentangled_reference(
     )
     return {
         "normal_reference_snippets": snippet_count,
-        "normal_role_neurons_per_layer": active_per_layer,
-        "primary_role_neurons_per_layer": active_per_layer,
+        "normal_role_neurons_total": total_active,
+        "primary_role_neurons_total": total_active,
     }
 
 
@@ -190,6 +191,8 @@ def comparable_configuration(config: dict[str, object]) -> dict[str, object]:
         "normal_reference_snippets",
         "normal_role_neurons_per_layer",
         "primary_role_neurons_per_layer",
+        "normal_role_neurons_total",
+        "primary_role_neurons_total",
     }
     comparable = {key: value for key, value in config.items() if key not in derived}
     comparable.setdefault("variant", "w6")

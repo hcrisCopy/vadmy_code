@@ -268,9 +268,12 @@ def checkpoint_payload(
     epoch: int,
     history: list[dict[str, float | int]],
     config: dict[str, object],
+    model_state: dict[str, torch.Tensor] | None = None,
+    ema_model: dict[str, torch.Tensor] | None = None,
+    ema_updates: int = 0,
 ) -> dict[str, object]:
-    return {
-        "model": model.state_dict(),
+    payload = {
+        "model": model.state_dict() if model_state is None else model_state,
         "optimizer": optimizer.state_dict(),
         "scheduler": scheduler.state_dict(),
         "epoch": epoch,
@@ -281,6 +284,24 @@ def checkpoint_payload(
         "torch_rng": torch.get_rng_state(),
         "cuda_rng": torch.cuda.get_rng_state_all(),
     }
+    if ema_model is not None:
+        payload["ema_model"] = ema_model
+        payload["ema_updates"] = int(ema_updates)
+    return payload
+
+
+@torch.no_grad()
+def update_ema_state(
+    ema_state: dict[str, torch.Tensor],
+    model: torch.nn.Module,
+    decay: float,
+) -> None:
+    """Average one training graph; non-floating audit buffers remain exact."""
+    for name, value in model.state_dict().items():
+        if value.is_floating_point():
+            ema_state[name].lerp_(value.detach(), 1.0 - decay)
+        else:
+            ema_state[name].copy_(value.detach())
 
 
 def main() -> None:
@@ -346,6 +367,7 @@ def main() -> None:
             ),
             "test_data_used": False,
             "optimizer_count": 1,
+            "ema_decay": 0.995,
         }
     )
     config_path = output / "config.json"
@@ -399,6 +421,11 @@ def main() -> None:
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )
+    ema_decay = float(configuration["ema_decay"])
+    ema_state = {
+        name: value.detach().clone() for name, value in model.state_dict().items()
+    }
+    ema_updates = 0
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.epochs
     )
@@ -413,6 +440,11 @@ def main() -> None:
         scheduler.load_state_dict(saved["scheduler"])
         history = list(saved["history"])
         start_epoch = int(saved["epoch"])
+        ema_state = {
+            name: value.to(device).clone()
+            for name, value in saved.get("ema_model", saved["model"]).items()
+        }
+        ema_updates = int(saved.get("ema_updates", 0))
         random.setstate(saved["python_rng"])
         np.random.set_state(saved["numpy_rng"])
         torch.set_rng_state(saved["torch_rng"].cpu())
@@ -497,6 +529,8 @@ def main() -> None:
             )
             losses["total"].backward()
             optimizer.step()
+            update_ema_state(ema_state, model, ema_decay)
+            ema_updates += 1
             for name in totals:
                 totals[name] += float(losses[name].detach())
             progress.set_postfix(
@@ -528,14 +562,29 @@ def main() -> None:
         )
         atomic_torch_save(
             checkpoint_payload(
-                model, optimizer, scheduler, epoch + 1, history, configuration
+                model,
+                optimizer,
+                scheduler,
+                epoch + 1,
+                history,
+                configuration,
+                ema_model=ema_state,
+                ema_updates=ema_updates,
             ),
             last_path,
         )
         if args.retain_epoch_checkpoints:
             atomic_torch_save(
                 checkpoint_payload(
-                    model, optimizer, scheduler, epoch + 1, history, configuration
+                    model,
+                    optimizer,
+                    scheduler,
+                    epoch + 1,
+                    history,
+                    configuration,
+                    model_state=ema_state,
+                    ema_model=ema_state,
+                    ema_updates=ema_updates,
                 ),
                 checkpoints / f"epoch_{epoch + 1:03d}.pt",
             )

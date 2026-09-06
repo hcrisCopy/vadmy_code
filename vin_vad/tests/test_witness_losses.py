@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import torch
 
-from vin_vad.witness_losses import temporal_smoothness, topk_bag_probability, witness_objective
+from vin_vad.witness_losses import (
+    normal_host_copy_loss,
+    temporal_smoothness,
+    topk_bag_probability,
+    witness_objective,
+)
 from vin_vad.witness_model import WitnessVAD
 
 
@@ -26,6 +31,24 @@ def test_padding_does_not_enter_topk_or_smoothness() -> None:
     changed[~validity] = 1e6
     torch.testing.assert_close(first_topk, topk_bag_probability(changed, validity))
     torch.testing.assert_close(first_smooth, temporal_smoothness(changed, validity))
+
+
+def test_normal_host_copy_penalizes_shared_false_alarms_but_keeps_vetoes() -> None:
+    host = torch.tensor(
+        [[0.1, 0.3, 0.8, 0.0], [0.1, 0.3, 0.8, 0.0]], dtype=torch.float32
+    )
+    validity = torch.tensor([[True, True, True, False]] * 2)
+    labels = torch.zeros(2)
+    copied = host.clone().requires_grad_(True)
+    veto = torch.tensor(
+        [[0.8, 0.3, 0.1, 1.0], [0.8, 0.3, 0.1, 1.0]], dtype=torch.float32
+    )
+    copied_loss = normal_host_copy_loss(copied, host, validity, labels)
+    veto_loss = normal_host_copy_loss(veto, host, validity, labels)
+    assert float(copied_loss) > 0.9
+    torch.testing.assert_close(veto_loss, torch.tensor(0.0))
+    copied_loss.backward()
+    assert copied.grad is not None and float(copied.grad.abs().sum()) > 0.0
 
 
 def test_every_objective_component_reaches_witness_parameters() -> None:

@@ -173,23 +173,19 @@ class SignedTopKWitnessNeurons(nn.Module):
             raise ValueError("validity must be a boolean [B,T] tensor")
         normalized = self.normalization(hidden)
         if bool(self.normal_role_ready):
-            global_deviation = (
-                normalized
-                - self.normal_mean.view(1, 1, self.layers, self.dimensions)
-            ) / self.normal_std.view(1, 1, self.layers, self.dimensions)
             if bool(self.normal_context_ready):
                 deviation, context_index = self.contextual_deviation(
                     normalized, validity
                 )
             else:
-                deviation = global_deviation
+                deviation = (
+                    normalized
+                    - self.normal_mean.view(1, 1, self.layers, self.dimensions)
+                ) / self.normal_std.view(1, 1, self.layers, self.dimensions)
                 context_index = torch.full(
                     (hidden.shape[0],), -1, dtype=torch.long, device=hidden.device
                 )
-            # Local anomaly witnesses must remain comparable across videos;
-            # the context-matched residual is reserved for the normality role
-            # that rejects scene-specific normal activation.
-            primary_input = global_deviation
+            primary_input = deviation
         else:
             deviation = None
             context_index = torch.full(

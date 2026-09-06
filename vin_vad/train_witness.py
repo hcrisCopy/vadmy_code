@@ -116,29 +116,22 @@ def fit_role_disentangled_reference(
         hidden = item["hidden"].to(device, non_blocking=True)
         normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
         deviation = matched_deviation(normalized)
-        global_deviation = (normalized - mean) / standard_deviation
         tail_count = min(len(deviation), max(1, len(deviation) // 16 + 1))
-        context_summary = torch.stack(
+        summary = torch.stack(
             [
                 torch.topk(deviation, tail_count, dim=0).values.mean(dim=0),
                 torch.topk(-deviation, tail_count, dim=0).values.mean(dim=0),
             ]
         )
-        global_summary = torch.stack(
-            [
-                torch.topk(global_deviation, tail_count, dim=0).values.mean(dim=0),
-                torch.topk(-global_deviation, tail_count, dim=0).values.mean(dim=0),
-            ]
-        )
         label = int(item["label"])
-        class_sum[label] += context_summary
-        class_square[label] += context_summary.square()
+        class_sum[label] += summary
+        class_square[label] += summary.square()
         class_count[label] += 1
         host_score = item["host_score"].to(device, non_blocking=True).double()
         host_bag = torch.topk(host_score, tail_count).values.mean().clamp(0.0, 1.0)
         residual = (host_bag - float(label)).abs()
-        residual_sum[label] += residual * global_summary
-        residual_square[label] += residual * global_summary.square()
+        residual_sum[label] += residual * summary
+        residual_square[label] += residual * summary.square()
         residual_count[label] += residual
 
     def class_effect(

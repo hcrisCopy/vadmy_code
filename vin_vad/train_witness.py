@@ -95,40 +95,27 @@ def fit_role_disentangled_reference(
     ).clamp_min(1e-4)
     context_std = context_variance.sqrt()
 
-    def matched_deviation(
-        normalized: torch.Tensor,
-    ) -> tuple[torch.Tensor, int]:
+    def matched_deviation(normalized: torch.Tensor) -> torch.Tensor:
         descriptor = normalized[:, -1].median(dim=0).values
         distance = (descriptor.unsqueeze(0) - context_centers).square().mean(dim=-1)
         context_index = int(distance.argmin())
         return (
-            (normalized - context_mean[context_index]) / context_std[context_index],
-            context_index,
-        )
+            normalized - context_mean[context_index]
+        ) / context_std[context_index]
 
     class_sum = torch.zeros(
         2, 2, neurons.layers, neurons.dimensions, dtype=torch.float64, device=device
     )
     class_square = torch.zeros_like(class_sum)
     class_count = torch.zeros(2, dtype=torch.float64, device=device)
-    residual_context_sum = torch.zeros(
-        neurons.contexts,
-        2,
-        2,
-        neurons.layers,
-        neurons.dimensions,
-        dtype=torch.float64,
-        device=device,
-    )
-    residual_context_square = torch.zeros_like(residual_context_sum)
-    residual_context_count = torch.zeros(
-        neurons.contexts, 2, dtype=torch.float64, device=device
-    )
+    residual_sum = torch.zeros_like(class_sum)
+    residual_square = torch.zeros_like(class_sum)
+    residual_count = torch.zeros(2, dtype=torch.float64, device=device)
     for index in tqdm(range(len(dataset)), desc="rank role neurons", unit="video"):
         item = dataset[index]
         hidden = item["hidden"].to(device, non_blocking=True)
         normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
-        deviation, context_index = matched_deviation(normalized)
+        deviation = matched_deviation(normalized)
         tail_count = min(len(deviation), max(1, len(deviation) // 16 + 1))
         summary = torch.stack(
             [
@@ -143,9 +130,9 @@ def fit_role_disentangled_reference(
         host_score = item["host_score"].to(device, non_blocking=True).double()
         host_bag = torch.topk(host_score, tail_count).values.mean().clamp(0.0, 1.0)
         residual = (host_bag - float(label)).abs()
-        residual_context_sum[context_index, label] += residual * summary
-        residual_context_square[context_index, label] += residual * summary.square()
-        residual_context_count[context_index, label] += residual
+        residual_sum[label] += residual * summary
+        residual_square[label] += residual * summary.square()
+        residual_count[label] += residual
 
     def class_effect(
         total: torch.Tensor,
@@ -177,46 +164,8 @@ def fit_role_disentangled_reference(
     normal_mask, normal_direction, normal_weight = role_definition(
         class_effect(class_sum, class_square, class_count)
     )
-    residual_context_mean = residual_context_sum / residual_context_count[
-        :, :, None, None, None
-    ].clamp_min(1e-6)
-    residual_context_variance = (
-        residual_context_square
-        / residual_context_count[:, :, None, None, None].clamp_min(1e-6)
-        - residual_context_mean.square()
-    ).clamp_min(1e-6)
-    residual_context_effect = torch.relu(
-        (residual_context_mean[:, 1] - residual_context_mean[:, 0])
-        / torch.sqrt(
-            residual_context_variance[:, 0] + residual_context_variance[:, 1]
-        )
-    )
-    context_effect, context_direction_index = residual_context_effect.max(dim=1)
-    aggregate_effect = context_effect.mean(dim=0)
-    selected = torch.topk(aggregate_effect, active_per_layer, dim=-1).indices
-    primary_mask = torch.zeros_like(aggregate_effect).scatter_(-1, selected, 1.0)
-    primary_weight = aggregate_effect * primary_mask
-    primary_weight = primary_weight / (
-        primary_weight.sum(dim=-1, keepdim=True) / active_per_layer
-    ).clamp_min(1e-6)
-    primary_direction = torch.ones_like(primary_weight)
-    primary_context_direction = torch.where(
-        context_direction_index == 0, 1.0, -1.0
-    )
-    primary_context_weight = context_effect * primary_mask.unsqueeze(0)
-    primary_context_weight = primary_context_weight / (
-        primary_context_weight.sum(dim=-1, keepdim=True) / active_per_layer
-    ).clamp_min(1e-6)
-    selected_context_direction = primary_context_direction.masked_fill(
-        ~primary_mask.bool().unsqueeze(0), 0.0
-    )
-    context_direction_disagreement = (
-        selected_context_direction.ne(selected_context_direction[:1])
-        .any(dim=0)
-        .logical_and(primary_mask.bool())
-        .sum()
-        .double()
-        / primary_mask.sum().clamp_min(1.0)
+    primary_mask, primary_direction, primary_weight = role_definition(
+        class_effect(residual_sum, residual_square, residual_count)
     )
 
     role_weight = normal_mask * normal_weight
@@ -224,7 +173,7 @@ def fit_role_disentangled_reference(
     for index in tqdm(normal_indices, desc="calibrate normality score", unit="video"):
         hidden = dataset[index]["hidden"].to(device, non_blocking=True)
         normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
-        deviation, _ = matched_deviation(normalized)
+        deviation = matched_deviation(normalized)
         directional = torch.relu(deviation * normal_direction)
         layer_score = (directional * role_weight).sum(dim=-1) / role_weight.sum(
             dim=-1
@@ -253,9 +202,6 @@ def fit_role_disentangled_reference(
         primary_direction.float(),
         primary_weight.float(),
     )
-    neurons.set_primary_context_role(
-        primary_context_direction.float(), primary_context_weight.float()
-    )
     return {
         "normal_reference_snippets": snippet_count,
         "normal_role_neurons_per_layer": active_per_layer,
@@ -264,9 +210,6 @@ def fit_role_disentangled_reference(
         "normal_context_video_counts": torch.bincount(
             normal_context_index, minlength=neurons.contexts
         ).tolist(),
-        "primary_context_direction_disagreement": float(
-            context_direction_disagreement
-        ),
     }
 
 
@@ -315,7 +258,6 @@ def comparable_configuration(config: dict[str, object]) -> dict[str, object]:
         "primary_role_neurons_per_layer",
         "normal_contexts_fit",
         "normal_context_video_counts",
-        "primary_context_direction_disagreement",
     }
     comparable = {key: value for key, value in config.items() if key not in derived}
     comparable.setdefault("variant", "w6")

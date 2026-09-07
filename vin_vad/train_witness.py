@@ -25,6 +25,39 @@ from vin_vad.witness_losses import variant_objective
 from vin_vad.witness_model import build_witness_variant
 
 
+def robust_directional_effect(
+    normal_summaries: torch.Tensor,
+    abnormal_summaries: torch.Tensor,
+    scale_floor: float = 1e-2,
+) -> torch.Tensor:
+    """Return a median/MAD effect for directional MIL responses.
+
+    Each input is ``[videos, directions, layers, dimensions]``.  A coordinate
+    is credible only when its typical abnormal-bag top-k response exceeds its
+    typical normal-bag response; a few extreme videos cannot dominate either
+    the center or scale estimate.
+    """
+    if normal_summaries.ndim != 4 or abnormal_summaries.ndim != 4:
+        raise ValueError("directional summaries must be [N,2,layers,dimensions]")
+    if normal_summaries.shape[1:] != abnormal_summaries.shape[1:]:
+        raise ValueError("normal and abnormal directional summaries must align")
+    if normal_summaries.shape[0] == 0 or abnormal_summaries.shape[0] == 0:
+        raise ValueError("robust effect needs both normal and abnormal videos")
+    if scale_floor <= 0.0:
+        raise ValueError("scale_floor must be positive")
+
+    normal_median = normal_summaries.median(dim=0).values
+    abnormal_median = abnormal_summaries.median(dim=0).values
+    normal_mad = (
+        normal_summaries - normal_median.unsqueeze(0)
+    ).abs().median(dim=0).values
+    abnormal_mad = (
+        abnormal_summaries - abnormal_median.unsqueeze(0)
+    ).abs().median(dim=0).values
+    robust_scale = (normal_mad + abnormal_mad).clamp_min(scale_floor)
+    return torch.relu((abnormal_median - normal_median) / robust_scale)
+
+
 @torch.no_grad()
 def fit_role_disentangled_reference(
     model: torch.nn.Module,
@@ -115,11 +148,7 @@ def fit_role_disentangled_reference(
             normalized - context_mean[context_index]
         ) / context_std[context_index]
 
-    class_sum = torch.zeros(
-        2, 2, neurons.layers, neurons.dimensions, dtype=torch.float64, device=device
-    )
-    class_square = torch.zeros_like(class_sum)
-    class_count = torch.zeros(2, dtype=torch.float64, device=device)
+    class_summaries: list[list[torch.Tensor]] = [[], []]
     for index in tqdm(range(len(dataset)), desc="rank role neurons", unit="video"):
         item = dataset[index]
         hidden = item["hidden"].to(device, non_blocking=True)
@@ -133,24 +162,7 @@ def fit_role_disentangled_reference(
             ]
         )
         label = int(item["label"])
-        class_sum[label] += summary
-        class_square[label] += summary.square()
-        class_count[label] += 1
-
-    def class_effect(
-        total: torch.Tensor,
-        square_total: torch.Tensor,
-        count: torch.Tensor,
-    ) -> torch.Tensor:
-        mean_value = total / count[:, None, None, None].clamp_min(1e-6)
-        variance_value = (
-            square_total / count[:, None, None, None].clamp_min(1e-6)
-            - mean_value.square()
-        ).clamp_min(1e-6)
-        return torch.relu(
-            (mean_value[1] - mean_value[0])
-            / torch.sqrt(variance_value[0] + variance_value[1])
-        )
+        class_summaries[label].append(summary.float().cpu())
 
     def role_definition(effect: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         best_effect, best_direction = effect.max(dim=0)
@@ -164,8 +176,12 @@ def fit_role_disentangled_reference(
         return mask, direction, weight
 
     active_per_layer = min(neurons.active, neurons.dimensions)
+    credibility = robust_directional_effect(
+        torch.stack(class_summaries[0]),
+        torch.stack(class_summaries[1]),
+    ).to(device=device, dtype=torch.float64)
     normal_mask, normal_direction, normal_weight = role_definition(
-        class_effect(class_sum, class_square, class_count)
+        credibility
     )
     # A bag-level host error says which videos are difficult, not which snippets
     # are anomalous.  Using it to select coordinates leaked that coarse notion of
@@ -425,6 +441,7 @@ def main() -> None:
             ),
             "test_data_used": False,
             "optimizer_count": 1,
+            "witness_selection": "directional_mil_median_mad",
         }
     )
     config_path = output / "config.json"

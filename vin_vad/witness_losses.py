@@ -31,6 +31,38 @@ def ranking_loss(score: torch.Tensor, validity: torch.Tensor, labels: torch.Tens
     return F.softplus(margin - abnormal[:, None] + normal[None, :]).mean()
 
 
+def counterfactual_tail_ranking_loss(
+    score: torch.Tensor,
+    validity: torch.Tensor,
+    labels: torch.Tensor,
+    margin: float,
+) -> torch.Tensor:
+    """Rank existential abnormal candidates above reliable normal hard negatives.
+
+    Weak abnormal labels authorize only each bag's current top-k candidates as
+    possible positives. Every snippet in a normal bag is a reliable negative, so
+    its top-k tail supplies the strictest counterfactual comparison. The loss
+    never assigns a negative pseudo-label to the unselected abnormal snippets.
+    """
+    normal_tail = []
+    abnormal_tail = []
+    for row, mask, label in zip(score, validity, labels):
+        valid = row[mask]
+        if valid.numel() == 0:
+            raise ValueError("every video needs at least one valid snippet")
+        count = min(valid.numel(), int(valid.numel() / 16 + 1))
+        tail = torch.topk(valid, count).values
+        if bool(label > 0.5):
+            abnormal_tail.append(tail)
+        else:
+            normal_tail.append(tail)
+    if not normal_tail or not abnormal_tail:
+        return score.sum() * 0.0
+    normal = torch.cat(normal_tail)
+    abnormal = torch.cat(abnormal_tail)
+    return F.softplus(margin - abnormal[:, None] + normal[None, :]).mean()
+
+
 def temporal_smoothness(score: torch.Tensor, validity: torch.Tensor) -> torch.Tensor:
     pair_mask = validity[:, 1:] & validity[:, :-1]
     difference = (score[:, 1:] - score[:, :-1]).square()
@@ -71,6 +103,9 @@ def witness_objective(
         role_losses.append(role_loss)
     neuron_loss = torch.stack(role_losses).mean()
     final_loss = per_video_mil(corrected, validity, labels).mean()
+    final_loss = final_loss + rank_weight * counterfactual_tail_ranking_loss(
+        corrected, validity, labels, rank_margin
+    )
     normal_mask = labels <= 0.5
     if normal_mask.any():
         normal_evidence = torch.stack(

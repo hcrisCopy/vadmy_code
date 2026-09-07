@@ -804,3 +804,317 @@ e_t^l=\frac{1}{\sqrt{k}}\sum_{j\in S_l}w_{lj}z_{tlj},\ |S_l|=k=32.
 
 完整自动实验记录见 `autoresearch-results/events.jsonl`；本阶段保留提交为 `f674bcc`（前半层
 场景 key）和 `5709e6e`（正常视频等权矩估计）。
+
+### DSANet-XD autoresearch 接续（2026-09-07）
+
+正式起点是 commit `a8b43cd`：host AP `86.95090%`，W6 AP `87.29935%`，增益
+`+0.34845 pp`，距 `+1 pp` 目标 `0.65155 pp`。完整命令输出和配置保存在
+`autoresearch-results/archive/20260906-191324/logs/0002-verify.json`，正式结果回执为
+`run_instructions/retained_witness_vad_f3_2_xd.json`。
+
+第一条结构替换删除 primary/normality/context 三角色投票和 agreement，只保留同一组有符号
+反事实 witness 的视频内相对项、时序上下文项与训练正常分布校准的绝对项。seed 42、20 epoch
+正式结果：best epoch 15，AP `87.23914%`，增益 `+0.28824 pp`；cross-AUC
+`95.56849%`，within-AUC `85.87847%`，normal FPR 改善 `0.06642 pp`。结果优于 host，
+但弱于正式起点，因此 autoresearch 已 discard（trial `974e17c`，revert `d9c9a8b`）。
+
+失败本质：离线冻结投影诊断能达到 AP `87.66759%`，而让异常袋的存在性 MIL 继续改写
+witness 坐标权重后只达到 `87.23914%`。正常袋能密集定义匹配反事实；异常袋只有视频级
+存在性标签，不足以持续重定义片段级神经元语义。下一条只做 matched control：冻结训练集
+统计得到的坐标、方向和效应权重，仅学习同一证据的时序读出与 frozen-host correction；不扫
+权重、不加新模块。
+
+远端 trial（下一次正式 run 前会自动归档到 `diagnostics/formal_trials/`）：
+
+~~~text
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/xd/w6/evaluation/metrics.json
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/xd/w6/selection/selection_curve.csv
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/xd/w6/training/checkpoints/best.pt
+~~~
+
+实际复现与查看命令：
+
+~~~powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File run_instructions/verify_witness_vad_f3_2_remote.ps1 -Dataset xd
+~~~
+
+~~~bash
+/root/miniconda3/envs/dsanet/bin/python -m json.tool \
+  /root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/xd/w6/evaluation/metrics.json
+~~~
+
+第二条 matched control 固定训练集统计得到的 witness support、方向和效应权重，其余设置与
+第一条完全一致。best epoch 2，AP `87.20845%`，增益 `+0.25756 pp`；cross-AUC
+`95.51900%`，within-AUC `85.92948%`，normal FPR 改善 `0.05364 pp`。它比可训练
+signed chain 再低 `0.03068 pp`，autoresearch 已 discard（trial `cbdd04c`，revert
+`2877477`）。因此“不可靠的神经元微调”不是缺失机制，停止围绕冻结范围做实验。
+
+两条正式失败与离线诊断的唯一结构差异是 temporal context：离线 `87.66759%` 使用同一
+witness 的 ReLU 正向偏离构造 context，而两条正式 trial 把 context 也改成 signed，造成
+时间窗口内正负抵消。下一条只恢复**同坐标双统计**：signed 投影决定校正方向，rectified
+幅度提供不抵消的时序支持；它们仍属于同一 witness 证据链，不恢复三角色投票或 agreement。
+
+第三条正式实验完成了上述同坐标双统计：固定同一组 witness，signed 瞬时偏离负责校正
+方向，rectified 非负幅度负责 temporal context。seed 42、20 epoch，best epoch 2，AP
+`87.28811%`，比 host 提升 `+0.33721 pp`；pooled/cross/within/macro AUC 分别为
+`95.53559% / 95.54227% / 86.14622% / 80.24726%`，normal FPR 改善 `0.00766 pp`。
+它仍比保留起点低 `0.01124 pp`，距 `+1 pp` 目标 `0.66279 pp`，因此 autoresearch 已
+discard（trial `7532494`，revert/current HEAD `8fda0bb`）。
+
+这条结果排除了“signed context 的正负抵消就是全部瓶颈”：改为 rectified context 仅从前两
+条正式实验的 `+0.258/+0.288 pp` 回升到 `+0.337 pp`，仍无法复现离线冻结诊断的
+`+0.71669 pp`。下一窗口不要直接开第四次训练。先在当前第三条 trial 的 checkpoint/逐 epoch
+输出上做**只读分量审计**，分别重算 signed instantaneous、rectified context、absolute
+normal calibration 及其组合，定位离线公式与正式图之间究竟是哪一项失真；诊断不得把 test
+标签用于拟合系数。只有审计指出一个可证伪的结构缺口后，才允许再做一次正式 `finish`。
+
+第三条 trial 当前远端产物（它属于失败 trial，不是 retained）：
+
+~~~text
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/xd/w6/evaluation/metrics.json
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/xd/w6/selection/selection.json
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/xd/w6/training/checkpoints/best.pt
+~~~
+
+前两条失败 trial 已自动归档：
+
+~~~text
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/diagnostics/formal_trials/20260906T200609Z-974e17cebe5f/
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/diagnostics/formal_trials/20260906T204530Z-cbdd04cdb6f1/
+~~~
+
+注意：UCF 的 `+1.07115 pp` 结果和 SHA256 仍是有效正式记录，但原 UCF checkpoint 已被后续
+XD 正式验证清理共享输出根时移除。不要声称原路径仍有文件；XD 结构定型后，必须用最终同一
+结构复跑 UCF，并把新 checkpoint 移入不会被下一数据集清理的受保护目录。
+
+### DSANet-XD 固定 checkpoint 分量审计（2026-09-07）
+
+本阶段只复用第三条失败 trial 的 epoch-2 checkpoint；没有重新训练，没有用测试标签拟合
+系数、阈值或结构。测试标签只计算最终指标。审计产物统一位于：
+
+~~~text
+../vadmy_data/witness_vad/dsanet/diagnostics/
+~~~
+
+| 固定公式 | XD AP | 相对 host | 裁决 |
+|---|---:|---:|---|
+| 正式 learned full | 87.28811 | +0.33721 pp | 参考 |
+| signed + absolute | 87.35148 | +0.40059 pp | 最强简单分量，但不足 |
+| signed + 确定性 rectified context + absolute | 87.39086 | +0.43996 pp | 本阶段最好，仍不足 |
+| 绝对证据逐片段 CDF 授权 | 87.27911 | +0.32821 pp | 只改善 FPR，删除 |
+| `q` 乘法正授权 | 87.23001 | +0.27911 pp | 会抹掉可靠正见证，删除 |
+| `q` 追加正授权 | 87.31934 | +0.36844 pp | 增益太小，删除 |
+| host-to-top-k 反事实补偿 | 87.34102 | +0.39012 pp | 改善正常 FPR，但不足 |
+| Entmax 稀疏责任 | 86.02970 | -0.92120 pp | 稀疏化不是瓶颈，删除 |
+| host-witness 冲突专修 | 87.03087 | +0.07997 pp | 丢失一致位置的有效排序，删除 |
+| OR-Markov 责任链 | 87.28864 | +0.33774 pp | 未增加信息，删除 |
+| 训练持续度 11 的 median 投影 | 87.29810 | +0.34720 pp | 时序平滑不是瓶颈，删除 |
+
+关键诊断不是“还差一个门”：learned video route 的视频级 AUC 已达 `98.78067%`，但任何
+路由重写都没有显著提高 frame AP。相反，绝对 witness 的视频级 mean/top-k AUC 分别为
+`87.70678% / 88.48864%`，而视频内标准化 relative top-k 的视频级 AUC 只有 `34.52899%`。
+当前神经元主要会区分视频，却没有提供足够稳定的片段证词；固定这组 witness 后，局部公式的
+实测上限明显低于 `+1 pp`。因此停止 q、eta、平滑、稀疏度和后处理实验。
+
+下一条正式假设只改变 witness 的**训练袋可信度定义**。当前均值/方差效应可能被少数极端
+异常视频主导；改为每个方向上的稳健效应：
+
+\[
+C_{lj}^{\pm}=\frac{\operatorname{Median}_{V:Y=1}u_{Vlj}^{\pm}
+-\operatorname{Median}_{V:Y=0}u_{Vlj}^{\pm}}
+{\operatorname{MAD}_{V:Y=1}u_{Vlj}^{\pm}
++\operatorname{MAD}_{V:Y=0}u_{Vlj}^{\pm}+\epsilon},
+\]
+
+其中 `u` 仍是每个训练视频的 MIL top-k 方向偏离。每层只保留 `C` 最大的 32 个坐标；其余
+模型、seed 42、20 epoch、损失和 DSANet 评测协议全部不变。这不是加模块，而是要求一个
+可解释 witness 必须在多数异常袋中稳定作证、在正常袋中保持沉默。若 DSANet-XD 不能超过
+保留起点 `87.29935%`，立即删除该定义，不继续改分位数或 MAD 系数。
+
+### DSANet-XD 稳健袋可信度正式结果（2026-09-07）
+
+第四条正式实验只把方向 witness 的训练袋效应从均值/方差改为 median/MAD；模型、损失、
+seed 42、20 epoch、每层 32 个坐标和评测协议均未改变。best epoch 1，XD AP
+`87.30967%`，相对 host `86.95090%` 提升 `+0.35877 pp`，仅比此前保留结果
+`87.29935%` 高 `+0.01032 pp`，距 `+1 pp` 目标仍差 `0.64123 pp`。normal-frame FPR
+反而增加 `+0.22351 pp`。控制器按单一主指标保留 commit `630a938`，但方法裁决是：
+**没有解决 XD 定位瓶颈，不把 median/MAD 包装成独立创新，也不继续扫分位数或尺度下限。**
+
+远端正式产物：
+
+~~~text
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/xd/w6/evaluation/metrics.json
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/xd/w6/selection/selection_curve.csv
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/xd/w6/training/checkpoints/best.pt
+~~~
+
+本地完整命令输出为 `autoresearch-results/logs/0004-verify.json`。复现和查看命令：
+
+~~~powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File run_instructions/verify_witness_vad_f3_2_remote.ps1 -Dataset xd
+~~~
+
+~~~bash
+/root/miniconda3/envs/dsanet/bin/python -m json.tool \
+  /root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/xd/w6/evaluation/metrics.json
+~~~
+
+#### 为什么 UCF 过线而 XD 卡住
+
+1. UCF 的 AUC 从 `89.44464%` 到 `90.51579%`，提升 `+1.07115 pp`；XD 评 AP，当前只从
+   `86.95090%` 到 `87.30967%`。AP 更依赖高分端精确排序，也更容易被正常高分误报伤害。
+2. XD 固定 checkpoint 分量审计中 signed local witness 单独贡献 `+0.37664 pp`，而
+   normal/context/absolute 单独只有 `+0.02342/-0.01754/+0.06007 pp`。核心方向有效，
+   但视频授权和上下文没有补足局部排序。
+3. learned video route 的视频级 AUC 已达 `98.78067%`，而 relative witness top-k 的视频级
+   AUC 只有 `34.52899%`。模型已经会判断“视频是否异常”，但不能稳定指出“异常在哪”。
+4. 第三、第四条正式实验都在早期 epoch 取得最佳 AP，此后训练 loss 继续下降而 AP 下降，
+   直接证实训练目标与最终逐帧排序错配。
+5. median/MAD 只带来 `+0.01032 pp`，说明少数异常视频主导效应不是主因。异常袋只保证
+   存在证词；强求多数异常袋出现同一坐标，反而会压制类别特异、稀有但真实的异常证词。
+
+#### 下一条唯一正式假设：存在性候选对可靠正常反事实的片段排序
+
+当前 `final_loss` 只对 corrected score 做 top-k bag BCE；跨袋 ranking 只施加在 witness role
+的 bag 均值上。下一条不加网络模块，只让最终校正直接学习 pooled AP 所需的弱监督排序：
+
+\[
+\mathcal L_{\mathrm{CF-rank}}=
+\frac{1}{|P||N|}\sum_{p\in P,n\in N}\operatorname{softplus}(m-p+n),
+\quad
+P=\operatorname{TopK}(S_{Y=1}),\;N=\operatorname{TopK}(S_{Y=0}).
+\]
+
+`P` 仅把异常袋当前 top-k 当作存在性候选，不把异常袋其余片段伪标为正常；`N` 只使用正常
+袋最难片段，仍是可靠密集负监督。该项作用在最终 corrected score，而不是新增 expert、router
+或后处理。沿用已有 `rank_margin=0.5` 和 `rank_weight=0.5`，不增加超参、不扫权重。判据：
+先在 DSANet-XD 超过 `87.30967%`；若仍不能明显缩小到 `+1 pp` 的差距，删除该目标并停止
+所有见证选择/路由微调，重新审视最终校正参数化。
+
+### DSANet-XD 最终分数反事实排序正式结果（2026-09-07）
+
+第五条正式实验在 commit `440953e` 上给 corrected score 增加存在性候选对正常难负例的
+pairwise ranking；没有新增网络模块或超参。seed 42、20 epoch 的 best 仍为 epoch 1，XD AP
+`87.31431%`，相对 host 提升 `+0.36341 pp`，仅比第四条多 `+0.00464 pp`，距目标仍差
+`0.63659 pp`。within-AUC 提升 `+0.76272 pp`，但 cross-AUC 仅提升 `+0.11309 pp`，
+normal-frame FPR 恶化 `+0.19797 pp`。控制器按主指标保留该 commit，但方法裁决是：
+**排序损失微调失败；不扫 margin/weight，不把该项写成创新。**
+
+远端产物与复现命令仍是上一节列出的固定路径和命令；本地完整输出为
+`autoresearch-results/logs/0005-verify.json`。
+
+#### 通用性状态纠正（必须遵守）
+
+历史 UCF `+1.07115 pp` 对应方法链截至 commit `5709e6e`。XD 正式起点 `a8b43cd` 虽然包含
+该祖先，但中间的 `b6badcc`、`a8b43cd` 已继续修改 `train_witness.py` 和
+`witness_router.py`；之后还有 `630a938`、`440953e`。因此历史 UCF 数字与当前 XD 数字
+**不是同一最终 commit，禁止拼在一起声称通用方法已经在两个数据集过线。**
+
+从现在起，DSANet 完成门只有一个：同一最终 commit、同一结构、同一公式和同一固定超参，
+分别只用 UCF/XD 各自训练集拟合数据统计，然后在 UCF AUC 与 XD AP 上均提升至少 `1 pp`。
+允许训练得到的数据集内正常参考和 witness 不同；不允许数据集专属模块、公式或手调超参。
+候选版本先过 XD 再原样重跑 UCF；XD 若明显不过线，不浪费一轮 UCF 正式训练。
+
+按项目约定继续采用 VAD 常用的 test-primary-metric best checkpoint 协议，不新增 validation
+split；结果文件必须如实保留 `test_used_for_selection=true`。本项目“无数据泄露”门聚焦于：
+训练和结构拟合不读取帧级 GT；UCF 流程不读取 XD 数据/统计，XD 流程不读取 UCF 数据/统计。
+
+#### 下一步先审计，不直接开第六次训练
+
+第五条结果表明，给现有输出增加更贴近 AP 的排序目标仍不能改变 epoch-1 峰值。下一步只读
+审计**视频内标准化是否删除跨视频校准**。注意当前 W6 `WitnessRouter` 已在 `b6badcc` 删除
+`event_gap`，直接使用 `delta_anomaly = eta * masked_standardize(evidence)`；不得按旧 W2 结构
+分析。复用当前 best 的缓存曲线，分别报告 raw `evidence`、`delta_anomaly`、host 与 corrected
+的 pooled/cross/within 指标，并统计正常帧、异常帧、固定 `host<0.5` 漏检异常帧上的正校正
+覆盖。测试 GT 只用于诊断分组，不拟合阈值或系数。只有 raw evidence 保留有用 cross-video
+信息、而标准化 residual 明显丢失时，才允许设计“训练正常分布校准 + 视频内残差”的单一
+通用 correction；否则停止改 router，回到 witness 表示本身。任何新 correction 必须同一
+commit 依次通过 XD、UCF。
+
+### DSANet-XD 当前 W6 跨视频校准审计（2026-09-07）
+
+脚本 `vin_vad/audit_w6_calibration.py` 只读取 commit `440953e` best epoch 1 的正式缓存曲线；
+GT 只用于报告分组和指标，没有拟合阈值、系数或结构。远端产物：
+
+~~~text
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/diagnostics/xd_w6_cross_video_calibration_audit.json
+~~~
+
+| 曲线 | pooled AUC | cross-AUC | within-AUC | pooled AP |
+|---|---:|---:|---:|---:|
+| host | 95.40110 | 95.40816 | 85.46846 | 86.95090 |
+| corrected | 95.51465 | 95.52125 | 86.23118 | 87.31431 |
+| raw witness evidence | 74.67940 | 74.67562 | 79.99238 | 47.73728 |
+| `delta_anomaly`（视频内标准化后） | 59.99488 | 59.98066 | 79.99257 | 31.31636 |
+
+raw evidence 经视频内标准化后，within-AUC 几乎不变，但 cross-AUC 从 `74.67562%` 降到
+`59.98066%`，说明当前 router 明确丢掉了 witness 的跨视频绝对可信度。raw evidence 均值在
+正常视频帧、真实异常帧、固定 `host<0.5` 的漏检异常帧上分别为 `0.32922/0.48189/0.42049`；
+但漏检异常帧的 `delta_anomaly` 均值为 `-0.02293`，只有 `46.60028%` 得到正校正，反而低于
+正常视频帧的正校正比例 `55.84265%`。这解释了“within 明显涨、cross 和 AP 只小涨”。
+
+下一条允许的结构假设只修改同一 evidence 的 correction 表达：
+
+\[
+r_t=\operatorname{StdWithinVideo}(e_t)
++\tanh\!\left(\operatorname{logit}(e_t)-b\right).
+\]
+
+第一项保留已验证的局部排序；第二项保留 raw evidence 的跨视频可信度。`b` 是由现有袋级损失
+学习的单一全局标量，固定初始化为 0；它不是数据集专属阈值，不增加 expert、context、q 或
+后处理，也不增加需扫描的超参。正式实验前应删除已判无效的 final tail-ranking 项，避免把
+失败 loss 与新 correction 捆绑。该候选先在 XD 运行；若接近或达到 `+1 pp`，必须在完全相同
+commit 上重跑 UCF。若 XD 仍停留在零点几，否决当前三角色 evidence 本身，停止 router 微调。
+
+### DSANet-UCF 单一固定 Top-32 干净参考（2026-09-08）
+
+用户取消两组选点的 union 方案后，commit `bf3010d` 已由 `b5b89fc` 完整撤回。当前
+commit `fc2b4da` 只用训练袋正常/异常的标准化反事实效应，在每层选择一组固定 Top-32；
+Primary、Normality、Context 三种读出必须共享这组坐标，代码会拒绝第二套 role mask。
+同时删除 XD 已判无效的 median/MAD 选点和 corrected-score tail-ranking loss；router 只保留
+视频级正常抑制、一致位置保护和带符号的局部有界残差，不含 host-miss complement、event gap、
+event completion 或 confidence gain。
+
+seed 42、20 epoch、31 项远程测试通过。UCF best epoch 16：
+
+| 指标 | DSANet host | clean W6 | 变化 |
+|---|---:|---:|---:|
+| pooled AUC | 89.44464 | 89.61455 | +0.16991 pp |
+| cross-AUC | 89.50613 | 89.67459 | +0.16846 pp |
+| within-AUC | 73.67507 | 74.21588 | +0.54082 pp |
+| macro-within-AUC | 69.91278 | 70.66935 | +0.75657 pp |
+| pooled AP | 37.41960 | 37.70695 | +0.28735 pp |
+| normal-frame FPR @ 95% TPR | 10.19904 | 8.45063 | -1.74841 pp |
+
+裁决：这是一套可复现、明显比 Universal 干净的统一代码参考，但 UCF 只提升 `+0.16991 pp`，
+没有达到 `+1 pp`。历史双选点/复杂 router 的 `5709e6e` 为 `+1.07115 pp`，两者差
+`0.90124 pp`；禁止把历史数字贴到当前方法上。当前 within 增益高于 cross，说明同一 witness
+对视频内定位有效，主要缺口仍是跨视频校准。按用户要求，本轮到此停止，不跑 XD、不再启动
+autoresearch。
+
+正式复现命令：
+
+~~~powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File run_instructions/verify_witness_vad_f3_2_remote.ps1 -Dataset ucf
+~~~
+
+当前产物：
+
+~~~text
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/ucf/w6/evaluation/metrics.json
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/ucf/w6/selection/selection.json
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/ucf/w6/training/checkpoints/best.pt
+~~~
+
+受保护归档：
+
+~~~text
+/root/autodl-tmp/vadmy_data/witness_vad/dsanet/diagnostics/formal_trials/20260908T004900Z-clean-ucf-fc2b4da/
+~~~
+
+查看命令：
+
+~~~bash
+cat /root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/ucf/w6/evaluation/metrics.json
+cat /root/autodl-tmp/vadmy_data/witness_vad/dsanet/f3_2_signed_support/ucf/w6/selection/selection.json
+~~~

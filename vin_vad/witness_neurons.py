@@ -144,11 +144,6 @@ class SignedTopKWitnessNeurons(nn.Module):
         expected = self.gate_logits.shape
         if any(value.shape != expected for value in (mask, direction, weight)):
             raise ValueError("primary-role tensors must all have shape [layers, dimensions]")
-        if bool(self.normal_role_ready) and not torch.equal(
-            mask.to(self.normal_role_mask) > 0,
-            self.normal_role_mask > 0,
-        ):
-            raise ValueError("primary and normality roles must share one witness support")
         selected = mask.to(self.gate_logits) > 0
         self.gate_logits.copy_(torch.where(selected, 4.0, -4.0))
         self.signed_weights.copy_(
@@ -157,11 +152,8 @@ class SignedTopKWitnessNeurons(nn.Module):
 
     def gates(self, neuron_keep_mask: torch.Tensor | None = None) -> torch.Tensor:
         soft = torch.sigmoid(self.gate_logits)
-        if bool(self.normal_role_ready):
-            hard = (self.normal_role_mask > 0).to(soft)
-        else:
-            indices = torch.topk(self.gate_logits, k=self.active, dim=-1).indices
-            hard = torch.zeros_like(soft).scatter_(-1, indices, 1.0)
+        indices = torch.topk(self.gate_logits, k=self.active, dim=-1).indices
+        hard = torch.zeros_like(soft).scatter_(-1, indices, 1.0)
         straight_through = hard + soft - soft.detach()
         if neuron_keep_mask is not None:
             if neuron_keep_mask.shape != straight_through.shape:
@@ -206,13 +198,9 @@ class SignedTopKWitnessNeurons(nn.Module):
             primary_input = normalized
         gate = self.gates(neuron_keep_mask)
         coordinate_weights = gate * self.signed_weights
-        if bool(self.normal_role_ready):
-            support_count = self.normal_role_mask.sum(dim=-1).clamp_min(1.0)
-        else:
-            support_count = gate.new_full((self.layers,), float(self.active))
         layer_evidence = torch.einsum(
             "btld,ld->btl", primary_input, coordinate_weights
-        ) / support_count.sqrt().view(1, 1, self.layers)
+        ) / math.sqrt(self.active)
         layer_evidence = layer_evidence.masked_fill(~validity.unsqueeze(-1), 0.0)
         if bool(self.normal_role_ready):
             assert deviation is not None

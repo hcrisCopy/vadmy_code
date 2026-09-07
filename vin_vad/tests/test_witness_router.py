@@ -7,6 +7,7 @@ from vin_vad.witness_router import (
     WitnessRouter,
     masked_local_max,
     masked_mean,
+    masked_standardize,
     masked_topk_anchor,
     video_summary,
 )
@@ -30,7 +31,7 @@ def test_zero_eta_is_exact_host_identity() -> None:
     assert torch.equal(result["corrected_score"][validity], host[validity])
 
 
-def test_video_state_routes_witness_and_veto_support() -> None:
+def test_signed_witness_residual_has_zero_video_mean() -> None:
     host, evidence, validity = inputs()
     router = WitnessRouter()
     router.video_head.weight.data.zero_()
@@ -47,38 +48,17 @@ def test_video_state_routes_witness_and_veto_support() -> None:
         torch.zeros_like(normal["anomaly_authorized"]),
     )
     assert torch.all(abnormal["delta_normal"][validity] <= 0.0)
-    assert torch.all(
-        abnormal["complementary_support"] <= abnormal["witness_support"]
+    expected = masked_standardize(evidence.clamp(1e-6, 1.0 - 1e-6), validity).clamp(-3.0, 3.0)
+    torch.testing.assert_close(abnormal["local_shape"], expected)
+    torch.testing.assert_close(normal["local_shape"], expected)
+    torch.testing.assert_close(
+        masked_mean(abnormal["delta_anomaly"], validity), torch.zeros(2), atol=1e-6, rtol=0.0
     )
-    assert torch.all(
-        abnormal["complementary_support"] <= abnormal["host_miss_support"]
-    )
-    completion = (abnormal["witness_support"] > 0) & (abnormal["event_gap"] > 0)
-    assert torch.all(abnormal["delta_anomaly"][completion] > 0.0)
-    neighbor_completion = (
-        (abnormal["witness_support"] == 0)
-        & (abnormal["witness_event_support"] > 0)
-        & (abnormal["event_gap"] > 0)
-    )
-    assert torch.any(neighbor_completion)
-    assert torch.all(abnormal["delta_anomaly"][neighbor_completion] > 0.0)
-    assert torch.all(normal["delta_anomaly"][normal["veto_support"] > 0] < 0.0)
-    assert torch.any(masked_mean(abnormal["delta_anomaly"], validity).abs() > 1e-5)
-    assert torch.all(abnormal["completion_gate"][validity] >= 0.0)
-    assert torch.all(abnormal["completion_gate"][validity] <= 1.0)
-    shifted = torch.sigmoid(
-        torch.logit(host.clamp(1e-6, 1.0 - 1e-6))
-        + abnormal["delta_normal"]
-        + abnormal["delta_anomaly"]
-    )
-    completed = shifted + abnormal["completion_gate"] * (
-        abnormal["completion_anchor"] - shifted
-    )
-    assert torch.all(completed[validity] >= shifted[validity])
-    assert torch.all(completed[validity] <= abnormal["completion_anchor"][validity])
+    assert torch.all(abnormal["delta_anomaly"][abnormal["witness_support"] > 0] > 0.0)
+    assert torch.all(abnormal["delta_anomaly"][abnormal["veto_support"] > 0] < 0.0)
 
 
-def test_negative_role_consensus_vetoes_only_host_conflicts() -> None:
+def test_negative_role_consensus_does_not_override_signed_evidence() -> None:
     router = WitnessRouter()
     with torch.no_grad():
         router.video_head.weight.zero_()
@@ -90,13 +70,11 @@ def test_negative_role_consensus_vetoes_only_host_conflicts() -> None:
 
     result = router(host, evidence, validity, negative_consensus=consensus)
 
-    assert result["consensus_conflict_veto"][0, 0].item() == 0.0
-    assert result["consensus_conflict_veto"][0, 1].item() > 0.0
-    assert result["consensus_conflict_veto"][0, 1] <= consensus[0, 1]
-    assert result["consensus_conflict_veto"][0, 2].item() == 0.0
+    without_consensus = router(host, evidence, validity)
+    torch.testing.assert_close(result["delta_anomaly"], without_consensus["delta_anomaly"])
 
 
-def test_negative_role_consensus_cannot_be_undone_by_event_completion() -> None:
+def test_signed_residual_does_not_propagate_to_neighbors() -> None:
     router = WitnessRouter()
     with torch.no_grad():
         router.video_head.weight.zero_()
@@ -108,30 +86,21 @@ def test_negative_role_consensus_cannot_be_undone_by_event_completion() -> None:
 
     result = router(host, evidence, validity, negative_consensus=consensus)
 
-    assert result["witness_support"][0, 0].item() > 0.0
-    assert result["completion_gate"][0, 0].item() == 0.0
-    assert result["completion_gate"][0, 1] <= 0.75
+    expected = masked_standardize(evidence, validity).clamp(-3.0, 3.0)
+    torch.testing.assert_close(result["local_shape"], expected)
 
 
-def test_positive_video_confidence_boundedly_scales_only_local_correction() -> None:
+def test_video_confidence_does_not_scale_signed_local_correction() -> None:
     host, evidence, validity = inputs()
     router = WitnessRouter()
     with torch.no_grad():
         router.video_head.weight.zero_()
         router.video_head.bias.fill_(2.0)
     positive = router(host, evidence, validity)
-    expected_gain = 1.0 + torch.tanh(torch.tensor(2.0))
-    torch.testing.assert_close(
-        positive["anomaly_confidence_gain"],
-        torch.full((2,), expected_gain),
-    )
-    assert torch.all(positive["anomaly_confidence_gain"] < 2.0)
     with torch.no_grad():
         router.video_head.bias.fill_(-2.0)
     negative = router(host, evidence, validity)
-    torch.testing.assert_close(
-        negative["anomaly_confidence_gain"], torch.ones(2)
-    )
+    torch.testing.assert_close(positive["delta_anomaly"], negative["delta_anomaly"])
 
 
 def test_positive_consensus_only_protects_normal_route_from_suppression() -> None:

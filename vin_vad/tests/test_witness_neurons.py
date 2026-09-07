@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 import torch
 
 from vin_vad.witness_model import WitnessExpert
@@ -72,7 +73,7 @@ def test_role_jury_has_distinct_auditable_views() -> None:
     hidden, validity = sample_hidden()
     expert = WitnessExpert()
     mask = torch.zeros(12, 768)
-    mask[:, :32] = 1.0
+    mask[:, :48] = 1.0
     expert.neurons.set_normal_role(
         torch.zeros(12, 768),
         torch.ones(12, 768),
@@ -82,18 +83,17 @@ def test_role_jury_has_distinct_auditable_views() -> None:
         torch.tensor(0.4),
         torch.tensor(0.2),
     )
-    primary_mask = torch.zeros(12, 768)
-    primary_mask[:, 32:64] = 1.0
     expert.neurons.set_primary_role(
-        primary_mask,
+        mask,
         -torch.ones(12, 768),
-        primary_mask,
+        mask,
     )
     torch.testing.assert_close(
-        (expert.neurons.gates().detach() > 0.5).to(primary_mask), primary_mask
+        (expert.neurons.gates().detach() > 0.5).to(mask), mask
     )
+    assert expert.neurons.active_counts().tolist() == [48] * 12
     torch.testing.assert_close(
-        expert.neurons.signed_weights.detach(), -primary_mask
+        expert.neurons.signed_weights.detach(), -mask
     )
     torch.testing.assert_close(expert.neurons.normal_role_mask, mask)
     result = expert(hidden, validity)
@@ -106,6 +106,25 @@ def test_role_jury_has_distinct_auditable_views() -> None:
     ):
         assert result[name].shape == validity.shape
         assert torch.equal(result[name][~validity], torch.zeros_like(result[name][~validity]))
+
+
+def test_primary_role_rejects_a_second_disjoint_support() -> None:
+    module = SignedTopKWitnessNeurons(active=2)
+    shared = torch.zeros(12, 768)
+    shared[:, :3] = 1.0
+    module.set_normal_role(
+        torch.zeros(12, 768),
+        torch.ones(12, 768),
+        shared,
+        torch.ones(12, 768),
+        shared,
+        torch.tensor(0.0),
+        torch.tensor(1.0),
+    )
+    other = torch.zeros_like(shared)
+    other[:, 3:6] = 1.0
+    with pytest.raises(ValueError, match="must share one witness support"):
+        module.set_primary_role(other, torch.ones_like(other), other)
 
 
 def test_each_video_uses_its_nearest_training_normal_context() -> None:

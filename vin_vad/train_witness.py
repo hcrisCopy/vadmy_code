@@ -25,37 +25,47 @@ from vin_vad.witness_losses import variant_objective
 from vin_vad.witness_model import build_witness_variant
 
 
-def robust_directional_effect(
-    normal_summaries: torch.Tensor,
-    abnormal_summaries: torch.Tensor,
-    scale_floor: float = 1e-2,
-) -> torch.Tensor:
-    """Return a median/MAD effect for directional MIL responses.
+def build_shared_witness_union(
+    normal_effect: torch.Tensor,
+    complementary_effect: torch.Tensor,
+    candidates_per_layer: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Unify two training-only witness criteria into one auditable support.
 
-    Each input is ``[videos, directions, layers, dimensions]``.  A coordinate
-    is credible only when its typical abnormal-bag top-k response exceeds its
-    typical normal-bag response; a few extreme videos cannot dominate either
-    the center or scale estimate.
+    Each criterion nominates the same fixed budget per layer.  Their deduplicated
+    union is the sole support used by every functional readout.  Direction and
+    weight come from the stronger standardized effect, so membership is shared
+    rather than hiding two role-specific experts behind one name.
     """
-    if normal_summaries.ndim != 4 or abnormal_summaries.ndim != 4:
-        raise ValueError("directional summaries must be [N,2,layers,dimensions]")
-    if normal_summaries.shape[1:] != abnormal_summaries.shape[1:]:
-        raise ValueError("normal and abnormal directional summaries must align")
-    if normal_summaries.shape[0] == 0 or abnormal_summaries.shape[0] == 0:
-        raise ValueError("robust effect needs both normal and abnormal videos")
-    if scale_floor <= 0.0:
-        raise ValueError("scale_floor must be positive")
+    if normal_effect.shape != complementary_effect.shape:
+        raise ValueError("witness effects must have the same shape")
+    if normal_effect.ndim != 3 or normal_effect.shape[0] != 2:
+        raise ValueError("witness effects must have shape [2,layers,dimensions]")
+    dimensions = int(normal_effect.shape[-1])
+    if not 0 < candidates_per_layer <= dimensions:
+        raise ValueError("candidates_per_layer must be in [1, dimensions]")
 
-    normal_median = normal_summaries.median(dim=0).values
-    abnormal_median = abnormal_summaries.median(dim=0).values
-    normal_mad = (
-        normal_summaries - normal_median.unsqueeze(0)
-    ).abs().median(dim=0).values
-    abnormal_mad = (
-        abnormal_summaries - abnormal_median.unsqueeze(0)
-    ).abs().median(dim=0).values
-    robust_scale = (normal_mad + abnormal_mad).clamp_min(scale_floor)
-    return torch.relu((abnormal_median - normal_median) / robust_scale)
+    def candidate_mask(effect: torch.Tensor) -> torch.Tensor:
+        best_effect = effect.max(dim=0).values
+        selected = torch.topk(
+            best_effect, candidates_per_layer, dim=-1
+        ).indices
+        return torch.zeros_like(best_effect).scatter_(-1, selected, 1.0)
+
+    normal_candidates = candidate_mask(normal_effect)
+    complementary_candidates = candidate_mask(complementary_effect)
+    shared_mask = torch.maximum(normal_candidates, complementary_candidates)
+    overlap = (normal_candidates * complementary_candidates).sum(dim=-1)
+
+    combined_effect = torch.maximum(normal_effect, complementary_effect)
+    best_effect, best_direction = combined_effect.max(dim=0)
+    shared_direction = torch.where(best_direction == 0, 1.0, -1.0)
+    shared_weight = best_effect * shared_mask
+    shared_count = shared_mask.sum(dim=-1, keepdim=True).clamp_min(1.0)
+    shared_weight = shared_weight / (
+        shared_weight.sum(dim=-1, keepdim=True) / shared_count
+    ).clamp_min(1e-6)
+    return shared_mask, shared_direction, shared_weight, overlap
 
 
 @torch.no_grad()
@@ -148,7 +158,14 @@ def fit_role_disentangled_reference(
             normalized - context_mean[context_index]
         ) / context_std[context_index]
 
-    class_summaries: list[list[torch.Tensor]] = [[], []]
+    class_sum = torch.zeros(
+        2, 2, neurons.layers, neurons.dimensions, dtype=torch.float64, device=device
+    )
+    class_square = torch.zeros_like(class_sum)
+    class_count = torch.zeros(2, dtype=torch.float64, device=device)
+    residual_sum = torch.zeros_like(class_sum)
+    residual_square = torch.zeros_like(class_sum)
+    residual_count = torch.zeros(2, dtype=torch.float64, device=device)
     for index in tqdm(range(len(dataset)), desc="rank role neurons", unit="video"):
         item = dataset[index]
         hidden = item["hidden"].to(device, non_blocking=True)
@@ -162,44 +179,51 @@ def fit_role_disentangled_reference(
             ]
         )
         label = int(item["label"])
-        class_summaries[label].append(summary.float().cpu())
+        class_sum[label] += summary
+        class_square[label] += summary.square()
+        class_count[label] += 1
+        host_score = item["host_score"].to(device, non_blocking=True).double()
+        host_bag = torch.topk(host_score, tail_count).values.mean().clamp(0.0, 1.0)
+        residual = (host_bag - float(label)).abs()
+        residual_sum[label] += residual * summary
+        residual_square[label] += residual * summary.square()
+        residual_count[label] += residual
 
-    def role_definition(effect: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        best_effect, best_direction = effect.max(dim=0)
-        selected = torch.topk(best_effect, active_per_layer, dim=-1).indices
-        mask = torch.zeros_like(best_effect).scatter_(-1, selected, 1.0)
-        direction = torch.where(best_direction == 0, 1.0, -1.0)
-        weight = best_effect * mask
-        weight = weight / (
-            weight.sum(dim=-1, keepdim=True) / active_per_layer
+    def class_effect(
+        total: torch.Tensor,
+        square_total: torch.Tensor,
+        count: torch.Tensor,
+    ) -> torch.Tensor:
+        mean_value = total / count[:, None, None, None].clamp_min(1e-6)
+        variance_value = (
+            square_total / count[:, None, None, None].clamp_min(1e-6)
+            - mean_value.square()
         ).clamp_min(1e-6)
-        return mask, direction, weight
+        return torch.relu(
+            (mean_value[1] - mean_value[0])
+            / torch.sqrt(variance_value[0] + variance_value[1])
+        )
 
     active_per_layer = min(neurons.active, neurons.dimensions)
-    credibility = robust_directional_effect(
-        torch.stack(class_summaries[0]),
-        torch.stack(class_summaries[1]),
-    ).to(device=device, dtype=torch.float64)
-    normal_mask, normal_direction, normal_weight = role_definition(
-        credibility
+    normal_effect = class_effect(class_sum, class_square, class_count)
+    complementary_effect = class_effect(
+        residual_sum, residual_square, residual_count
     )
-    # A bag-level host error says which videos are difficult, not which snippets
-    # are anomalous.  Using it to select coordinates leaked that coarse notion of
-    # difficulty into the local witness role.  Both the fixed normality probe and
-    # its trainable temporal readout therefore start from the same auditable
-    # training-only counterfactual neurons; the readout, not the host, learns how
-    # their signed deviations evolve through time.
-    primary_mask = normal_mask.clone()
-    primary_direction = normal_direction.clone()
-    primary_weight = normal_weight.clone()
+    shared_mask, shared_direction, shared_weight, candidate_overlap = (
+        build_shared_witness_union(
+            normal_effect,
+            complementary_effect,
+            active_per_layer,
+        )
+    )
 
-    role_weight = normal_mask * normal_weight
+    role_weight = shared_mask * shared_weight
     normal_scores = []
     for index in tqdm(normal_indices, desc="calibrate normality score", unit="video"):
         hidden = dataset[index]["hidden"].to(device, non_blocking=True)
         normalized = torch.nn.functional.layer_norm(hidden, (neurons.dimensions,)).double()
         deviation = matched_deviation(normalized)
-        directional = torch.relu(deviation * normal_direction)
+        directional = torch.relu(deviation * shared_direction)
         layer_score = (directional * role_weight).sum(dim=-1) / role_weight.sum(
             dim=-1
         ).clamp_min(1e-6)
@@ -211,9 +235,9 @@ def fit_role_disentangled_reference(
     neurons.set_normal_role(
         mean.float(),
         standard_deviation.float(),
-        normal_mask.float(),
-        normal_direction.float(),
-        normal_weight.float(),
+        shared_mask.float(),
+        shared_direction.float(),
+        shared_weight.float(),
         score_threshold.float(),
         score_std.float(),
     )
@@ -223,14 +247,20 @@ def fit_role_disentangled_reference(
         context_std.float(),
     )
     neurons.set_primary_role(
-        primary_mask.float(),
-        primary_direction.float(),
-        primary_weight.float(),
+        shared_mask.float(),
+        shared_direction.float(),
+        shared_weight.float(),
     )
+    shared_count = shared_mask.sum(dim=-1).to(torch.int64)
     return {
         "normal_reference_snippets": snippet_count,
-        "normal_role_neurons_per_layer": active_per_layer,
-        "primary_role_neurons_per_layer": active_per_layer,
+        "witness_candidates_per_criterion_per_layer": active_per_layer,
+        "shared_witness_neurons_per_layer": shared_count.tolist(),
+        "witness_candidate_overlap_per_layer": candidate_overlap.to(
+            torch.int64
+        ).tolist(),
+        "normal_role_neurons_per_layer": shared_count.tolist(),
+        "primary_role_neurons_per_layer": shared_count.tolist(),
         "normal_contexts_fit": neurons.contexts,
         "normal_context_video_counts": torch.bincount(
             normal_context_index, minlength=neurons.contexts
@@ -441,7 +471,6 @@ def main() -> None:
             ),
             "test_data_used": False,
             "optimizer_count": 1,
-            "witness_selection": "directional_mil_median_mad",
         }
     )
     config_path = output / "config.json"

@@ -121,6 +121,10 @@ class WitnessRouter(nn.Module):
             - video_probability.detach()
         )
         normal_authorized = 1.0 - anomaly_authorized
+        # The hard state decides whether correction is allowed.  Its bounded
+        # positive confidence only controls the strength of already-localized
+        # anomaly correction, so it cannot create a whole-video score offset.
+        anomaly_confidence_gain = 1.0 + torch.tanh(torch.relu(video_logit))
         eta_normal = (
             torch.nn.functional.softplus(self.raw_eta_normal)
             if eta_normal_override is None
@@ -155,22 +159,66 @@ class WitnessRouter(nn.Module):
         host_clipped = host_score.clamp(1e-6, 1.0 - 1e-6)
         evidence_clipped = evidence.clamp(1e-6, 1.0 - 1e-6)
         direct_witness = masked_standardize(evidence_clipped, validity).clamp(-3.0, 3.0)
+        direct_host = masked_standardize(host_clipped, validity).clamp(-3.0, 3.0)
         witness_support = torch.relu(direct_witness)
         veto_support = torch.relu(-direct_witness)
-        # Video-standardization turns the neuron jury into a signed local
-        # residual: evidence above the video's own reference raises a snippet,
-        # while evidence below it lowers one by the same learned scale.  This
-        # preserves the frozen host's video calibration and prevents weak bag
-        # labels from authorizing a positive shift over most of an abnormal bag.
-        local_shape = direct_witness
-        delta_anomaly = eta_anomaly * local_shape
+        host_support = torch.relu(direct_host)
+        consensus_conflict_veto = (
+            torch.zeros_like(host_support)
+            if negative_consensus is None
+            else torch.minimum(
+                host_support,
+                negative_consensus.clamp_min(0.0),
+            )
+        ).masked_fill(~validity, 0.0)
+        host_miss_support = torch.relu(-direct_host)
+        complementary_support = torch.minimum(
+            witness_support, host_miss_support
+        )
+        witness_event_support = masked_local_max(witness_support, validity)
+        event_anchor = masked_local_max(host_clipped, validity)
+        event_gap = torch.relu(
+            torch.logit(event_anchor.clamp(1e-6, 1.0 - 1e-6))
+            - torch.logit(host_clipped)
+        ).masked_fill(~validity, 0.0)
+        local_shape = (
+            anomaly_authorized.unsqueeze(1)
+            * (
+                witness_support
+                + complementary_support
+                + witness_event_support * event_gap
+                - consensus_conflict_veto
+            )
+            - normal_authorized.unsqueeze(1) * veto_support
+        ).masked_fill(~validity, 0.0)
+        # q decides the correction direction; neuron evidence decides its support.
+        # A non-zero mean is required to repair cross-video ranking, which dominates
+        # frame AUC/AP, while the support remains temporally localized.
+        delta_anomaly = (
+            eta_anomaly * anomaly_confidence_gain.unsqueeze(1) * local_shape
+        )
         delta_anomaly = delta_anomaly.masked_fill(~validity, 0.0)
         delta_normal = delta_normal.masked_fill(~validity, 0.0)
 
         host_logit = torch.logit(host_clipped)
         base = torch.sigmoid(host_logit)
         shifted = torch.sigmoid(host_logit + delta_normal + delta_anomaly)
-        corrected = host_score + shifted - base
+        # The consensus residual seeds missed event positions.  A second,
+        # point-authorized convex step completes only locations that carry their
+        # own witness support and can never overshoot the local event peak.
+        completion_anchor = masked_local_max(shifted, validity)
+        negative_completion_veto = (
+            torch.zeros_like(host_score)
+            if negative_consensus is None
+            else negative_consensus.clamp(0.0, 1.0)
+        ).masked_fill(~validity, 0.0)
+        completion_gate = (
+            anomaly_authorized.unsqueeze(1)
+            * witness_support.clamp(max=1.0)
+            * (1.0 - negative_completion_veto)
+        ).masked_fill(~validity, 0.0)
+        completed = shifted + completion_gate * (completion_anchor - shifted)
+        corrected = host_score + completed - base
         corrected = corrected.clamp(0.0, 1.0).masked_fill(~validity, 0.0)
         if eta_normal_override == 0.0 and eta_anomaly_override == 0.0:
             # The explicit ablation contract is bitwise identity, not merely
@@ -182,6 +230,7 @@ class WitnessRouter(nn.Module):
             "video_probability": video_probability,
             "anomaly_authorized": anomaly_authorized,
             "normal_authorized": normal_authorized,
+            "anomaly_confidence_gain": anomaly_confidence_gain,
             "eta_normal": eta_normal,
             "eta_anomaly": eta_anomaly,
             "delta_normal": delta_normal,
@@ -189,6 +238,15 @@ class WitnessRouter(nn.Module):
             "positive_normal_protection": positive_normal_protection,
             "local_shape": local_shape,
             "witness_support": witness_support,
+            "host_miss_support": host_miss_support,
+            "complementary_support": complementary_support,
+            "witness_event_support": witness_event_support,
             "veto_support": veto_support,
+            "consensus_conflict_veto": consensus_conflict_veto,
+            "event_anchor": event_anchor,
+            "event_gap": event_gap,
+            "completion_anchor": completion_anchor,
+            "negative_completion_veto": negative_completion_veto,
+            "completion_gate": completion_gate,
             "corrected_score": corrected,
         }

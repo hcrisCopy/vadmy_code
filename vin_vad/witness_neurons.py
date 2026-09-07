@@ -144,6 +144,14 @@ class SignedTopKWitnessNeurons(nn.Module):
         expected = self.gate_logits.shape
         if any(value.shape != expected for value in (mask, direction, weight)):
             raise ValueError("primary-role tensors must all have shape [layers, dimensions]")
+        if bool(self.normal_role_ready):
+            if not torch.equal(
+                mask.to(self.normal_role_mask) > 0,
+                self.normal_role_mask > 0,
+            ):
+                raise ValueError(
+                    "all witness roles must use the single formula-selected support"
+                )
         selected = mask.to(self.gate_logits) > 0
         self.gate_logits.copy_(torch.where(selected, 4.0, -4.0))
         self.signed_weights.copy_(
@@ -152,8 +160,13 @@ class SignedTopKWitnessNeurons(nn.Module):
 
     def gates(self, neuron_keep_mask: torch.Tensor | None = None) -> torch.Tensor:
         soft = torch.sigmoid(self.gate_logits)
-        indices = torch.topk(self.gate_logits, k=self.active, dim=-1).indices
-        hard = torch.zeros_like(soft).scatter_(-1, indices, 1.0)
+        if bool(self.normal_role_ready):
+            # Selection is a training-data statistic, not another learned expert:
+            # all three readouts keep using exactly the same Top-K coordinates.
+            hard = (self.normal_role_mask > 0).to(soft)
+        else:
+            indices = torch.topk(self.gate_logits, k=self.active, dim=-1).indices
+            hard = torch.zeros_like(soft).scatter_(-1, indices, 1.0)
         straight_through = hard + soft - soft.detach()
         if neuron_keep_mask is not None:
             if neuron_keep_mask.shape != straight_through.shape:

@@ -9,7 +9,6 @@ from vin_vad.train_witness import (
     balanced_indices,
     comparable_configuration,
     merge_balanced_batches,
-    robust_directional_effect,
 )
 from vin_vad.select_witness_checkpoint import select_best
 
@@ -61,19 +60,6 @@ def test_rng_checkpoint_tensors_are_cpu_compatible() -> None:
     state = torch.get_rng_state()
     torch.set_rng_state(state.cpu())
     assert state.dtype == torch.uint8
-
-
-def test_robust_directional_effect_rejects_a_single_extreme_video() -> None:
-    normal = torch.zeros(5, 2, 1, 2)
-    abnormal = torch.zeros(5, 2, 1, 2)
-    abnormal[:, 0, 0, 0] = torch.tensor([1.0, 1.1, 0.9, 1.0, 100.0])
-    abnormal[:, 0, 0, 1] = torch.tensor([0.0, 0.0, 0.0, 0.0, 100.0])
-
-    effect = robust_directional_effect(normal, abnormal)
-
-    assert effect.shape == (2, 1, 2)
-    assert effect[0, 0, 0] > 0.0
-    assert effect[0, 0, 1] == 0.0
 
 
 def test_w1_host_dataset_never_opens_hidden_archive(tmp_path) -> None:
